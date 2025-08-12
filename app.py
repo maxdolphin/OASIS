@@ -21,6 +21,7 @@ import sys
 sys.path.append('src')
 from ulanowicz_calculator import UlanowiczCalculator
 from visualizer import SustainabilityVisualizer
+from network_generator import OrganizationalNetworkGenerator, NETWORK_TYPES
 
 # Configure page
 st.set_page_config(
@@ -217,80 +218,174 @@ def sample_data_interface():
             st.error(f"Error loading sample data: {str(e)}")
 
 def synthetic_data_interface():
-    """Interface for generating synthetic data."""
+    """Visual Network Generator Interface."""
     
-    st.header("⚡ Generate Synthetic Organizational Data")
+    st.header("⚡ Visual Network Generator")
+    st.markdown("""
+    Create and analyze organizational networks by adjusting structure and flow patterns.
+    See how different network topologies affect sustainability metrics in real-time.
+    """)
     
-    col1, col2 = st.columns(2)
+    # Initialize session state for network data
+    if 'generated_network' not in st.session_state:
+        st.session_state.generated_network = None
+    if 'flow_matrix' not in st.session_state:
+        st.session_state.flow_matrix = None
+    
+    # Main interface layout
+    col1, col2 = st.columns([1, 2])
     
     with col1:
-        st.subheader("🏢 Organization Configuration")
+        st.subheader("🎛️ Network Controls")
         
-        org_name = st.text_input("Organization Name", "My Test Company")
-        org_type = st.selectbox("Organization Type", 
-                               ["Technology Company", "Manufacturing", "Healthcare", "Finance", "Education", "Consulting"])
+        # Organization info
+        org_name = st.text_input("Organization Name", "Generated Network Org")
         
-        # Department selection
-        st.subheader("🏬 Departments")
-        default_departments = ["Executive", "Product", "Engineering", "Sales", "Marketing", "Operations", "HR", "Finance"]
-        
-        departments = st.multiselect(
-            "Select departments (minimum 3):",
-            ["Executive", "Product", "Engineering", "Data_Science", "Sales", "Marketing", 
-             "Customer_Success", "Operations", "HR", "Finance", "Legal", "R&D"],
-            default=default_departments
+        # Network structure selection
+        st.markdown("### 🏗️ Network Structure")
+        network_type = st.selectbox(
+            "Network Type:",
+            options=list(NETWORK_TYPES.keys()),
+            format_func=lambda x: NETWORK_TYPES[x]["name"],
+            help="Choose the organizational structure pattern"
         )
         
-        if len(departments) < 3:
-            st.warning("Please select at least 3 departments for meaningful analysis")
-            return
-    
-    with col2:
-        st.subheader("⚙️ Communication Parameters")
+        # Show network description
+        selected_type = NETWORK_TYPES[network_type]
+        st.info(f"**{selected_type['description']}**\n\n"
+                f"Characteristics: {selected_type['characteristics']}\n\n"
+                f"Use cases: {selected_type['use_cases']}")
         
-        communication_intensity = st.select_slider(
-            "Communication Intensity:",
-            options=["Low", "Medium", "High"],
-            value="Medium",
-            help="Higher intensity means more emails/communications between departments"
-        )
+        # Size controls
+        st.markdown("### 📏 Size Controls")
+        num_nodes = st.slider("Number of Nodes:", 3, 25, 10, 
+                             help="Number of departments/units in the organization")
         
-        formality_level = st.select_slider(
-            "Document Formality Level:",
-            options=["Low", "Medium", "High"], 
-            value="Medium",
-            help="Higher formality means more formal documents and procedures"
-        )
+        density = st.slider("Network Density:", 0.1, 0.8, 0.3,
+                           help="Fraction of possible connections that exist")
         
-        organization_age = st.slider(
-            "Organization Age (years):",
-            min_value=1, max_value=50, value=5,
-            help="Older organizations tend to have more established communication patterns and formal procedures"
-        )
+        # Flow controls
+        st.markdown("### 💧 Flow Parameters")
+        flow_range = st.slider("Flow Intensity Range:", 1, 100, (5, 50),
+                              help="Minimum and maximum flow values")
         
-        st.subheader("🎲 Randomization")
-        use_random_seed = st.checkbox("Use random seed for reproducibility", value=True)
+        hub_amplification = st.slider("Hub Amplification:", 0.0, 2.0, 0.5,
+                                     help="How much extra flow large hubs receive")
+        
+        # Additional parameters based on network type
+        if network_type == 'small_world':
+            rewiring_prob = st.slider("Rewiring Probability:", 0.1, 0.9, 0.3,
+                                     help="Probability of rewiring edges for shortcuts")
+        elif network_type == 'hierarchical':
+            branching_factor = st.slider("Branching Factor:", 2, 5, 2,
+                                        help="Number of subordinates per manager")
+        elif network_type == 'community':
+            num_communities = st.slider("Number of Communities:", 2, 6, 3,
+                                       help="Number of distinct departments/groups")
+        
+        # Randomization
+        st.markdown("### 🎲 Randomization")
+        use_random_seed = st.checkbox("Use random seed", value=True)
         if use_random_seed:
-            random_seed = st.number_input("Random seed:", min_value=1, max_value=1000, value=42)
+            random_seed = st.number_input("Seed:", min_value=1, max_value=1000, value=42)
         else:
             random_seed = None
-    
-    if st.button("🎯 Generate & Analyze Organization"):
-        if len(departments) >= 3:
-            with st.spinner("Generating synthetic organizational data..."):
-                flow_matrix, node_names = generate_synthetic_organization(
-                    departments, communication_intensity.lower(), formality_level.lower(), organization_age, random_seed
+        
+        # Generate button
+        if st.button("🚀 Generate Network", type="primary"):
+            with st.spinner("Generating network..."):
+                # Initialize generator
+                generator = OrganizationalNetworkGenerator(seed=random_seed)
+                
+                # Additional kwargs based on network type
+                kwargs = {}
+                if network_type == 'small_world':
+                    kwargs['rewiring_prob'] = rewiring_prob
+                elif network_type == 'hierarchical':
+                    kwargs['branching_factor'] = branching_factor
+                elif network_type == 'community':
+                    kwargs['num_communities'] = num_communities
+                
+                # Generate network structure
+                G = generator.generate_network(network_type, num_nodes, density, **kwargs)
+                
+                # Add flow weights
+                G_weighted = generator.add_flow_weights(
+                    G, flow_range[0], flow_range[1], hub_amplification
                 )
                 
-                st.success(f"✅ Generated synthetic data for {org_name}")
+                # Store in session state
+                st.session_state.generated_network = G_weighted
+                st.session_state.flow_matrix = generator.network_to_flow_matrix(G_weighted)
                 
-                # Show generated data preview
-                st.subheader("📊 Generated Flow Matrix")
-                preview_df = pd.DataFrame(flow_matrix, index=node_names, columns=node_names)
-                st.dataframe(preview_df.round(2))
-                
-                # Run analysis
+                st.success("✅ Network generated successfully!")
+    
+    with col2:
+        st.subheader("🌐 Network Visualization")
+        
+        if st.session_state.generated_network is not None:
+            G = st.session_state.generated_network
+            
+            # Generate node names
+            node_names = [f"Unit_{i}" for i in range(G.number_of_nodes())]
+            
+            # Create network visualization
+            generator = OrganizationalNetworkGenerator()
+            fig = generator.create_plotly_visualization(
+                G, node_names, 
+                title=f"{selected_type['name']} Network ({G.number_of_nodes()} nodes, {G.number_of_edges()} edges)"
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Network statistics
+            col2a, col2b, col2c = st.columns(3)
+            with col2a:
+                st.metric("Nodes", G.number_of_nodes())
+            with col2b:
+                st.metric("Edges", G.number_of_edges())
+            with col2c:
+                actual_density = G.number_of_edges() / (G.number_of_nodes() * (G.number_of_nodes() - 1))
+                st.metric("Actual Density", f"{actual_density:.3f}")
+            
+        else:
+            st.info("👆 Generate a network using the controls on the left to see the visualization here.")
+    
+    # Flow matrix preview and analysis
+    if st.session_state.flow_matrix is not None:
+        st.subheader("📊 Flow Matrix & Analysis")
+        
+        col3, col4 = st.columns([1, 1])
+        
+        with col3:
+            st.markdown("### Flow Matrix Preview")
+            flow_matrix = st.session_state.flow_matrix
+            node_names = [f"Unit_{i}" for i in range(flow_matrix.shape[0])]
+            
+            preview_df = pd.DataFrame(flow_matrix, index=node_names, columns=node_names)
+            st.dataframe(preview_df.round(1))
+            
+            if st.button("🔍 Run Full Analysis", type="secondary"):
                 run_analysis(flow_matrix, node_names, org_name)
+        
+        with col4:
+            st.markdown("### Quick Sustainability Preview")
+            
+            # Quick metrics calculation
+            with st.spinner("Calculating metrics..."):
+                calculator = UlanowiczCalculator(flow_matrix, node_names)
+                metrics = calculator.get_sustainability_metrics()
+                
+                st.metric("Relative Ascendency (α)", f"{metrics['relative_ascendency']:.3f}")
+                st.metric("Robustness", f"{calculator.calculate_robustness():.3f}")
+                
+                viable = "✅ YES" if metrics['is_viable'] else "❌ NO"
+                st.metric("In Window of Viability", viable)
+                
+                assessment = calculator.assess_sustainability()
+                if "VIABLE" in assessment:
+                    st.success(assessment)
+                else:
+                    st.warning(assessment)
 
 def generate_synthetic_organization(departments, intensity, formality, age, seed):
     """Generate synthetic organizational data."""
