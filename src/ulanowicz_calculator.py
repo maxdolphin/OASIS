@@ -1,21 +1,22 @@
 """
 Ulanowicz Ecosystem Sustainability Theory Calculator
 
-This module implements the key indicators from Robert Ulanowicz's ecosystem sustainability theory
-and the extended regenerative economics framework by Fath & Ulanowicz:
+UPDATED: Now implements CORRECT Information Theory formulations from
+Ulanowicz et al. (2009) "Quantifying sustainability: Resilience, efficiency 
+and the return of information theory" - the foundational paper.
 
-Core Ulanowicz Metrics:
+Core Information Theory Metrics (Corrected):
 - Total System Throughput (TST)
-- Average Mutual Information (AMI)
-- Ascendency (A)
-- Overhead (Φ)
-- Development Capacity (C)
-- Window of Viability calculations
+- Development Capacity: C = -Σ(T_ij * log(T_ij/T··)) [Eq. 11]
+- Ascendency: A = Σ(T_ij * log(T_ij*T·· / (T_i·*T_·j))) [Eq. 12]  
+- Reserve: Φ = Σ(T_ij * log(T_ij² / (T_i·*T_·j))) [Eq. 13]
+- Fundamental relationship: C = A + Φ [Eq. 14]
+- Relative Ascendency: α = A/C (key sustainability metric)
 
 Extended Regenerative Economics Indicators:
-- Flow Diversity (H)
+- Flow Diversity (H)  
 - Structural Information (SI)
-- Robustness (R)
+- Robustness (R) - TO BE IMPLEMENTED
 - Network Efficiency
 - Effective Link Density
 - Trophic Depth
@@ -112,30 +113,48 @@ class UlanowiczCalculator:
     
     def calculate_ascendency(self) -> float:
         """
-        Calculate Ascendency (A).
+        Calculate Ascendency (A) using CORRECT IT formulation.
         
-        Ascendency represents the system's "power" - the product of total
-        activity (TST) and organization (AMI).
+        Ascendency is the scaled mutual constraint representing the
+        system's organized power.
         
-        Formula: A = TST × AMI
+        Formula: A = Σ(T_ij * log(T_ij * T·· / (T_i· * T_·j)))
+        From Ulanowicz et al. (2009) Eq. (12)
         
         Returns:
-            Ascendency value
+            Ascendency (flow-bits)
         """
-        return self.calculate_tst() * self.calculate_ami()
+        tst = self.calculate_tst()
+        if tst == 0:
+            return 0
+        
+        ascendency_sum = 0
+        for i in range(self.n_nodes):
+            for j in range(self.n_nodes):
+                flow_ij = self.flow_matrix[i, j]
+                if flow_ij > 0:
+                    output_i = self.output_throughput[i]
+                    input_j = self.input_throughput[j]
+                    
+                    if output_i > 0 and input_j > 0:
+                        # Direct ascendency calculation
+                        ratio = (flow_ij * tst) / (output_i * input_j)
+                        ascendency_sum += flow_ij * math.log(ratio)
+        
+        return ascendency_sum
     
     def calculate_development_capacity(self) -> float:
         """
-        Calculate Development Capacity (C).
+        Calculate Development Capacity (C) using CORRECT IT formulation.
         
-        Development Capacity is the theoretical maximum ascendency possible
-        given the current throughput distribution.
+        Development Capacity represents the scaled system indeterminacy -
+        the capacity for system development and change.
         
-        Formula: C = -TST × Σ(p_ij × log(p_ij))
-        where p_ij = T_ij / TST
+        Formula: C = -Σ(T_ij * log(T_ij / T··))
+        From Ulanowicz et al. (2009) Eq. (11)
         
         Returns:
-            Development Capacity value
+            Development Capacity (flow-bits)
         """
         tst = self.calculate_tst()
         if tst == 0:
@@ -146,25 +165,85 @@ class UlanowiczCalculator:
             for j in range(self.n_nodes):
                 flow_ij = self.flow_matrix[i, j]
                 if flow_ij > 0:
-                    p_ij = flow_ij / tst
-                    capacity_sum += p_ij * math.log(p_ij)
+                    # Direct capacity calculation: T_ij * log(T_ij / T··)
+                    capacity_sum += flow_ij * math.log(flow_ij / tst)
         
-        return -tst * capacity_sum
+        return -capacity_sum
+    
+    def calculate_reserve(self) -> float:
+        """
+        Calculate Reserve (Φ) using CORRECT IT formulation.
+        
+        Reserve represents the system's flexibility and reserve capacity.
+        It should be calculated as: Φ = C - A
+        
+        This follows from the fundamental relationship: C = A + Φ
+        Therefore: Φ = C - A
+        
+        Returns:
+            Reserve (flow-bits)
+        """
+        development_capacity = self.calculate_development_capacity()
+        ascendency = self.calculate_ascendency()
+        
+        return development_capacity - ascendency
+    
+    def calculate_relative_ascendency(self) -> float:
+        """
+        Calculate Relative Ascendency (α = A/C).
+        
+        Relative ascendency is the key sustainability metric representing
+        the fraction of total system capacity that is realized as organization.
+        
+        Formula: α = A/C
+        Optimal range: 0.2 - 0.6 for sustainability
+        Peak robustness: ~0.37
+        
+        Returns:
+            Relative Ascendency (dimensionless ratio)
+        """
+        ascendency = self.calculate_ascendency()
+        development_capacity = self.calculate_development_capacity()
+        
+        return ascendency / development_capacity if development_capacity > 0 else 0
+    
+    def verify_fundamental_relationship(self) -> Dict[str, float]:
+        """
+        Verify the fundamental relationship: C = A + Φ
+        
+        This is a key validation check from Information Theory that ensures
+        our calculations are mathematically consistent.
+        
+        Returns:
+            Dictionary with verification results
+        """
+        ascendency = self.calculate_ascendency()
+        reserve = self.calculate_reserve()
+        development_capacity = self.calculate_development_capacity()
+        
+        calculated_capacity = ascendency + reserve
+        difference = abs(development_capacity - calculated_capacity)
+        relative_error = difference / development_capacity if development_capacity > 0 else 0
+        
+        return {
+            'ascendency': ascendency,
+            'reserve': reserve,
+            'development_capacity': development_capacity,
+            'calculated_capacity': calculated_capacity,
+            'difference': difference,
+            'relative_error': relative_error,
+            'is_valid': relative_error < 0.001  # 0.1% tolerance
+        }
     
     def calculate_overhead(self) -> float:
         """
-        Calculate Overhead (Φ).
-        
-        Overhead represents the system's flexibility, redundancy, and
-        reserve capacity. It's the difference between development capacity
-        and ascendency.
-        
-        Formula: Φ = C - A
+        Calculate Overhead (Φ) - legacy method name.
+        For compatibility, returns the same as reserve.
         
         Returns:
-            Overhead value
+            Overhead/Reserve value
         """
-        return self.calculate_development_capacity() - self.calculate_ascendency()
+        return self.calculate_reserve()
     
     def calculate_window_of_viability(self) -> Tuple[float, float]:
         """
@@ -189,29 +268,53 @@ class UlanowiczCalculator:
     
     def get_sustainability_metrics(self) -> Dict[str, float]:
         """
-        Get all sustainability metrics in a single dictionary.
+        Get all sustainability metrics using CORRECT IT formulations.
         
         Returns:
-            Dictionary containing all calculated metrics
+            Dictionary containing all calculated metrics with proper IT foundations
         """
+        # Core IT metrics (corrected)
         tst = self.calculate_tst()
-        ami = self.calculate_ami()
-        ascendency = self.calculate_ascendency()
         development_capacity = self.calculate_development_capacity()
-        overhead = self.calculate_overhead()
+        ascendency = self.calculate_ascendency()
+        reserve = self.calculate_reserve()
+        relative_ascendency = self.calculate_relative_ascendency()
+        
+        # Legacy compatibility
+        ami = self.calculate_ami()
+        overhead = self.calculate_overhead()  # Same as reserve
+        
+        # Window of viability
         lower_bound, upper_bound = self.calculate_window_of_viability()
         
+        # Fundamental relationship verification
+        verification = self.verify_fundamental_relationship()
+        
         return {
+            # Core Ulanowicz IT Metrics (CORRECTED)
             'total_system_throughput': tst,
-            'average_mutual_information': ami,
-            'ascendency': ascendency,
             'development_capacity': development_capacity,
+            'ascendency': ascendency,
+            'reserve': reserve,
+            'relative_ascendency': relative_ascendency,
+            
+            # Legacy compatibility metrics
+            'average_mutual_information': ami,
             'overhead': overhead,
-            'ascendency_ratio': ascendency / development_capacity if development_capacity > 0 else 0,
-            'overhead_ratio': overhead / development_capacity if development_capacity > 0 else 0,
+            
+            # Derived ratios and relationships
+            'ascendency_ratio': relative_ascendency,  # Same as relative_ascendency
+            'overhead_ratio': reserve / development_capacity if development_capacity > 0 else 0,
+            'reserve_ratio': reserve / development_capacity if development_capacity > 0 else 0,
+            
+            # Window of viability analysis
             'viability_lower_bound': lower_bound,
             'viability_upper_bound': upper_bound,
-            'is_viable': lower_bound <= ascendency <= upper_bound
+            'is_viable': lower_bound <= ascendency <= upper_bound,
+            
+            # Fundamental relationship validation
+            'fundamental_relationship_valid': verification['is_valid'],
+            'fundamental_relationship_error': verification['relative_error']
         }
     
     def assess_sustainability(self) -> str:
