@@ -481,13 +481,6 @@ def display_visualizations(calculator, metrics):
     # Create visualizer
     visualizer = SustainabilityVisualizer(calculator)
     
-    # Sustainability curve
-    st.subheader("🎯 Sustainability Curve & Window of Viability")
-    
-    # Create comprehensive sustainability curve
-    sustainability_fig = create_sustainability_curve(metrics)
-    st.plotly_chart(sustainability_fig, use_container_width=True)
-    
     # Robustness curve
     st.subheader("💪 Robustness Analysis")
     robustness_fig = create_robustness_curve(metrics)
@@ -498,181 +491,6 @@ def display_visualizations(calculator, metrics):
     flow_fig = create_flow_heatmap(calculator.flow_matrix, calculator.node_names)
     st.plotly_chart(flow_fig, use_container_width=True)
 
-def create_sustainability_curve(metrics):
-    """Create comprehensive sustainability curve with window of viability."""
-    
-    development_capacity = metrics['development_capacity']
-    ascendency = metrics['ascendency']
-    lower_bound = metrics['viability_lower_bound']
-    upper_bound = metrics['viability_upper_bound']
-    efficiency_ratio = metrics['ascendency_ratio']
-    
-    fig = go.Figure()
-    
-    # Create range for the curve
-    max_capacity = max(development_capacity * 1.3, upper_bound * 1.5)
-    capacity_range = np.linspace(0, max_capacity, 200)
-    
-    # Theoretical sustainability curve (parabolic relationship)
-    # Based on Ulanowicz theory: optimal around 37% efficiency
-    optimal_ratio = 0.37
-    curve_ascendency = []
-    
-    for c in capacity_range:
-        if c > 0:
-            # Create curved relationship peaking at optimal ratio
-            max_ascendency_at_c = c * optimal_ratio
-            # Add some realistic variation
-            theoretical_a = max_ascendency_at_c * (1 - 0.3 * abs(efficiency_ratio - optimal_ratio))
-            curve_ascendency.append(max(0, theoretical_a))
-        else:
-            curve_ascendency.append(0)
-    
-    # Add the sustainability curve
-    fig.add_trace(go.Scatter(
-        x=capacity_range, 
-        y=curve_ascendency, 
-        mode='lines',
-        name='Theoretical Sustainability Curve',
-        line=dict(color='blue', width=3),
-        hovertemplate='Development Capacity: %{x:.1f}<br>Theoretical Ascendency: %{y:.1f}<extra></extra>'
-    ))
-    
-    # Add window of viability as filled area
-    viability_x = [0, max_capacity, max_capacity, 0, 0]
-    viability_y = [lower_bound, lower_bound, upper_bound, upper_bound, lower_bound]
-    
-    fig.add_trace(go.Scatter(
-        x=viability_x,
-        y=viability_y,
-        fill='toself',
-        fillcolor='rgba(50, 205, 50, 0.2)',
-        line=dict(color='green', width=2),
-        name='Window of Viability',
-        hovertemplate='Viable Zone<br>Lower: %{text}<extra></extra>',
-        text=[f'{lower_bound:.1f}', f'{lower_bound:.1f}', f'{upper_bound:.1f}', f'{upper_bound:.1f}', f'{lower_bound:.1f}']
-    ))
-    
-    # Add boundary lines
-    fig.add_hline(
-        y=lower_bound, 
-        line_dash="dash", 
-        line_color="orange",
-        annotation_text="Chaos Boundary (Too Little Organization)",
-        annotation_position="top right"
-    )
-    
-    fig.add_hline(
-        y=upper_bound, 
-        line_dash="dash", 
-        line_color="red",
-        annotation_text="Rigidity Boundary (Too Much Organization)",
-        annotation_position="bottom right"
-    )
-    
-    # Add optimal efficiency line
-    if development_capacity > 0:
-        optimal_ascendency = development_capacity * optimal_ratio
-        fig.add_trace(go.Scatter(
-            x=[development_capacity], 
-            y=[optimal_ascendency],
-            mode='markers',
-            marker=dict(size=12, color='green', symbol='star'),
-            name='Optimal Point (37% Efficiency)',
-            hovertemplate='Optimal Position<br>Capacity: %{x:.1f}<br>Ascendency: %{y:.1f}<br>Efficiency: 37%<extra></extra>'
-        ))
-    
-    # Add current organization position
-    position_color = 'green' if lower_bound <= ascendency <= upper_bound else 'red'
-    position_symbol = 'circle' if lower_bound <= ascendency <= upper_bound else 'x'
-    
-    fig.add_trace(go.Scatter(
-        x=[development_capacity], 
-        y=[ascendency],
-        mode='markers+text',
-        marker=dict(size=20, color=position_color, symbol=position_symbol, line=dict(width=3, color='black')),
-        name='Your Organization',
-        text=['YOUR ORG'],
-        textposition="middle center",
-        textfont=dict(size=10, color='white'),
-        hovertemplate='Your Organization<br>Development Capacity: %{x:.1f}<br>Ascendency: %{y:.1f}<br>Efficiency: ' + f'{efficiency_ratio:.1%}<extra></extra>'
-    ))
-    
-    # Add reference organizations for context
-    reference_orgs = [
-        {'name': 'Typical Start-up', 'c': development_capacity * 0.6, 'ratio': 0.15, 'color': 'purple'},
-        {'name': 'Mature Corporation', 'c': development_capacity * 1.4, 'ratio': 0.45, 'color': 'brown'},
-        {'name': 'Chaotic System', 'c': development_capacity * 0.8, 'ratio': 0.08, 'color': 'gray'},
-        {'name': 'Over-Optimized', 'c': development_capacity * 1.1, 'ratio': 0.68, 'color': 'darkred'}
-    ]
-    
-    for ref in reference_orgs:
-        ref_ascendency = ref['c'] * ref['ratio']
-        fig.add_trace(go.Scatter(
-            x=[ref['c']], 
-            y=[ref_ascendency],
-            mode='markers',
-            marker=dict(size=10, color=ref['color'], symbol='diamond'),
-            name=ref['name'],
-            hovertemplate=f"{ref['name']}<br>Capacity: %{{x:.1f}}<br>Ascendency: %{{y:.1f}}<br>Efficiency: {ref['ratio']:.1%}<extra></extra>"
-        ))
-    
-    # Add zones annotations
-    fig.add_annotation(
-        x=max_capacity * 0.8,
-        y=lower_bound * 0.5,
-        text="CHAOS ZONE<br>(Insufficient Organization)",
-        showarrow=False,
-        font=dict(size=12, color='red'),
-        bgcolor='rgba(255, 255, 255, 0.8)',
-        bordercolor='red',
-        borderwidth=1
-    )
-    
-    fig.add_annotation(
-        x=max_capacity * 0.8,
-        y=upper_bound * 1.2,
-        text="RIGIDITY ZONE<br>(Over-Organization)",
-        showarrow=False,
-        font=dict(size=12, color='darkred'),
-        bgcolor='rgba(255, 255, 255, 0.8)',
-        bordercolor='darkred',
-        borderwidth=1
-    )
-    
-    fig.add_annotation(
-        x=max_capacity * 0.8,
-        y=(lower_bound + upper_bound) / 2,
-        text="VIABLE ZONE<br>(Sustainable Balance)",
-        showarrow=False,
-        font=dict(size=14, color='green'),
-        bgcolor='rgba(255, 255, 255, 0.9)',
-        bordercolor='green',
-        borderwidth=2
-    )
-    
-    # Update layout
-    fig.update_layout(
-        title={
-            'text': 'Organizational Sustainability Curve<br><sub>Position in Window of Viability</sub>',
-            'x': 0.5,
-            'font': {'size': 18}
-        },
-        xaxis_title='Development Capacity (C) - Total System Potential',
-        yaxis_title='Ascendency (A) - Current System Performance',
-        showlegend=True,
-        legend=dict(
-            yanchor="top",
-            y=0.99,
-            xanchor="left",
-            x=0.01
-        ),
-        hovermode='closest',
-        template='plotly_white',
-        height=600
-    )
-    
-    return fig
 
 def create_robustness_curve(metrics):
     """Create robustness curve visualization."""
@@ -734,6 +552,7 @@ def create_flow_heatmap(flow_matrix, node_names):
                       xaxis_title='To Department', yaxis_title='From Department')
     
     return fig
+
 
 def display_network_analysis(calculator, metrics, flow_matrix, node_names):
     """Display network analysis details."""
