@@ -1135,31 +1135,65 @@ def get_robustness_status(robustness):
         return "Low"
 
 def learn_more_interface():
-    """Educational interface about the methodology."""
+    """Educational interface about adaptive organizations and regenerative economics."""
     
-    st.header("📚 Learn About Regenerative Economics")
+    st.header("📚 Learn About Adaptive Organizations")
     
-    tab1, tab2, tab3, tab4 = st.tabs(["🌱 Overview", "📊 Key Metrics", "🎯 Window of Viability", "🔬 Research"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "🌱 Adaptive Organizations", "📊 Key Metrics", "🎯 Window of Viability", 
+        "🔬 Scientific Foundation", "🚀 Practical Applications"
+    ])
     
     with tab1:
         st.markdown("""
-        ## 🌱 Regenerative Economics Framework
+        ## 🌱 Adaptive Organizations Framework
         
-        This analysis system is based on **Robert Ulanowicz's Ecosystem Theory** extended with 
-        **Regenerative Economics** principles developed by Brian Fath and Ulanowicz.
+        This analysis system combines **Massimo Mistretta's Adaptive Organizations** methodology with 
+        **Robert Ulanowicz's Ecosystem Theory** and **Regenerative Economics** principles.
         
-        ### Core Concept
+        ### Core Philosophy: Organizations as Living Systems
         
-        Organizations, like ecosystems, need to balance **efficiency** (organization) with **resilience** 
-        (flexibility) to remain sustainable. Too much efficiency leads to brittleness, while too 
-        little leads to chaos.
+        Adaptive organizations are **living systems** that continuously evolve, learn, and regenerate. 
+        Like ecosystems, they must balance **efficiency** with **resilience** to thrive in complex environments.
         
-        ### Key Insights
+        ### Key Principles of Adaptive Organizations
         
-        - **Flow Networks**: Organizations are networks of information, resource, and communication flows
-        - **Balance is Critical**: Optimal systems operate in a "window of viability"
-        - **Regenerative Capacity**: Healthy systems can adapt and self-renew
-        - **Measurable Sustainability**: Network properties predict long-term viability
+        **🔄 Continuous Adaptation**
+        - Organizations must constantly evolve to survive
+        - Change is not episodic but continuous
+        - Adaptation happens at all levels simultaneously
+        
+        **🌐 Network-Centric Design**  
+        - Organizations are networks of relationships and flows
+        - Information, resources, and energy flow through the system
+        - Network topology determines organizational capabilities
+        
+        **⚖️ Balance Over Optimization**
+        - Avoid over-optimization in any single dimension
+        - Maintain healthy tension between order and chaos
+        - Preserve capacity for future adaptation
+        
+        **🎯 Purpose-Driven Evolution**
+        - Clear purpose guides adaptive choices
+        - Values and mission provide stability amid change
+        - Evolution serves larger organizational purpose
+        
+        **🔬 Evidence-Based Adaptation**
+        - Use data and metrics to guide adaptation
+        - Scientific approach to organizational design
+        - Measure what matters for long-term sustainability
+        
+        ### The Adaptive Advantage
+        
+        Organizations that master adaptive principles:
+        - **Thrive in uncertainty** rather than just survive it
+        - **Regenerate capabilities** faster than they consume them  
+        - **Create value** for all stakeholders, not just shareholders
+        - **Evolve with their environment** rather than resist change
+        
+        ---
+        
+        *Learn more: [Adaptive Organizations on Medium](https://medium.com/adaptive-organizations)*
         """)
     
     with tab2:
@@ -1235,44 +1269,117 @@ def learn_more_interface():
     
     with tab4:
         st.markdown("""
-        ## 🔬 Research Foundation
+        ## 🔬 Scientific Foundation
         
-        ### Primary Sources
+        ### Primary Research Sources
         
-        **Robert E. Ulanowicz**
-        - "A Third Window: Natural Life Beyond Newton and Darwin"
-        - Pioneer of ecosystem network analysis
-        - Developer of ascendency concept
+        **🌿 Robert E. Ulanowicz - Ecosystem Theory**
+        - "A Third Window: Natural Life Beyond Newton and Darwin"  
+        - "Quantifying Sustainability: Resilience, Efficiency and the Return of Information Theory"
+        - Pioneer of network-based sustainability analysis
+        - Developer of ascendency and window of viability concepts
         
-        **Fath & Ulanowicz (2019)**
+        **🔄 Brian D. Fath & Ulanowicz - Regenerative Economics**
         - "Measuring Regenerative Economics: 10 principles and measures undergirding systemic economic health"
-        - Extended framework to economic systems
-        - Added regenerative capacity concepts
+        - Extended ecosystem theory to economic systems
+        - Developed regenerative capacity framework
         
-        ### Key Research Areas
+        **🏢 Massimo Mistretta - Adaptive Organizations**
+        - [Adaptive Organizations Medium Publication](https://medium.com/adaptive-organizations)
+        - Integration of ecosystem theory with organizational design
+        - Practical application of regenerative principles to business
+        - Evidence-based approach to organizational transformation
         
-        **Network Ecology**
-        - Flow analysis in complex systems
-        - Information theory applications
-        - Sustainability metrics development
+        ### Mathematical Foundations
         
-        **Systems Theory**
-        - Complex adaptive systems
-        - Resilience and robustness
-        - Self-organization principles
+        **Information Theory**
+        - Shannon entropy for measuring system organization
+        - Mutual information for quantifying relationships
+        - Mathematical precision in sustainability measurement
         
-        **Regenerative Economics**
-        - Alternative to traditional growth models
-        - Focus on long-term sustainability
-        - Integration of ecological principles
+        **Network Science**
+        - Graph theory for organizational structure analysis
+        - Flow dynamics and system throughput
+        - Centrality and connectivity measures
         
-        ### Applications
+        **Complex Systems Theory**
+        - Self-organization and emergence
+        - Non-linear dynamics and phase transitions
+        - Adaptive capacity and resilience
+        """)
+    
+    with tab5:
+        st.markdown("""
+        ## 🚀 Practical Applications
         
-        - Organizational design and restructuring
-        - Supply chain optimization
-        - Urban planning and development
-        - Economic policy analysis
-        - Ecosystem management
+        ### Organizational Design & Transformation
+        
+        **🏗️ Structure Design**
+        - Use network visualization to design optimal structures
+        - Balance centralization and distribution based on scientific metrics
+        - Create adaptive communication patterns that enhance sustainability
+        
+        **🔄 Change Management**
+        - Monitor sustainability metrics during organizational transitions
+        - Maintain position in window of viability throughout change
+        - Preserve adaptive capacity while implementing improvements
+        
+        **📊 Performance Management**
+        - Track regenerative capacity alongside traditional KPIs
+        - Use robustness as leading indicator of organizational health
+        - Measure network effects of management decisions
+        
+        ### Strategic Leadership Applications
+        
+        **🎯 Strategic Planning**
+        - Assess organizational readiness for strategic initiatives
+        - Design strategies that enhance rather than consume adaptive capacity
+        - Balance growth ambitions with long-term sustainability
+        
+        **🤝 Merger & Integration**
+        - Analyze cultural and structural compatibility before mergers
+        - Design integration processes that preserve key capabilities
+        - Monitor network health throughout integration process
+        
+        **💡 Innovation Ecosystem Design**
+        - Create conditions for sustainable innovation
+        - Balance exploration (new ideas) with exploitation (current strengths)
+        - Design innovation networks for maximum adaptability
+        
+        ### Using This Analysis Tool
+        
+        **🔍 Diagnose** your organization's current sustainability position
+        **🎨 Design** new organizational structures and test their viability scientifically  
+        **📊 Monitor** organizational health metrics over time
+        **🧪 Experiment** with different network configurations safely
+        **📚 Learn** from successful adaptive organization patterns in nature
+        **🚀 Transform** your organization into a regenerative adaptive system
+        
+        ### Implementation Roadmap
+        
+        1. **Current State Assessment**
+           - Map existing communication and information flows
+           - Calculate baseline sustainability metrics
+           - Identify position in window of viability
+        
+        2. **Vision Design** 
+           - Use network generator to explore optimal structures
+           - Test different scenarios and their sustainability implications
+           - Save promising configurations to your library
+        
+        3. **Gradual Transformation**
+           - Implement changes that move toward adaptive principles
+           - Monitor metrics during transformation process
+           - Preserve what works while evolving what doesn't
+        
+        4. **Continuous Evolution**
+           - Regular sustainability assessments
+           - Adaptive adjustments based on changing conditions
+           - Culture of evidence-based continuous improvement
+        
+        ---
+        
+        *Ready to transform your organization? Start with the Visual Network Generator to explore possibilities.*
         """)
 
 def formulas_reference_interface():
