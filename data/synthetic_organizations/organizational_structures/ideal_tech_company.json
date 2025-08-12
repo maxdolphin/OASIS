@@ -1,0 +1,86 @@
+{
+  "organization_name": "TechFlow Innovations",
+  "organization_type": "Technology Company",
+  "total_employees": 45,
+  "departments": {
+    "Executive": {
+      "employees": ["CEO_Sarah", "CTO_Marcus", "CFO_Elena"],
+      "role": "Strategic leadership and decision making",
+      "external_collaborators": ["Board_Member_1", "Board_Member_2", "Investor_Rep"]
+    },
+    "Product": {
+      "employees": ["PM_David", "PM_Lisa", "Designer_Alex", "Designer_Maya"],
+      "role": "Product strategy and design",
+      "external_collaborators": ["UX_Consultant", "Market_Researcher"]
+    },
+    "Engineering": {
+      "employees": ["Lead_Dev_John", "Senior_Dev_Anna", "Senior_Dev_Ben", "Dev_Chris", "Dev_Emma", "Dev_Sam", "QA_Lead_Nina", "QA_Tester_Omar"],
+      "role": "Software development and technical implementation",
+      "external_collaborators": ["Tech_Consultant", "Security_Auditor"]
+    },
+    "Data_Science": {
+      "employees": ["DS_Lead_Rachel", "Data_Scientist_Tom", "ML_Engineer_Zoe"],
+      "role": "Data analysis and machine learning",
+      "external_collaborators": ["AI_Consultant", "Data_Vendor"]
+    },
+    "Sales": {
+      "employees": ["Sales_Dir_Mike", "Account_Mgr_Jenny", "Account_Mgr_Carlos", "Sales_Rep_Sophie"],
+      "role": "Revenue generation and client relationships",
+      "external_collaborators": ["Sales_Consultant", "Channel_Partner_1", "Channel_Partner_2"]
+    },
+    "Marketing": {
+      "employees": ["Marketing_Dir_Kate", "Content_Mgr_Paul", "Digital_Mgr_Lucia"],
+      "role": "Brand awareness and lead generation",
+      "external_collaborators": ["PR_Agency", "Digital_Agency", "Content_Creator"]
+    },
+    "Customer_Success": {
+      "employees": ["CS_Lead_Grace", "CS_Rep_Daniel", "CS_Rep_Mia"],
+      "role": "Customer support and retention",
+      "external_collaborators": ["Support_Contractor", "Training_Partner"]
+    },
+    "Operations": {
+      "employees": ["Ops_Dir_Robert", "Office_Mgr_Helen", "IT_Admin_Kevin"],
+      "role": "Business operations and infrastructure",
+      "external_collaborators": ["IT_Vendor", "Legal_Counsel", "Accounting_Firm"]
+    },
+    "HR": {
+      "employees": ["HR_Dir_Amanda", "Recruiter_James"],
+      "role": "Human resources and talent management",
+      "external_collaborators": ["Recruiting_Agency", "Benefits_Provider", "Training_Provider"]
+    },
+    "Finance": {
+      "employees": ["Finance_Mgr_Thomas", "Analyst_Victoria"],
+      "role": "Financial planning and analysis",
+      "external_collaborators": ["Accountant", "Tax_Advisor", "Financial_Consultant"]
+    }
+  },
+  "communication_patterns": {
+    "high_frequency": [
+      ["Executive", "Product"],
+      ["Product", "Engineering"],
+      ["Engineering", "Data_Science"],
+      ["Sales", "Customer_Success"],
+      ["Marketing", "Sales"]
+    ],
+    "medium_frequency": [
+      ["Executive", "Sales"],
+      ["Executive", "Engineering"],
+      ["Product", "Data_Science"],
+      ["Product", "Marketing"],
+      ["Operations", "Engineering"],
+      ["HR", "Operations"],
+      ["Finance", "Executive"]
+    ],
+    "low_frequency": [
+      ["HR", "All_Departments"],
+      ["Finance", "Operations"],
+      ["Customer_Success", "Product"],
+      ["Marketing", "Engineering"]
+    ]
+  },
+  "collaboration_intensity": {
+    "daily": ["Product-Engineering", "Sales-Customer_Success", "Executive-Product"],
+    "weekly": ["Executive-Sales", "Product-Marketing", "Engineering-Data_Science", "Operations-Finance"],
+    "monthly": ["HR-All", "Finance-All", "Executive-All"]
+  }
+}

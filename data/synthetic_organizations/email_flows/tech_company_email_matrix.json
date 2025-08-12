@@ -1,0 +1,49 @@
+{
+  "organization": "TechFlow Innovations",
+  "data_type": "email_exchange_flows",
+  "period": "monthly_average",
+  "units": "emails_per_month",
+  "nodes": [
+    "Executive", "Product", "Engineering", "Data_Science", "Sales", 
+    "Marketing", "Customer_Success", "Operations", "HR", "Finance"
+  ],
+  "flows": [
+    [0.0,  45.0, 32.0, 18.0, 38.0, 25.0, 22.0, 35.0, 28.0, 42.0],
+    [38.0, 0.0,  85.0, 35.0, 45.0, 55.0, 28.0, 18.0, 15.0, 22.0],
+    [28.0, 78.0, 0.0,  65.0, 12.0, 18.0, 35.0, 45.0, 25.0, 15.0],
+    [15.0, 32.0, 58.0, 0.0,  8.0,  15.0, 12.0, 22.0, 8.0,  12.0],
+    [35.0, 42.0, 15.0, 12.0, 0.0,  68.0, 95.0, 18.0, 12.0, 25.0],
+    [22.0, 48.0, 22.0, 18.0, 62.0, 0.0,  32.0, 15.0, 18.0, 28.0],
+    [18.0, 25.0, 28.0, 8.0,  88.0, 28.0, 0.0,  22.0, 15.0, 18.0],
+    [32.0, 15.0, 42.0, 18.0, 15.0, 12.0, 18.0, 0.0,  55.0, 48.0],
+    [25.0, 12.0, 22.0, 8.0,  15.0, 15.0, 18.0, 52.0, 0.0,  35.0],
+    [38.0, 18.0, 12.0, 8.0,  22.0, 25.0, 15.0, 45.0, 32.0, 0.0]
+  ],
+  "metadata": {
+    "generation_method": "synthetic_realistic_patterns",
+    "assumptions": [
+      "Higher flows between departments with frequent collaboration",
+      "Executive has moderate outgoing communication to all departments",
+      "Product-Engineering has highest bidirectional flow",
+      "Sales-Customer_Success has high communication due to customer handoffs",
+      "Marketing-Sales has high communication for lead management",
+      "HR and Finance have moderate flows with operational departments"
+    ],
+    "flow_characteristics": {
+      "peak_flows": [
+        {"from": "Sales", "to": "Customer_Success", "value": 95.0, "reason": "Customer handoff and support coordination"},
+        {"from": "Sales", "to": "Marketing", "value": 68.0, "reason": "Lead feedback and campaign coordination"},
+        {"from": "Product", "to": "Engineering", "value": 85.0, "reason": "Daily product development collaboration"},
+        {"from": "Engineering", "to": "Product", "value": 78.0, "reason": "Technical feedback and progress updates"}
+      ],
+      "moderate_flows": [
+        {"range": "25-50", "description": "Regular inter-departmental coordination"},
+        {"range": "15-25", "description": "Periodic project-based communication"}
+      ],
+      "low_flows": [
+        {"range": "8-15", "description": "Minimal but necessary communication"},
+        {"range": "0", "description": "No direct regular communication"}
+      ]
+    }
+  }
+}

@@ -1,0 +1,519 @@
+"""
+Ulanowicz Ecosystem Sustainability Theory Calculator
+
+This module implements the key indicators from Robert Ulanowicz's ecosystem sustainability theory
+and the extended regenerative economics framework by Fath & Ulanowicz:
+
+Core Ulanowicz Metrics:
+- Total System Throughput (TST)
+- Average Mutual Information (AMI)
+- Ascendency (A)
+- Overhead (Φ)
+- Development Capacity (C)
+- Window of Viability calculations
+
+Extended Regenerative Economics Indicators:
+- Flow Diversity (H)
+- Structural Information (SI)
+- Robustness (R)
+- Network Efficiency
+- Effective Link Density
+- Trophic Depth
+- Redundancy measures
+"""
+
+import numpy as np
+import networkx as nx
+from typing import Dict, List, Tuple, Optional
+import math
+
+
+class UlanowiczCalculator:
+    """
+    Calculator for Ulanowicz ecosystem sustainability metrics.
+    
+    Based on Ulanowicz's theory that sustainable systems must balance
+    order (ascendency) and flexibility (overhead) within a window of viability.
+    """
+    
+    def __init__(self, flow_matrix: np.ndarray, node_names: Optional[List[str]] = None):
+        """
+        Initialize calculator with flow matrix.
+        
+        Args:
+            flow_matrix: Square matrix where element (i,j) represents flow from node i to node j
+            node_names: Optional list of node names for labeling
+        """
+        self.flow_matrix = np.array(flow_matrix, dtype=float)
+        self.n_nodes = self.flow_matrix.shape[0]
+        self.node_names = node_names or [f"Node_{i}" for i in range(self.n_nodes)]
+        
+        # Validate input
+        if self.flow_matrix.shape[0] != self.flow_matrix.shape[1]:
+            raise ValueError("Flow matrix must be square")
+        
+        # Calculate derived matrices
+        self._calculate_throughput_matrices()
+    
+    def _calculate_throughput_matrices(self):
+        """Calculate input, output, and total throughput vectors."""
+        # Input throughput for each node (sum of incoming flows)
+        self.input_throughput = np.sum(self.flow_matrix, axis=0)
+        
+        # Output throughput for each node (sum of outgoing flows)
+        self.output_throughput = np.sum(self.flow_matrix, axis=1)
+        
+        # Total throughput for each node
+        self.total_throughput = self.input_throughput + self.output_throughput
+    
+    def calculate_tst(self) -> float:
+        """
+        Calculate Total System Throughput (TST).
+        
+        TST is the sum of all flows in the network, representing the total
+        activity or metabolism of the system.
+        
+        Returns:
+            Total System Throughput value
+        """
+        return np.sum(self.flow_matrix)
+    
+    def calculate_ami(self) -> float:
+        """
+        Calculate Average Mutual Information (AMI).
+        
+        AMI measures the degree of organization or constraint in the network.
+        Higher AMI indicates more organized, less random flow patterns.
+        
+        Formula: AMI = Σ(T_ij * log(T_ij * TST / (T_i. * T_.j))) / TST
+        where T_ij is flow from i to j, T_i. is output from i, T_.j is input to j
+        
+        Returns:
+            Average Mutual Information value
+        """
+        tst = self.calculate_tst()
+        if tst == 0:
+            return 0
+        
+        ami_sum = 0
+        for i in range(self.n_nodes):
+            for j in range(self.n_nodes):
+                flow_ij = self.flow_matrix[i, j]
+                if flow_ij > 0:
+                    output_i = self.output_throughput[i]
+                    input_j = self.input_throughput[j]
+                    
+                    if output_i > 0 and input_j > 0:
+                        # Calculate mutual information term
+                        ratio = (flow_ij * tst) / (output_i * input_j)
+                        ami_sum += flow_ij * math.log(ratio)
+        
+        return ami_sum / tst if tst > 0 else 0
+    
+    def calculate_ascendency(self) -> float:
+        """
+        Calculate Ascendency (A).
+        
+        Ascendency represents the system's "power" - the product of total
+        activity (TST) and organization (AMI).
+        
+        Formula: A = TST × AMI
+        
+        Returns:
+            Ascendency value
+        """
+        return self.calculate_tst() * self.calculate_ami()
+    
+    def calculate_development_capacity(self) -> float:
+        """
+        Calculate Development Capacity (C).
+        
+        Development Capacity is the theoretical maximum ascendency possible
+        given the current throughput distribution.
+        
+        Formula: C = -TST × Σ(p_ij × log(p_ij))
+        where p_ij = T_ij / TST
+        
+        Returns:
+            Development Capacity value
+        """
+        tst = self.calculate_tst()
+        if tst == 0:
+            return 0
+        
+        capacity_sum = 0
+        for i in range(self.n_nodes):
+            for j in range(self.n_nodes):
+                flow_ij = self.flow_matrix[i, j]
+                if flow_ij > 0:
+                    p_ij = flow_ij / tst
+                    capacity_sum += p_ij * math.log(p_ij)
+        
+        return -tst * capacity_sum
+    
+    def calculate_overhead(self) -> float:
+        """
+        Calculate Overhead (Φ).
+        
+        Overhead represents the system's flexibility, redundancy, and
+        reserve capacity. It's the difference between development capacity
+        and ascendency.
+        
+        Formula: Φ = C - A
+        
+        Returns:
+            Overhead value
+        """
+        return self.calculate_development_capacity() - self.calculate_ascendency()
+    
+    def calculate_window_of_viability(self) -> Tuple[float, float]:
+        """
+        Calculate the Window of Viability bounds.
+        
+        The window of viability defines the range of ascendency values
+        where a system can sustainably operate - not too rigid (high ascendency)
+        and not too chaotic (low ascendency).
+        
+        Based on Ulanowicz's empirical observations:
+        - Lower bound: ~20% of development capacity
+        - Upper bound: ~60% of development capacity
+        
+        Returns:
+            Tuple of (lower_bound, upper_bound) for viable ascendency range
+        """
+        development_capacity = self.calculate_development_capacity()
+        lower_bound = 0.2 * development_capacity  # Minimum organization for viability
+        upper_bound = 0.6 * development_capacity  # Maximum before brittleness
+        
+        return lower_bound, upper_bound
+    
+    def get_sustainability_metrics(self) -> Dict[str, float]:
+        """
+        Get all sustainability metrics in a single dictionary.
+        
+        Returns:
+            Dictionary containing all calculated metrics
+        """
+        tst = self.calculate_tst()
+        ami = self.calculate_ami()
+        ascendency = self.calculate_ascendency()
+        development_capacity = self.calculate_development_capacity()
+        overhead = self.calculate_overhead()
+        lower_bound, upper_bound = self.calculate_window_of_viability()
+        
+        return {
+            'total_system_throughput': tst,
+            'average_mutual_information': ami,
+            'ascendency': ascendency,
+            'development_capacity': development_capacity,
+            'overhead': overhead,
+            'ascendency_ratio': ascendency / development_capacity if development_capacity > 0 else 0,
+            'overhead_ratio': overhead / development_capacity if development_capacity > 0 else 0,
+            'viability_lower_bound': lower_bound,
+            'viability_upper_bound': upper_bound,
+            'is_viable': lower_bound <= ascendency <= upper_bound
+        }
+    
+    def assess_sustainability(self) -> str:
+        """
+        Provide a qualitative assessment of the system's sustainability.
+        
+        Returns:
+            String description of sustainability status
+        """
+        metrics = self.get_sustainability_metrics()
+        ascendency = metrics['ascendency']
+        lower_bound = metrics['viability_lower_bound']
+        upper_bound = metrics['viability_upper_bound']
+        
+        if ascendency < lower_bound:
+            return "UNSUSTAINABLE - Too chaotic (low organization)"
+        elif ascendency > upper_bound:
+            return "UNSUSTAINABLE - Too rigid (over-organized)"
+        elif ascendency < (lower_bound + upper_bound) / 2:
+            return "VIABLE - Leaning toward flexibility"
+        else:
+            return "VIABLE - Leaning toward organization"
+    
+    def calculate_flow_diversity(self) -> float:
+        """
+        Calculate Flow Diversity (H) using Shannon entropy.
+        
+        Flow diversity measures the evenness of flow distribution
+        across all network connections. Higher diversity indicates
+        more evenly distributed flows.
+        
+        Formula: H = -Σ(p_ij * log(p_ij))
+        where p_ij = T_ij / TST
+        
+        Returns:
+            Flow Diversity value
+        """
+        tst = self.calculate_tst()
+        if tst == 0:
+            return 0
+        
+        diversity_sum = 0
+        for i in range(self.n_nodes):
+            for j in range(self.n_nodes):
+                flow_ij = self.flow_matrix[i, j]
+                if flow_ij > 0:
+                    p_ij = flow_ij / tst
+                    diversity_sum += p_ij * math.log(p_ij)
+        
+        return -diversity_sum
+    
+    def calculate_structural_information(self) -> float:
+        """
+        Calculate Structural Information (SI).
+        
+        SI measures the constraint or organization inherent in the
+        network structure, independent of flow magnitudes.
+        
+        Formula: SI = log(n²) - H
+        where n is number of nodes and H is flow diversity
+        
+        Returns:
+            Structural Information value
+        """
+        max_diversity = math.log(self.n_nodes ** 2)
+        flow_diversity = self.calculate_flow_diversity()
+        return max_diversity - flow_diversity
+    
+    def calculate_robustness(self) -> float:
+        """
+        Calculate Network Robustness (R).
+        
+        Robustness measures the system's ability to maintain functionality
+        under stress or disturbance. It balances efficiency and resilience.
+        
+        Based on Fath-Ulanowicz formulation combining ascendency and overhead.
+        
+        Formula: R = (A/C) * (1 - A/C) * log(C)
+        
+        Returns:
+            Robustness value
+        """
+        ascendency = self.calculate_ascendency()
+        development_capacity = self.calculate_development_capacity()
+        
+        if development_capacity == 0:
+            return 0
+        
+        a_c_ratio = ascendency / development_capacity
+        robustness = a_c_ratio * (1 - a_c_ratio) * math.log(development_capacity)
+        
+        return max(0, robustness)  # Ensure non-negative
+    
+    def calculate_network_efficiency(self) -> float:
+        """
+        Calculate Network Efficiency.
+        
+        Efficiency measures how well the network utilizes its connections
+        for flow transmission.
+        
+        Formula: Efficiency = A / C (Ascendency ratio)
+        
+        Returns:
+            Network Efficiency value
+        """
+        ascendency = self.calculate_ascendency()
+        development_capacity = self.calculate_development_capacity()
+        
+        return ascendency / development_capacity if development_capacity > 0 else 0
+    
+    def calculate_effective_link_density(self) -> float:
+        """
+        Calculate Effective Link Density.
+        
+        Measures the effective connectivity of the network,
+        weighted by flow magnitudes.
+        
+        Returns:
+            Effective Link Density value
+        """
+        tst = self.calculate_tst()
+        if tst == 0:
+            return 0
+        
+        # Count non-zero flows
+        active_links = np.count_nonzero(self.flow_matrix)
+        max_links = self.n_nodes ** 2
+        
+        # Weight by flow distribution
+        ami = self.calculate_ami()
+        max_ami = math.log(max_links) if max_links > 0 else 0
+        
+        if max_ami == 0:
+            return active_links / max_links
+        
+        return (active_links / max_links) * (ami / max_ami)
+    
+    def calculate_trophic_depth(self) -> float:
+        """
+        Calculate average Trophic Depth of the network.
+        
+        Trophic depth measures the average path length through
+        the network, indicating organizational hierarchy.
+        
+        Returns:
+            Average Trophic Depth value
+        """
+        # Create networkx graph for path analysis
+        G = nx.DiGraph()
+        
+        # Add nodes and edges with weights
+        for i in range(self.n_nodes):
+            G.add_node(i)
+            for j in range(self.n_nodes):
+                if self.flow_matrix[i, j] > 0:
+                    G.add_edge(i, j, weight=self.flow_matrix[i, j])
+        
+        if G.number_of_edges() == 0:
+            return 0
+        
+        # Calculate average shortest path length
+        try:
+            avg_path_length = nx.average_shortest_path_length(G, weight='weight')
+            return avg_path_length
+        except nx.NetworkXError:
+            # Graph is not connected, calculate for largest component
+            if nx.is_strongly_connected(G):
+                return nx.average_shortest_path_length(G, weight='weight')
+            else:
+                # Use largest strongly connected component
+                largest_scc = max(nx.strongly_connected_components(G), key=len, default=set())
+                if len(largest_scc) > 1:
+                    subgraph = G.subgraph(largest_scc)
+                    return nx.average_shortest_path_length(subgraph, weight='weight')
+                else:
+                    return 1.0  # Single node or no connections
+    
+    def calculate_redundancy(self) -> float:
+        """
+        Calculate Network Redundancy.
+        
+        Redundancy measures the degree of alternative pathways
+        and backup connections in the network.
+        
+        Formula: Redundancy = Overhead / Development Capacity
+        
+        Returns:
+            Redundancy value
+        """
+        overhead = self.calculate_overhead()
+        development_capacity = self.calculate_development_capacity()
+        
+        return overhead / development_capacity if development_capacity > 0 else 0
+    
+    def calculate_regenerative_capacity(self) -> float:
+        """
+        Calculate Regenerative Capacity.
+        
+        Measures the system's ability to self-renew and adapt,
+        balancing efficiency with resilience.
+        
+        Based on the optimal robustness point in the window of vitality.
+        
+        Returns:
+            Regenerative Capacity value
+        """
+        robustness = self.calculate_robustness()
+        
+        # Theoretical maximum robustness occurs around A/C = 0.37
+        optimal_ratio = 0.37
+        current_ratio = self.calculate_network_efficiency()
+        
+        # Distance from optimal point (closer is better)
+        distance_from_optimal = abs(current_ratio - optimal_ratio)
+        
+        # Regenerative capacity is higher when closer to optimal
+        regenerative_capacity = robustness * (1 - distance_from_optimal)
+        
+        return max(0, regenerative_capacity)
+    
+    def get_extended_metrics(self) -> Dict[str, float]:
+        """
+        Get all extended regenerative economics metrics.
+        
+        Returns:
+            Dictionary containing all extended metrics
+        """
+        basic_metrics = self.get_sustainability_metrics()
+        
+        extended_metrics = {
+            'flow_diversity': self.calculate_flow_diversity(),
+            'structural_information': self.calculate_structural_information(),
+            'robustness': self.calculate_robustness(),
+            'network_efficiency': self.calculate_network_efficiency(),
+            'effective_link_density': self.calculate_effective_link_density(),
+            'trophic_depth': self.calculate_trophic_depth(),
+            'redundancy': self.calculate_redundancy(),
+            'regenerative_capacity': self.calculate_regenerative_capacity()
+        }
+        
+        # Combine basic and extended metrics
+        all_metrics = {**basic_metrics, **extended_metrics}
+        
+        return all_metrics
+    
+    def assess_regenerative_health(self) -> Dict[str, str]:
+        """
+        Provide comprehensive assessment based on regenerative economics principles.
+        
+        Returns:
+            Dictionary with assessments for different aspects
+        """
+        metrics = self.get_extended_metrics()
+        
+        assessments = {
+            'sustainability': self.assess_sustainability(),
+            'robustness': self._assess_robustness(metrics['robustness'], metrics['network_efficiency']),
+            'resilience': self._assess_resilience(metrics['redundancy'], metrics['flow_diversity']),
+            'efficiency': self._assess_efficiency(metrics['network_efficiency']),
+            'regenerative_potential': self._assess_regenerative_potential(metrics['regenerative_capacity'])
+        }
+        
+        return assessments
+    
+    def _assess_robustness(self, robustness: float, efficiency: float) -> str:
+        """Assess robustness level."""
+        if robustness < 0.1:
+            return "LOW - System lacks robustness to disturbances"
+        elif robustness > 0.3:
+            return "HIGH - System demonstrates strong robustness"
+        elif efficiency < 0.2:
+            return "MODERATE - Robustness limited by low efficiency"
+        elif efficiency > 0.6:
+            return "MODERATE - Robustness limited by over-optimization"
+        else:
+            return "GOOD - Balanced robustness within viable range"
+    
+    def _assess_resilience(self, redundancy: float, diversity: float) -> str:
+        """Assess resilience level."""
+        if redundancy < 0.3:
+            return "LOW - Insufficient backup capacity"
+        elif redundancy > 0.8:
+            return "HIGH - Substantial reserve capacity"
+        elif diversity < 1.0:
+            return "MODERATE - Limited pathway diversity"
+        else:
+            return "GOOD - Adequate resilience mechanisms"
+    
+    def _assess_efficiency(self, efficiency: float) -> str:
+        """Assess efficiency level."""
+        if efficiency < 0.2:
+            return "LOW - System operates with low efficiency"
+        elif efficiency > 0.6:
+            return "HIGH - System may be over-optimized"
+        else:
+            return "OPTIMAL - Efficiency within sustainable range"
+    
+    def _assess_regenerative_potential(self, regen_capacity: float) -> str:
+        """Assess regenerative potential."""
+        if regen_capacity < 0.1:
+            return "LOW - Limited capacity for self-renewal"
+        elif regen_capacity > 0.25:
+            return "HIGH - Strong regenerative capabilities"
+        else:
+            return "MODERATE - Some regenerative potential exists"

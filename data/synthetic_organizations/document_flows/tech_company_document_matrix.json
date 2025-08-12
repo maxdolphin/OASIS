@@ -1,0 +1,93 @@
+{
+  "organization": "TechFlow Innovations",
+  "data_type": "document_sharing_flows", 
+  "period": "monthly_average",
+  "units": "documents_shared_per_month",
+  "nodes": [
+    "Executive", "Product", "Engineering", "Data_Science", "Sales",
+    "Marketing", "Customer_Success", "Operations", "HR", "Finance"
+  ],
+  "flows": [
+    [0.0,  12.0, 8.0,  5.0,  15.0, 10.0, 8.0,  18.0, 22.0, 25.0],
+    [8.0,  0.0,  45.0, 18.0, 22.0, 35.0, 15.0, 5.0,  8.0,  12.0],
+    [5.0,  38.0, 0.0,  28.0, 3.0,  8.0,  12.0, 15.0, 5.0,  3.0],
+    [3.0,  15.0, 22.0, 0.0,  2.0,  8.0,  5.0,  8.0,  2.0,  5.0],
+    [12.0, 18.0, 5.0,  3.0,  0.0,  25.0, 42.0, 8.0,  3.0,  15.0],
+    [8.0,  28.0, 12.0, 5.0,  22.0, 0.0,  18.0, 5.0,  8.0,  12.0],
+    [5.0,  12.0, 8.0,  2.0,  35.0, 15.0, 0.0,  8.0,  5.0,  8.0],
+    [15.0, 3.0,  12.0, 5.0,  5.0,  3.0,  5.0,  0.0,  28.0, 32.0],
+    [18.0, 5.0,  8.0,  2.0,  5.0,  5.0,  8.0,  25.0, 0.0,  18.0],
+    [22.0, 8.0,  3.0,  3.0,  12.0, 8.0,  5.0,  28.0, 15.0, 0.0]
+  ],
+  "document_types": {
+    "Executive": {
+      "outgoing": ["Strategic plans", "Board reports", "Policy documents", "Vision statements"],
+      "incoming": ["Department reports", "Financial summaries", "Project updates", "Performance metrics"]
+    },
+    "Product": {
+      "outgoing": ["Product requirements", "User stories", "Wireframes", "Product roadmaps"],
+      "incoming": ["Market research", "User feedback", "Technical constraints", "Feature requests"]
+    },
+    "Engineering": {
+      "outgoing": ["Technical specifications", "Architecture docs", "Code reviews", "Release notes"],
+      "incoming": ["Product requirements", "Bug reports", "User stories", "Performance data"]
+    },
+    "Data_Science": {
+      "outgoing": ["Data models", "Analytics reports", "ML model docs", "Data insights"],
+      "incoming": ["Data requirements", "Business questions", "Model feedback", "Performance metrics"]
+    },
+    "Sales": {
+      "outgoing": ["Sales reports", "Customer feedback", "Market intelligence", "Proposals"],
+      "incoming": ["Product materials", "Pricing docs", "Marketing collateral", "Customer success stories"]
+    },
+    "Marketing": {
+      "outgoing": ["Campaign materials", "Content assets", "Brand guidelines", "Market research"],
+      "incoming": ["Product updates", "Sales feedback", "Customer insights", "Performance data"]
+    },
+    "Customer_Success": {
+      "outgoing": ["Customer reports", "Success stories", "Feature requests", "Support tickets"],
+      "incoming": ["Product documentation", "Training materials", "Customer data", "Best practices"]
+    },
+    "Operations": {
+      "outgoing": ["Process documentation", "Vendor contracts", "Compliance reports", "Infrastructure docs"],
+      "incoming": ["Budget requests", "Policy updates", "Security requirements", "Operational metrics"]
+    },
+    "HR": {
+      "outgoing": ["HR policies", "Training materials", "Org charts", "Performance reviews"],
+      "incoming": ["Job descriptions", "Budget approvals", "Employee feedback", "Compliance requirements"]
+    },
+    "Finance": {
+      "outgoing": ["Financial reports", "Budget analyses", "Forecasts", "Expense reports"],
+      "incoming": ["Purchase requests", "Revenue data", "Expense receipts", "Budget proposals"]
+    }
+  },
+  "metadata": {
+    "generation_method": "document_flow_modeling",
+    "assumptions": [
+      "Document sharing is less frequent but more formal than emails",
+      "Executive generates many policy/strategy documents distributed widely", 
+      "Product-Engineering has high document exchange for specifications",
+      "Sales-Customer_Success share customer-related documents frequently",
+      "Finance and Operations generate compliance/procedural documents",
+      "HR distributes policies and training materials to all departments"
+    ],
+    "flow_characteristics": {
+      "high_document_flows": [
+        {"from": "Product", "to": "Engineering", "value": 45.0, "documents": "Product specs, user stories, wireframes"},
+        {"from": "Sales", "to": "Customer_Success", "value": 42.0, "documents": "Customer handoffs, success stories"},
+        {"from": "Engineering", "to": "Product", "value": 38.0, "documents": "Technical feedback, architecture docs"}
+      ],
+      "administrative_flows": [
+        {"from": "Executive", "value_range": "15-25", "documents": "Strategic plans, policies"},
+        {"from": "Operations", "value_range": "15-32", "documents": "Process docs, contracts"},
+        {"from": "HR", "value_range": "18-28", "documents": "Policies, training materials"},
+        {"from": "Finance", "value_range": "12-32", "documents": "Financial reports, budgets"}
+      ]
+    },
+    "seasonal_patterns": {
+      "quarterly_peaks": ["Executive strategic docs", "Finance budget reports"],
+      "project_based": ["Engineering specs", "Product requirements"],
+      "ongoing": ["Sales reports", "Customer success documentation"]
+    }
+  }
+}
