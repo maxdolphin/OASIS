@@ -175,22 +175,76 @@ def upload_data_interface():
         """)
 
 def sample_data_interface():
-    """Interface for using pre-built sample data."""
+    """Interface for using built-in and user-saved sample data."""
     
     st.header("🧪 Analyze Sample Organizations")
+    st.markdown("Choose from built-in samples or your saved networks from the Visual Network Generator.")
     
-    # Load available sample datasets
-    sample_datasets = {
-        "TechFlow Innovations (Combined Flows)": "data/synthetic_organizations/combined_flows/tech_company_combined_matrix.json",
-        "TechFlow Innovations (Email Only)": "data/synthetic_organizations/email_flows/tech_company_email_matrix.json", 
-        "TechFlow Innovations (Documents Only)": "data/synthetic_organizations/document_flows/tech_company_document_matrix.json",
-        "Balanced Test Organization": "data/synthetic_organizations/combined_flows/balanced_org_test.json"
-    }
+    # Load all available datasets (built-in + user-saved)
+    all_datasets = load_all_sample_datasets()
     
-    selected_dataset = st.selectbox("Choose a sample organization:", list(sample_datasets.keys()))
+    if not all_datasets:
+        st.warning("No sample datasets available. Try generating some networks first!")
+        return
     
-    if st.button("🚀 Analyze Selected Organization"):
-        dataset_path = sample_datasets[selected_dataset]
+    # Organize datasets by type for better UX
+    builtin_datasets = {k: v for k, v in all_datasets.items() if v["type"] == "builtin"}
+    user_datasets = {k: v for k, v in all_datasets.items() if v["type"] == "user_saved"}
+    
+    # Show counts
+    col1, col2 = st.columns(2)
+    with col1:
+        st.info(f"📁 **Built-in Samples**: {len(builtin_datasets)}")
+    with col2:
+        st.info(f"💾 **Your Saved Networks**: {len(user_datasets)}")
+    
+    # Dataset selection
+    selected_dataset = st.selectbox("Choose an organization:", list(all_datasets.keys()))
+    dataset_info = all_datasets[selected_dataset]
+    
+    # Show metadata for user-saved networks
+    if dataset_info["type"] == "user_saved" and "metadata" in dataset_info:
+        metadata = dataset_info["metadata"]
+        
+        with st.expander("📋 Network Details", expanded=True):
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.write(f"**Type**: {metadata.get('network_description', 'N/A')}")
+                st.write(f"**Nodes**: {metadata.get('actual_nodes', 'N/A')}")
+                st.write(f"**Edges**: {metadata.get('actual_edges', 'N/A')}")
+            with col2:
+                st.write(f"**Density**: {metadata.get('actual_density', 0):.4f}")
+                st.write(f"**Total Flow**: {metadata.get('total_flow', 0):.1f}")
+                st.write(f"**Hub Amplification**: {metadata.get('hub_amplification', 'N/A')}")
+            with col3:
+                created = metadata.get('created', 'Unknown')
+                if created != 'Unknown':
+                    try:
+                        from datetime import datetime
+                        dt = datetime.fromisoformat(created.replace('Z', '+00:00'))
+                        created = dt.strftime('%Y-%m-%d %H:%M:%S')
+                    except:
+                        pass
+                st.write(f"**Created**: {created}")
+                st.write(f"**Flow Range**: {metadata.get('flow_range', 'N/A')}")
+    
+    # Analysis buttons
+    col1, col2 = st.columns(2)
+    with col1:
+        analyze_button = st.button("🚀 Analyze Selected Organization", type="primary")
+    with col2:
+        if dataset_info["type"] == "user_saved":
+            if st.button("🗑️ Delete This Network", type="secondary"):
+                try:
+                    import os
+                    os.remove(dataset_info["path"])
+                    st.success("✅ Network deleted successfully!")
+                    st.rerun()  # Refresh the interface
+                except Exception as e:
+                    st.error(f"❌ Failed to delete: {str(e)}")
+    
+    if analyze_button:
+        dataset_path = dataset_info["path"]
         
         try:
             with open(dataset_path, 'r') as f:
@@ -198,18 +252,21 @@ def sample_data_interface():
             
             flow_matrix = np.array(data['flows'])
             node_names = data['nodes']
-            org_name = data.get('organization', selected_dataset)
+            org_name = data.get('organization', selected_dataset.split(' - ')[0])  # Clean up display name
             
             st.success(f"✅ Loaded {org_name}")
             
             # Show dataset info
-            col1, col2, col3 = st.columns(3)
+            col1, col2, col3, col4 = st.columns(4)
             with col1:
-                st.metric("Departments", len(node_names))
+                st.metric("Nodes", len(node_names))
             with col2:
-                st.metric("Total Flows", int(np.sum(flow_matrix)))
+                st.metric("Total Flow", f"{np.sum(flow_matrix):.1f}")
             with col3:
                 st.metric("Connections", int(np.count_nonzero(flow_matrix)))
+            with col4:
+                density = np.count_nonzero(flow_matrix) / (len(node_names) ** 2)
+                st.metric("Density", f"{density:.4f}")
             
             # Run analysis
             run_analysis(flow_matrix, node_names, org_name)
@@ -428,8 +485,16 @@ def synthetic_data_interface():
                     flows_df = pd.DataFrame(flows).sort_values('Flow', ascending=False).head(10)
                     st.dataframe(flows_df)
             
-            if st.button("🔍 Run Full Analysis", type="secondary"):
-                run_analysis(flow_matrix, node_names, org_name)
+            col_analyze, col_save = st.columns(2)
+            with col_analyze:
+                if st.button("🔍 Run Full Analysis", type="secondary"):
+                    run_analysis(flow_matrix, node_names, org_name)
+            
+            with col_save:
+                if st.button("💾 Save to Sample Data", type="secondary"):
+                    save_network_to_samples(org_name, st.session_state.generated_network, 
+                                           network_type, selected_type, num_nodes, density, 
+                                           flow_range, hub_amplification)
         
         with col4:
             st.markdown("### Quick Sustainability Preview")
@@ -450,6 +515,115 @@ def synthetic_data_interface():
                     st.success(assessment)
                 else:
                     st.warning(assessment)
+
+def save_network_to_samples(org_name, network, network_type, selected_type, num_nodes, density, flow_range, hub_amplification):
+    """Save generated network to user sample data collection."""
+    
+    try:
+        from datetime import datetime
+        import os
+        
+        # Create safe filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_name = "".join(c for c in org_name if c.isalnum() or c in (' ', '-', '_')).rstrip()
+        safe_name = safe_name.replace(' ', '_')
+        filename = f"{safe_name}_{timestamp}.json"
+        
+        # Convert network to flow matrix
+        generator = OrganizationalNetworkGenerator()
+        flow_matrix = generator.network_to_flow_matrix(network)
+        node_names = [f"Unit_{i}" for i in range(network.number_of_nodes())]
+        
+        # Create metadata
+        save_data = {
+            "organization": org_name,
+            "nodes": node_names,
+            "flows": flow_matrix.tolist(),
+            "metadata": {
+                "created": datetime.now().isoformat(),
+                "network_type": network_type,
+                "network_description": selected_type["name"],
+                "num_nodes": num_nodes,
+                "density": density,
+                "flow_range": flow_range,
+                "hub_amplification": hub_amplification,
+                "actual_nodes": network.number_of_nodes(),
+                "actual_edges": network.number_of_edges(),
+                "actual_density": network.number_of_edges() / (network.number_of_nodes() * (network.number_of_nodes() - 1)),
+                "total_flow": float(np.sum(flow_matrix)),
+                "saved_from": "Visual Network Generator"
+            }
+        }
+        
+        # Save to user directory
+        save_path = f"data/user_saved_networks/{filename}"
+        os.makedirs("data/user_saved_networks", exist_ok=True)
+        
+        with open(save_path, 'w') as f:
+            json.dump(save_data, f, indent=2)
+        
+        st.success(f"✅ **Network Saved!**\n\nSaved as: `{filename}`\n\nYou can now find it in the '🧪 Use Sample Data' section under 'User Saved Networks'.")
+        
+    except Exception as e:
+        st.error(f"❌ Failed to save network: {str(e)}")
+
+def load_all_sample_datasets():
+    """Load both built-in and user-saved datasets."""
+    
+    datasets = {}
+    
+    # Built-in sample datasets
+    builtin_datasets = {
+        "TechFlow Innovations (Combined Flows)": "data/synthetic_organizations/combined_flows/tech_company_combined_matrix.json",
+        "TechFlow Innovations (Email Only)": "data/synthetic_organizations/email_flows/tech_company_email_matrix.json", 
+        "TechFlow Innovations (Documents Only)": "data/synthetic_organizations/document_flows/tech_company_document_matrix.json",
+        "Balanced Test Organization": "data/synthetic_organizations/combined_flows/balanced_org_test.json"
+    }
+    
+    # Add built-in datasets
+    for name, path in builtin_datasets.items():
+        datasets[f"📁 {name}"] = {"path": path, "type": "builtin"}
+    
+    # Load user-saved datasets
+    import os
+    user_dir = "data/user_saved_networks"
+    if os.path.exists(user_dir):
+        user_files = [f for f in os.listdir(user_dir) if f.endswith('.json')]
+        user_files.sort(reverse=True)  # Most recent first
+        
+        for filename in user_files:
+            try:
+                filepath = os.path.join(user_dir, filename)
+                with open(filepath, 'r') as f:
+                    data = json.load(f)
+                
+                # Extract display name and metadata
+                org_name = data.get('organization', filename.replace('.json', ''))
+                metadata = data.get('metadata', {})
+                created = metadata.get('created', 'Unknown')
+                network_type = metadata.get('network_description', 'Generated Network')
+                
+                # Format display name
+                display_name = f"💾 {org_name} ({network_type})"
+                if created != 'Unknown':
+                    try:
+                        from datetime import datetime
+                        dt = datetime.fromisoformat(created.replace('Z', '+00:00'))
+                        date_str = dt.strftime('%Y-%m-%d %H:%M')
+                        display_name += f" - {date_str}"
+                    except:
+                        pass
+                
+                datasets[display_name] = {
+                    "path": filepath, 
+                    "type": "user_saved",
+                    "metadata": metadata
+                }
+                
+            except Exception as e:
+                continue  # Skip corrupted files
+    
+    return datasets
 
 def generate_synthetic_organization(departments, intensity, formality, age, seed):
     """Generate synthetic organizational data."""
