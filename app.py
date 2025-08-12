@@ -258,11 +258,17 @@ def synthetic_data_interface():
         
         # Size controls
         st.markdown("### 📏 Size Controls")
-        num_nodes = st.slider("Number of Nodes:", 3, 25, 10, 
+        num_nodes = st.slider("Number of Nodes:", 3, 1000, 10, 
                              help="Number of departments/units in the organization")
         
-        density = st.slider("Network Density:", 0.1, 0.8, 0.3,
-                           help="Fraction of possible connections that exist")
+        # Adjust density range based on network size for performance
+        if num_nodes > 100:
+            max_density = min(0.3, 500 / (num_nodes * (num_nodes - 1)))
+            density = st.slider("Network Density:", 0.01, max_density, min(0.1, max_density/2),
+                               help="Density limited for large networks to ensure performance")
+        else:
+            density = st.slider("Network Density:", 0.1, 0.8, 0.3,
+                               help="Fraction of possible connections that exist")
         
         # Flow controls
         st.markdown("### 💧 Flow Parameters")
@@ -291,9 +297,19 @@ def synthetic_data_interface():
         else:
             random_seed = None
         
+        # Performance warning for large networks
+        if num_nodes > 500:
+            st.warning("⚠️ **Large Network**: Networks with >500 nodes may take longer to generate and analyze.")
+        elif num_nodes > 200:
+            st.info("ℹ️ **Medium Network**: Visualization will be replaced with degree distribution chart.")
+        
         # Generate button
         if st.button("🚀 Generate Network", type="primary"):
-            with st.spinner("Generating network..."):
+            generation_time = "Generating network..."
+            if num_nodes > 500:
+                generation_time = "Generating large network... this may take a moment..."
+                
+            with st.spinner(generation_time):
                 # Initialize generator
                 generator = OrganizationalNetworkGenerator(seed=random_seed)
                 
@@ -318,7 +334,10 @@ def synthetic_data_interface():
                 st.session_state.generated_network = G_weighted
                 st.session_state.flow_matrix = generator.network_to_flow_matrix(G_weighted)
                 
-                st.success("✅ Network generated successfully!")
+                success_msg = "✅ Network generated successfully!"
+                if num_nodes > 100:
+                    success_msg += f" ({num_nodes} nodes, {G_weighted.number_of_edges()} edges)"
+                st.success(success_msg)
     
     with col2:
         st.subheader("🌐 Network Visualization")
@@ -329,23 +348,42 @@ def synthetic_data_interface():
             # Generate node names
             node_names = [f"Unit_{i}" for i in range(G.number_of_nodes())]
             
-            # Create network visualization
-            generator = OrganizationalNetworkGenerator()
-            fig = generator.create_plotly_visualization(
-                G, node_names, 
-                title=f"{selected_type['name']} Network ({G.number_of_nodes()} nodes, {G.number_of_edges()} edges)"
-            )
-            st.plotly_chart(fig, use_container_width=True)
+            # Show visualization for reasonable sizes, statistics for all
+            if G.number_of_nodes() <= 200:
+                # Create network visualization for smaller networks
+                generator = OrganizationalNetworkGenerator()
+                fig = generator.create_plotly_visualization(
+                    G, node_names, 
+                    title=f"{selected_type['name']} Network ({G.number_of_nodes()} nodes, {G.number_of_edges()} edges)"
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                # For large networks, show summary instead of visualization
+                st.info(f"🏢 **Large Network Generated**\n\n"
+                       f"Network too large for visualization ({G.number_of_nodes()} nodes)\n"
+                       f"Showing statistics and analysis instead.")
+                
+                # Show degree distribution for large networks
+                degrees = [G.degree(n) for n in G.nodes()]
+                degree_fig = px.histogram(
+                    x=degrees, 
+                    title=f"Degree Distribution - {selected_type['name']} Network",
+                    labels={"x": "Node Degree", "y": "Count"}
+                )
+                st.plotly_chart(degree_fig, use_container_width=True)
             
-            # Network statistics
-            col2a, col2b, col2c = st.columns(3)
+            # Network statistics (always shown)
+            col2a, col2b, col2c, col2d = st.columns(4)
             with col2a:
                 st.metric("Nodes", G.number_of_nodes())
             with col2b:
                 st.metric("Edges", G.number_of_edges())
             with col2c:
                 actual_density = G.number_of_edges() / (G.number_of_nodes() * (G.number_of_nodes() - 1))
-                st.metric("Actual Density", f"{actual_density:.3f}")
+                st.metric("Actual Density", f"{actual_density:.4f}")
+            with col2d:
+                avg_degree = 2 * G.number_of_edges() / G.number_of_nodes()
+                st.metric("Avg Degree", f"{avg_degree:.1f}")
             
         else:
             st.info("👆 Generate a network using the controls on the left to see the visualization here.")
@@ -361,8 +399,34 @@ def synthetic_data_interface():
             flow_matrix = st.session_state.flow_matrix
             node_names = [f"Unit_{i}" for i in range(flow_matrix.shape[0])]
             
-            preview_df = pd.DataFrame(flow_matrix, index=node_names, columns=node_names)
-            st.dataframe(preview_df.round(1))
+            # Show different preview based on size
+            if flow_matrix.shape[0] <= 25:
+                # Full matrix for small networks
+                preview_df = pd.DataFrame(flow_matrix, index=node_names, columns=node_names)
+                st.dataframe(preview_df.round(1))
+            else:
+                # Summary statistics for large networks
+                st.write(f"**Matrix Size**: {flow_matrix.shape[0]} × {flow_matrix.shape[0]}")
+                st.write(f"**Total Flow**: {np.sum(flow_matrix):.1f}")
+                st.write(f"**Non-zero Connections**: {np.count_nonzero(flow_matrix)}")
+                st.write(f"**Average Flow**: {np.mean(flow_matrix[flow_matrix > 0]):.1f}")
+                st.write(f"**Max Flow**: {np.max(flow_matrix):.1f}")
+                
+                # Show top flows
+                if st.checkbox("Show Top 10 Flows"):
+                    # Find top flows
+                    flows = []
+                    for i in range(flow_matrix.shape[0]):
+                        for j in range(flow_matrix.shape[1]):
+                            if flow_matrix[i, j] > 0:
+                                flows.append({
+                                    'From': f"Unit_{i}",
+                                    'To': f"Unit_{j}", 
+                                    'Flow': flow_matrix[i, j]
+                                })
+                    
+                    flows_df = pd.DataFrame(flows).sort_values('Flow', ascending=False).head(10)
+                    st.dataframe(flows_df)
             
             if st.button("🔍 Run Full Analysis", type="secondary"):
                 run_analysis(flow_matrix, node_names, org_name)
