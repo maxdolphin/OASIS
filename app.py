@@ -79,7 +79,7 @@ def main():
     st.sidebar.title("🎛️ Control Panel")
     analysis_mode = st.sidebar.radio(
         "Choose Analysis Mode:",
-        ["📊 Upload Data", "🧪 Use Sample Data", "⚡ Generate Synthetic Data", "📚 Learn More"]
+        ["📊 Upload Data", "🧪 Use Sample Data", "⚡ Generate Synthetic Data", "📚 Learn More", "🔬 Formulas Reference"]
     )
     
     if analysis_mode == "📊 Upload Data":
@@ -90,6 +90,8 @@ def main():
         synthetic_data_interface()
     elif analysis_mode == "📚 Learn More":
         learn_more_interface()
+    elif analysis_mode == "🔬 Formulas Reference":
+        formulas_reference_interface()
 
 def upload_data_interface():
     """Interface for uploading custom data."""
@@ -260,6 +262,12 @@ def synthetic_data_interface():
             help="Higher formality means more formal documents and procedures"
         )
         
+        organization_age = st.slider(
+            "Organization Age (years):",
+            min_value=1, max_value=50, value=5,
+            help="Older organizations tend to have more established communication patterns and formal procedures"
+        )
+        
         st.subheader("🎲 Randomization")
         use_random_seed = st.checkbox("Use random seed for reproducibility", value=True)
         if use_random_seed:
@@ -271,7 +279,7 @@ def synthetic_data_interface():
         if len(departments) >= 3:
             with st.spinner("Generating synthetic organizational data..."):
                 flow_matrix, node_names = generate_synthetic_organization(
-                    departments, communication_intensity.lower(), formality_level.lower(), random_seed
+                    departments, communication_intensity.lower(), formality_level.lower(), organization_age, random_seed
                 )
                 
                 st.success(f"✅ Generated synthetic data for {org_name}")
@@ -284,7 +292,7 @@ def synthetic_data_interface():
                 # Run analysis
                 run_analysis(flow_matrix, node_names, org_name)
 
-def generate_synthetic_organization(departments, intensity, formality, seed):
+def generate_synthetic_organization(departments, intensity, formality, age, seed):
     """Generate synthetic organizational data."""
     
     if seed:
@@ -307,6 +315,21 @@ def generate_synthetic_organization(departments, intensity, formality, seed):
     
     email_params = intensity_params[intensity]
     doc_params = formality_params[formality]
+    
+    # Age effects: older organizations have more established patterns
+    age_factor = 1 + (age - 1) * 0.1  # 10% increase per year beyond first year
+    hierarchy_factor = min(2.0, 1 + age * 0.05)  # More hierarchical patterns with age
+    
+    # Adjust parameters based on age
+    email_params = {
+        "base": email_params["base"] * age_factor,
+        "variance": email_params["variance"] * (1 / age_factor)  # Less variance in older orgs
+    }
+    
+    doc_params = {
+        "base": doc_params["base"] * age_factor * hierarchy_factor,
+        "variance": doc_params["variance"] * (1 / age_factor)
+    }
     
     # Generate email flows
     email_matrix = np.zeros((n_depts, n_depts))
@@ -498,38 +521,67 @@ def create_robustness_curve(metrics):
     efficiency_range = np.linspace(0.01, 0.99, 100)
     development_capacity = metrics['development_capacity']
     
-    robustness_values = []
+    # Create normalized robustness curve (shape only, not absolute values)
+    normalized_robustness = []
     for eff in efficiency_range:
-        robustness = eff * (1 - eff) * np.log(development_capacity) if development_capacity > 0 else 0
-        robustness_values.append(max(0, robustness))
+        # Normalized robustness function (without log(C) scaling)
+        robustness_shape = eff * (1 - eff)
+        normalized_robustness.append(robustness_shape)
+    
+    # Scale the curve to make it visible relative to current organization
+    max_shape = max(normalized_robustness)
+    current_efficiency = metrics['network_efficiency'] 
+    current_robustness = metrics['robustness']
+    
+    # Scale curve so current organization's theoretical position matches actual
+    if current_efficiency > 0 and max_shape > 0:
+        theoretical_shape = current_efficiency * (1 - current_efficiency)
+        scale_factor = current_robustness / theoretical_shape if theoretical_shape > 0 else 1
+    else:
+        scale_factor = 1
+    
+    scaled_robustness = [r * scale_factor for r in normalized_robustness]
     
     fig = go.Figure()
     
-    # Robustness curve
-    fig.add_trace(go.Scatter(x=efficiency_range, y=robustness_values, mode='lines',
-                            name='Robustness Curve', line=dict(width=3, color='blue')))
+    # Robustness curve (normalized and scaled)
+    fig.add_trace(go.Scatter(x=efficiency_range, y=scaled_robustness, mode='lines',
+                            name='Theoretical Robustness Curve', line=dict(width=3, color='blue', dash='dot')))
     
-    # Current position
-    current_efficiency = metrics['network_efficiency']
-    current_robustness = metrics['robustness']
+    # Current organization position (actual calculated robustness)
     fig.add_trace(go.Scatter(x=[current_efficiency], y=[current_robustness], mode='markers',
                             marker=dict(size=15, color='red'), name='Your Organization',
                             hovertemplate='Your Position<br>Efficiency: %{x:.3f}<br>Robustness: %{y:.3f}<extra></extra>'))
     
-    # Optimal point
-    optimal_efficiency = 0.37
-    optimal_robustness = optimal_efficiency * (1 - optimal_efficiency) * np.log(development_capacity)
-    fig.add_trace(go.Scatter(x=[optimal_efficiency], y=[optimal_robustness], mode='markers',
-                            marker=dict(size=12, color='green', symbol='star'), name='Theoretical Optimum',
-                            hovertemplate='Optimal Point<br>Efficiency: %{x:.3f}<br>Robustness: %{y:.3f}<extra></extra>'))
+    # Mathematical peak (50% efficiency - theoretical maximum)
+    math_optimal_efficiency = 0.5
+    math_optimal_robustness = math_optimal_efficiency * (1 - math_optimal_efficiency) * scale_factor
+    fig.add_trace(go.Scatter(x=[math_optimal_efficiency], y=[math_optimal_robustness], mode='markers',
+                            marker=dict(size=12, color='green', symbol='star'), name='Mathematical Peak',
+                            hovertemplate='Theoretical Maximum<br>Efficiency: %{x:.3f}<br>Peak Robustness: %{y:.3f}<extra></extra>'))
+    
+    # Empirical optimum (37% efficiency - Ulanowicz's research finding)
+    empirical_optimal_efficiency = 0.37
+    empirical_optimal_robustness = empirical_optimal_efficiency * (1 - empirical_optimal_efficiency) * scale_factor
+    fig.add_trace(go.Scatter(x=[empirical_optimal_efficiency], y=[empirical_optimal_robustness], mode='markers',
+                            marker=dict(size=10, color='orange', symbol='diamond'), name='Empirical Optimum',
+                            hovertemplate='Ulanowicz Optimum<br>Efficiency: %{x:.3f}<br>Real-world Peak: %{y:.3f}<extra></extra>'))
     
     # Add viability bounds
     fig.add_vrect(x0=0.2, x1=0.6, fillcolor="green", opacity=0.1, 
                   annotation_text="Window of Viability", annotation_position="top left")
     
+    # Add annotations
+    fig.add_annotation(
+        x=current_efficiency, y=current_robustness,
+        text=f"Your Org<br>α={current_efficiency:.3f}",
+        showarrow=True, arrowhead=2, arrowsize=1, arrowwidth=2, arrowcolor="red",
+        xshift=20, yshift=20
+    )
+    
     fig.update_layout(
-        title='System Robustness vs Network Efficiency<br><sub>Find the Sweet Spot Between Order and Chaos</sub>',
-        xaxis_title='Network Efficiency (A/C) - Organization Level',
+        title='System Robustness vs Network Efficiency<br><sub>Your Organization\'s Position Relative to Theoretical Optimum</sub>',
+        xaxis_title='Network Efficiency (α = A/C) - Relative Ascendency',
         yaxis_title='Robustness - Ability to Handle Disturbances',
         template='plotly_white',
         height=500
@@ -890,5 +942,259 @@ def learn_more_interface():
         - Ecosystem management
         """)
 
+def formulas_reference_interface():
+    """Complete formulas reference for all indicators."""
+    
+    st.header("🔬 Complete Formulas Reference")
+    st.markdown("""
+    This page contains all mathematical formulations used in the Adaptive Organization Analysis system,
+    organized by category and based on peer-reviewed scientific literature.
+    """)
+    
+    # Create tabs for different categories
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "🧮 Core Ulanowicz IT", "🌱 Regenerative Economics", "📊 Network Analysis", 
+        "🎯 Sustainability Metrics", "⚙️ Extended Indicators"
+    ])
+    
+    with tab1:
+        st.subheader("🧮 Core Information Theory Formulations")
+        st.markdown("*Based on Ulanowicz et al. (2009) - Foundational paper*")
+        
+        st.markdown("""
+        ### **Total System Throughput (TST)**
+        ```
+        TST = Σ T_ij
+        ```
+        Where T_ij is the flow from compartment i to compartment j
+        
+        ### **Development Capacity (C)** 
+        ```
+        C = -Σ(T_ij × log(T_ij / T··))
+        ```
+        - **Equation (11)** from Ulanowicz et al. (2009)
+        - Represents scaled system indeterminacy
+        - Units: flow-bits
+        
+        ### **Ascendency (A)**
+        ```
+        A = Σ(T_ij × log(T_ij × T·· / (T_i· × T_·j)))
+        ```
+        - **Equation (12)** from Ulanowicz et al. (2009)
+        - Scaled mutual constraint (organized power)
+        - Units: flow-bits
+        
+        ### **Reserve (Φ)**
+        ```
+        Φ = C - A
+        ```
+        - **Equation (14)** from Ulanowicz et al. (2009)
+        - System flexibility and reserve capacity
+        - Units: flow-bits
+        
+        ### **Relative Ascendency (α)**
+        ```
+        α = A / C
+        ```
+        - **Key sustainability metric**
+        - Dimensionless ratio (0 to 1)
+        - Optimal range: 0.2 - 0.6
+        
+        ### **Fundamental Relationship**
+        ```
+        C = A + Φ
+        ```
+        - **Mathematical constraint** from Information Theory
+        - Used for validation (should hold exactly)
+        """)
+    
+    with tab2:
+        st.subheader("🌱 Regenerative Economics Formulations")
+        st.markdown("*Based on Fath & Ulanowicz (2019) and Goerner et al. (2009)*")
+        
+        st.markdown("""
+        ### **Robustness (R)**
+        ```
+        R = (A/C) × (1 - A/C) × log(C)
+        ```
+        - **Fath-Ulanowicz formulation**
+        - Balances efficiency with resilience
+        - Peak occurs around α = 0.37 (empirically)
+        
+        ### **Flow Diversity (H)**
+        ```
+        H = -Σ(p_ij × log(p_ij))
+        where p_ij = T_ij / TST
+        ```
+        - **Shannon entropy** of flow distribution
+        - Higher values = more evenly distributed flows
+        
+        ### **Structural Information (SI)**
+        ```
+        SI = log(n²) - H
+        ```
+        - Network constraint independent of magnitudes
+        - n = number of nodes
+        
+        ### **Regenerative Capacity**
+        ```
+        RC = R × (1 - |α - α_opt|)
+        where α_opt = 0.37
+        ```
+        - Combines robustness with distance from optimum
+        - Measures self-renewal potential
+        """)
+    
+    with tab3:
+        st.subheader("📊 Network Analysis Formulations")
+        
+        st.markdown("""
+        ### **Network Efficiency**
+        ```
+        Efficiency = A / C = α
+        ```
+        - Same as relative ascendency
+        - Measures organizational constraint
+        
+        ### **Redundancy**
+        ```
+        Redundancy = Φ / C = 1 - α
+        ```
+        - Alternative pathways and backup capacity
+        - Complement of efficiency
+        
+        ### **Average Mutual Information (AMI)**
+        ```
+        AMI = Σ(T_ij × log(T_ij × TST / (T_i· × T_·j))) / TST
+        ```
+        - Degree of organization in flow patterns
+        - Higher values = more structured
+        
+        ### **Effective Link Density**
+        ```
+        ELD = (L_active / L_max) × (AMI / AMI_max)
+        ```
+        - L_active = number of non-zero flows
+        - L_max = n²
+        - Weighted by information content
+        
+        ### **Trophic Depth**
+        ```
+        TD = Average shortest path length (weighted)
+        ```
+        - Calculated using NetworkX algorithms
+        - Indicates hierarchical organization
+        """)
+    
+    with tab4:
+        st.subheader("🎯 Sustainability Assessment Formulations")
+        
+        st.markdown("""
+        ### **Window of Viability**
+        ```
+        Lower Bound = 0.2 × C
+        Upper Bound = 0.6 × C
+        Viable = Lower Bound ≤ A ≤ Upper Bound
+        ```
+        - **Empirical bounds** from Ulanowicz research
+        - Based on natural ecosystem observations
+        
+        ### **Sustainability Classification**
+        ```
+        if α < 0.2:  "Too chaotic (low organization)"
+        if α > 0.6:  "Too rigid (over-organized)" 
+        if 0.2 ≤ α ≤ 0.6:  "Viable system"
+        ```
+        
+        ### **Optimal Robustness Point**
+        ```
+        Mathematical Peak: α = 0.5 (derivative = 0)
+        Empirical Optimum: α = 0.37 (Ulanowicz research)
+        ```
+        
+        ### **Health Assessment Logic**
+        ```
+        Robustness: HIGH (>0.25), MODERATE (0.15-0.25), LOW (<0.15)
+        Efficiency: OPTIMAL (0.2-0.6), LOW (<0.2), HIGH (>0.6)
+        Resilience: Based on redundancy and diversity thresholds
+        ```
+        """)
+    
+    with tab5:
+        st.subheader("⚙️ Extended Indicator Formulations")
+        
+        st.markdown("""
+        ### **Input/Output Throughput**
+        ```
+        T_i· = Σ_j T_ij  (output from node i)
+        T_·j = Σ_i T_ij  (input to node j)
+        ```
+        
+        ### **Total Throughput per Node**
+        ```
+        TT_k = T_k· + T_·k
+        ```
+        - Sum of all flows through node k
+        
+        ### **Flow Balance**
+        ```
+        Balance_k = T_k· - T_·k
+        ```
+        - Positive = net outflow, Negative = net inflow
+        
+        ### **Network Density**
+        ```
+        Density = L_active / L_possible
+        where L_possible = n × (n-1)
+        ```
+        - Fraction of possible connections actually used
+        
+        ### **Validation Metrics**
+        ```
+        Fundamental Error = |C - (A + Φ)| / C
+        Valid = Error < 0.001 (0.1% tolerance)
+        ```
+        - Mathematical consistency check
+        """)
+    
+    # Mathematical notation guide
+    st.markdown("---")
+    st.subheader("📝 Notation Guide")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("""
+        **Flow Variables:**
+        - `T_ij` = Flow from node i to node j
+        - `T_i·` = Total outflow from node i
+        - `T_·j` = Total inflow to node j  
+        - `T··` = Total system throughput (TST)
+        - `n` = Number of nodes/compartments
+        """)
+    
+    with col2:
+        st.markdown("""
+        **Information Theory:**
+        - `log` = Natural logarithm (ln)
+        - `Σ` = Summation over all flows
+        - `α` = Alpha (relative ascendency)
+        - `Φ` = Phi (reserve/overhead)
+        - Units: "flow-bits" for information measures
+        """)
+
+def show_app_version():
+    """Display app version information."""
+    st.markdown("---")
+    st.markdown("""
+    <div style="text-align: center; color: #666; font-size: 0.9rem; margin-top: 2rem;">
+        <strong>Adaptive Organization Analysis System</strong><br>
+        Version 2.0.0 - Information Theory Corrected<br>
+        Built with Ulanowicz-Fath Regenerative Economics Framework<br>
+        <em>Phase 1 Complete: Core IT Formulations Implemented</em>
+    </div>
+    """, unsafe_allow_html=True)
+
 if __name__ == "__main__":
     main()
+    show_app_version()
