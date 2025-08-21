@@ -1,0 +1,29 @@
+{
+  "organization": "Mondego Estuary",
+  "nodes": [
+    "Phytoplankton",
+    "Macroalgae",
+    "Zooplankton",
+    "Benthic_Invertebrates",
+    "Fish",
+    "Birds",
+    "Detritus"
+  ],
+  "flows": [
+    [0, 0, 850, 200, 150, 0, 2800],
+    [0, 0, 0, 600, 100, 0, 3200],
+    [0, 0, 0, 0, 450, 50, 300],
+    [0, 0, 0, 100, 350, 150, 800],
+    [0, 0, 0, 0, 50, 100, 450],
+    [0, 0, 0, 0, 0, 0, 200],
+    [1500, 1200, 400, 1800, 200, 50, 0]
+  ],
+  "metadata": {
+    "source": "Patrício, J. & Marques, J.C. (2006) Mass balanced models of Mondego Estuary",
+    "description": "Estuarine food web from Mondego Estuary, Portugal",
+    "units": "mgC/m²/day",
+    "note": "Temperate Atlantic estuary ecosystem",
+    "ecosystem_type": "Estuarine",
+    "location": "Portugal"
+  }
+}

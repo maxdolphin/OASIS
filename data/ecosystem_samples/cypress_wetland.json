@@ -1,0 +1,28 @@
+{
+  "organization": "Cypress Wetland",
+  "nodes": [
+    "Cypress_Trees",
+    "Herbs_Shrubs",
+    "Insects",
+    "Fish",
+    "Birds_Reptiles",
+    "Detritus",
+    "Dissolved_Organic"
+  ],
+  "flows": [
+    [0, 0, 150, 0, 25, 3500, 200],
+    [0, 0, 250, 0, 50, 1800, 150],
+    [0, 0, 50, 120, 80, 400, 0],
+    [0, 0, 0, 30, 150, 200, 0],
+    [0, 0, 0, 0, 20, 180, 0],
+    [1200, 800, 600, 250, 100, 500, 1500],
+    [500, 300, 200, 100, 50, 2000, 0]
+  ],
+  "metadata": {
+    "source": "Ulanowicz, R.E. & Wulff, F. (1991) Comparing ecosystem structures",
+    "description": "Carbon flow in Cypress Dome ecosystem, Florida",
+    "units": "gC/m²/year",
+    "note": "Wetland ecosystem with 7 compartments",
+    "ecosystem_type": "Freshwater wetland"
+  }
+}

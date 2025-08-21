@@ -177,10 +177,10 @@ def upload_data_interface():
 def sample_data_interface():
     """Interface for using built-in and user-saved sample data."""
     
-    st.header("🧪 Analyze Sample Organizations")
-    st.markdown("Choose from built-in samples or your saved networks from the Visual Network Generator.")
+    st.header("🧪 Analyze Sample Organizations & Ecosystems")
+    st.markdown("Choose from organizational samples, real ecosystems from scientific literature, or your saved networks.")
     
-    # Load all available datasets (built-in + user-saved)
+    # Load all available datasets (built-in + user-saved + ecosystems)
     all_datasets = load_all_sample_datasets()
     
     if not all_datasets:
@@ -189,21 +189,49 @@ def sample_data_interface():
     
     # Organize datasets by type for better UX
     builtin_datasets = {k: v for k, v in all_datasets.items() if v["type"] == "builtin"}
+    ecosystem_datasets = {k: v for k, v in all_datasets.items() if v["type"] == "ecosystem"}
     user_datasets = {k: v for k, v in all_datasets.items() if v["type"] == "user_saved"}
     
     # Show counts
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     with col1:
-        st.info(f"📁 **Built-in Samples**: {len(builtin_datasets)}")
+        st.info(f"📁 **Samples**: {len(builtin_datasets)}")
     with col2:
-        st.info(f"💾 **Your Saved Networks**: {len(user_datasets)}")
+        st.info(f"🌿 **Ecosystems**: {len(ecosystem_datasets)}")
+    with col3:
+        st.info(f"💾 **Your Networks**: {len(user_datasets)}")
     
     # Dataset selection
     selected_dataset = st.selectbox("Choose an organization:", list(all_datasets.keys()))
     dataset_info = all_datasets[selected_dataset]
     
-    # Show metadata for user-saved networks
-    if dataset_info["type"] == "user_saved" and "metadata" in dataset_info:
+    # Show metadata based on dataset type
+    if dataset_info["type"] == "ecosystem" and "metadata" in dataset_info:
+        metadata = dataset_info["metadata"]
+        
+        with st.expander("🌿 Ecosystem Details", expanded=True):
+            st.write(f"**Source**: {metadata.get('source', 'N/A')}")
+            st.write(f"**Description**: {metadata.get('description', 'N/A')}")
+            st.write(f"**Units**: {metadata.get('units', 'N/A')}")
+            
+            # Show published metrics if available
+            published = metadata.get('published_metrics', {})
+            if published:
+                st.subheader("📊 Published Metrics")
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    if 'total_system_throughput' in published:
+                        st.metric("TST", f"{published['total_system_throughput']:.0f}")
+                with col2:
+                    if 'ascendency' in published:
+                        st.metric("Ascendency", f"{published['ascendency']:.0f}")
+                with col3:
+                    if 'ascendency_ratio' in published:
+                        st.metric("A/C Ratio", f"{published['ascendency_ratio']:.3f}")
+                if 'note' in published:
+                    st.info(f"📝 {published['note']}")
+    
+    elif dataset_info["type"] == "user_saved" and "metadata" in dataset_info:
         metadata = dataset_info["metadata"]
         
         with st.expander("📋 Network Details", expanded=True):
@@ -581,11 +609,31 @@ def load_all_sample_datasets():
     }
     
     # Add built-in datasets
+    import os
     for name, path in builtin_datasets.items():
-        datasets[f"📁 {name}"] = {"path": path, "type": "builtin"}
+        if os.path.exists(path):
+            datasets[f"📁 {name}"] = {"path": path, "type": "builtin"}
+    
+    # Load ecosystem samples
+    ecosystem_dir = "data/ecosystem_samples"
+    if os.path.exists(ecosystem_dir):
+        ecosystem_files = [f for f in os.listdir(ecosystem_dir) if f.endswith('.json')]
+        for filename in ecosystem_files:
+            filepath = os.path.join(ecosystem_dir, filename)
+            try:
+                with open(filepath, 'r') as f:
+                    data = json.load(f)
+                
+                org_name = data.get('organization', filename.replace('.json', ''))
+                datasets[f"🌿 {org_name}"] = {
+                    "path": filepath,
+                    "type": "ecosystem",
+                    "metadata": data.get('metadata', {})
+                }
+            except Exception as e:
+                continue
     
     # Load user-saved datasets
-    import os
     user_dir = "data/user_saved_networks"
     if os.path.exists(user_dir):
         user_files = [f for f in os.listdir(user_dir) if f.endswith('.json')]

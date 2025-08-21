@@ -107,7 +107,7 @@ class UlanowiczCalculator:
                     if output_i > 0 and input_j > 0:
                         # Calculate mutual information term
                         ratio = (flow_ij * tst) / (output_i * input_j)
-                        ami_sum += flow_ij * math.log(ratio)
+                        ami_sum += flow_ij * math.log2(ratio)
         
         return ami_sum / tst if tst > 0 else 0
     
@@ -139,7 +139,7 @@ class UlanowiczCalculator:
                     if output_i > 0 and input_j > 0:
                         # Direct ascendency calculation
                         ratio = (flow_ij * tst) / (output_i * input_j)
-                        ascendency_sum += flow_ij * math.log(ratio)
+                        ascendency_sum += flow_ij * math.log2(ratio)
         
         return ascendency_sum
     
@@ -166,7 +166,7 @@ class UlanowiczCalculator:
                 flow_ij = self.flow_matrix[i, j]
                 if flow_ij > 0:
                     # Direct capacity calculation: T_ij * log(T_ij / T··)
-                    capacity_sum += flow_ij * math.log(flow_ij / tst)
+                    capacity_sum += flow_ij * math.log2(flow_ij / tst)
         
         return -capacity_sum
     
@@ -362,7 +362,7 @@ class UlanowiczCalculator:
                 flow_ij = self.flow_matrix[i, j]
                 if flow_ij > 0:
                     p_ij = flow_ij / tst
-                    diversity_sum += p_ij * math.log(p_ij)
+                    diversity_sum += p_ij * math.log2(p_ij)
         
         return -diversity_sum
     
@@ -379,7 +379,7 @@ class UlanowiczCalculator:
         Returns:
             Structural Information value
         """
-        max_diversity = math.log(self.n_nodes ** 2)
+        max_diversity = math.log2(self.n_nodes ** 2)
         flow_diversity = self.calculate_flow_diversity()
         return max_diversity - flow_diversity
     
@@ -404,7 +404,11 @@ class UlanowiczCalculator:
             return 0
         
         a_c_ratio = ascendency / development_capacity
-        robustness = a_c_ratio * (1 - a_c_ratio) * math.log(development_capacity)
+        # Correct robustness formula: R = -α·log₂(α)
+        if 0 < a_c_ratio < 1:
+            robustness = -a_c_ratio * math.log2(a_c_ratio)
+        else:
+            robustness = 0
         
         return max(0, robustness)  # Ensure non-negative
     
@@ -445,7 +449,7 @@ class UlanowiczCalculator:
         
         # Weight by flow distribution
         ami = self.calculate_ami()
-        max_ami = math.log(max_links) if max_links > 0 else 0
+        max_ami = math.log2(max_links) if max_links > 0 else 0
         
         if max_ami == 0:
             return active_links / max_links

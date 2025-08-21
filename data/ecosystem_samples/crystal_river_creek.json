@@ -1,0 +1,32 @@
+{
+  "organization": "Crystal River Creek",
+  "nodes": [
+    "Primary_Producers",
+    "Herbivores",
+    "Carnivores",
+    "Top_Carnivores",
+    "Decomposers",
+    "Detritus"
+  ],
+  "flows": [
+    [0, 8881, 0, 0, 0, 20410],
+    [0, 0, 2309, 0, 0, 3530],
+    [0, 0, 0, 370, 0, 1600],
+    [0, 0, 0, 0, 0, 167],
+    [0, 0, 0, 0, 0, 5205],
+    [11184, 860, 1600, 75, 3275, 0]
+  ],
+  "metadata": {
+    "source": "Ulanowicz, R.E. (1986) Growth and Development: Ecosystems Phenomenology",
+    "description": "Energy flow network from Crystal River Creek, Florida",
+    "units": "kcal/m²/year",
+    "note": "Crystal River control ecosystem - energy flows",
+    "published_metrics": {
+      "total_system_throughput": 97916,
+      "development_capacity": 204355,
+      "ascendency": 112891,
+      "overhead": 91464,
+      "ascendency_ratio": 0.552
+    }
+  }
+}

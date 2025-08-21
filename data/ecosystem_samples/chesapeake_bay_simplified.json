@@ -1,0 +1,23 @@
+{
+  "organization": "Chesapeake Bay (Simplified)",
+  "nodes": [
+    "Phytoplankton",
+    "Zooplankton",
+    "Benthic_Filter_Feeders",
+    "Deposit_Feeders",
+    "Fish"
+  ],
+  "flows": [
+    [0, 2500, 1200, 0, 300],
+    [0, 0, 0, 0, 800],
+    [0, 0, 0, 0, 200],
+    [0, 0, 0, 0, 100],
+    [0, 0, 0, 0, 0]
+  ],
+  "metadata": {
+    "source": "Simplified from Baird & Ulanowicz (1989)",
+    "description": "Simplified trophic network of Chesapeake Bay",
+    "units": "mgC/m²/day",
+    "note": "Simplified 5-node version for demonstration"
+  }
+}

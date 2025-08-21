@@ -1,0 +1,33 @@
+{
+  "organization": "Cone Spring Ecosystem",
+  "nodes": [
+    "Plants",
+    "Bacteria", 
+    "Detritus",
+    "Detritivores",
+    "Carnivores"
+  ],
+  "flows": [
+    [2003, 0, 8881, 0, 0],
+    [0, 3275, 255, 0, 0],
+    [0, 5205, 635, 2309, 0],
+    [0, 0, 200, 167, 203],
+    [0, 0, 370, 0, 1814]
+  ],
+  "metadata": {
+    "source": "Ulanowicz & Norden (1990) Int. J. Systems Sci. 21(2), 429-437",
+    "description": "Carbon flow network from Cone Spring, Florida",
+    "units": "mgC/m²/day",
+    "imports": [11184, 300, 860, 0, 0],
+    "exports": [2003, 860, 3109, 75, 1814],
+    "respirations": [3280, 1600, 5205, 255, 370],
+    "published_metrics": {
+      "total_system_throughput": 42016,
+      "development_capacity": 135000,
+      "ascendency": 68191,
+      "overhead": 66809,
+      "ascendency_ratio": 0.505,
+      "note": "Values from Table 1, using log₂"
+    }
+  }
+}

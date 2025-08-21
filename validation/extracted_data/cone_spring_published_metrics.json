@@ -1,0 +1,53 @@
+{
+  "source": "Ulanowicz, R.E. and Norden, J.S. (1990) Symmetrical overhead in flow networks. Int. J. Systems Sci. 21(2), 429-437",
+  "table": "Table 1 - System indices",
+  "note": "Published values using log base 2 (bits)",
+  "metrics": {
+    "total_system_throughput": {
+      "value": 42016,
+      "units": "mgC/m²/day",
+      "description": "Sum of all flows"
+    },
+    "development_capacity": {
+      "value": 135000,
+      "units": "mgC·bits/m²/day",
+      "description": "C = -Σ(T_ij × log₂(T_ij/TST))"
+    },
+    "ascendency": {
+      "value": 68191,
+      "units": "mgC·bits/m²/day", 
+      "description": "A = Σ(T_ij × log₂((T_ij×TST)/(T_i·×T_·j)))"
+    },
+    "overhead": {
+      "value": 66809,
+      "units": "mgC·bits/m²/day",
+      "description": "Φ = C - A"
+    },
+    "ascendency_ratio": {
+      "value": 0.505,
+      "units": "dimensionless",
+      "description": "A/C ratio"
+    },
+    "overhead_ratio": {
+      "value": 0.495,
+      "units": "dimensionless",
+      "description": "Φ/C ratio"
+    },
+    "average_mutual_information": {
+      "value": 1.623,
+      "units": "bits",
+      "description": "AMI = A/TST"
+    },
+    "statistical_entropy": {
+      "value": 3.213,
+      "units": "bits",
+      "description": "H = C/TST"
+    },
+    "residual_diversity": {
+      "value": 1.590,
+      "units": "bits",
+      "description": "Ψ = Φ/TST = H - AMI"
+    }
+  },
+  "extended_matrix_note": "Paper also includes 6x6 extended matrix with environment as node 0"
+}

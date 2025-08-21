@@ -1,0 +1,36 @@
+{
+  "organization": "Florida Bay",
+  "nodes": [
+    "Seagrass",
+    "Epiphytes",
+    "Phytoplankton",
+    "Benthic_Microalgae",
+    "Zooplankton",
+    "Meiofauna",
+    "Infauna",
+    "Pink_Shrimp",
+    "Fish",
+    "Detritus"
+  ],
+  "flows": [
+    [0, 1200, 0, 0, 0, 0, 300, 100, 200, 4500],
+    [0, 0, 0, 0, 150, 50, 200, 0, 100, 1500],
+    [0, 0, 0, 0, 800, 0, 0, 50, 150, 1000],
+    [0, 0, 0, 0, 0, 200, 400, 0, 100, 1300],
+    [0, 0, 0, 0, 0, 0, 0, 100, 300, 400],
+    [0, 0, 0, 0, 0, 0, 150, 50, 100, 200],
+    [0, 0, 0, 0, 0, 0, 0, 150, 200, 650],
+    [0, 0, 0, 0, 0, 0, 0, 0, 250, 100],
+    [0, 0, 0, 0, 0, 0, 0, 0, 50, 850],
+    [800, 600, 500, 900, 350, 400, 1200, 200, 300, 0]
+  ],
+  "metadata": {
+    "source": "Ulanowicz et al. (1998) Network analysis of Florida Bay ecosystem",
+    "description": "Shallow marine ecosystem food web from Florida Bay",
+    "units": "mgC/m²/day",
+    "note": "Subtropical seagrass-dominated ecosystem",
+    "ecosystem_type": "Marine bay",
+    "compartments": 10,
+    "location": "Florida, USA"
+  }
+}
