@@ -2040,43 +2040,138 @@ def formulas_reference_interface():
         """)
     
     with tab2:
-        st.subheader("🌱 Regenerative Economics Formulations")
-        st.markdown("*Based on Fath & Ulanowicz (2019) and Goerner et al. (2009)*")
+        st.subheader("🔄 Fath et al. (2019) - Measuring Regenerative Economics")
+        st.markdown("*Complete formulas from 'Measuring regenerative economics: 10 principles and measures undergirding systemic economic health'*")
+        
+        st.info("📚 **Reference**: Fath, B.D., Fiscus, D.A., Goerner, S.J., Berea, A., & Ulanowicz, R.E. (2019). Global Transitions, 1, 15-27.")
         
         st.markdown("""
-        ### **Robustness (R)**
+        ### **1. Network Aggradation (Cross-Scale Circulation)**
         ```
-        R = (A/C) × (1 - A/C) × log(C)
+        Network Aggradation = TST / Σzi
         ```
-        - **Fath-Ulanowicz formulation**
-        - Balances efficiency with resilience
-        - Peak occurs around α = 0.37 (empirically)
+        - **Principle 1**: Robust cross-scale circulation
+        - Ratio of Total System Throughput to total inputs
+        - Higher values indicate more internal circulation
         
-        ### **Flow Diversity (H)**
+        ### **2. Finn Cycling Index (Regenerative Re-investment)**
         ```
-        H = -Σ(p_ij × log(p_ij))
-        where p_ij = T_ij / TST
+        FCI = ΣTci / TST
+        where Tci = ((nii - 1) / nii) × Ti
         ```
-        - **Shannon entropy** of flow distribution
-        - Higher values = more evenly distributed flows
+        - **Principle 2**: Regenerative re-investment
+        - Fraction of total flow that is recycled
+        - nii = path multiplier from i back to i
         
-        ### **Structural Information (SI)**
+        ### **3. Ascendency (A) - Organization Measure**
+        ```
+        A = Σ(Fij × log(Fij × F.. / (Fi. × F.j)))
+        ```
+        - Core measure of system organization
+        - Fij = flow from i to j
+        - F.. = total system flow
+        
+        ### **4. Development Capacity (C) - System Potential**
+        ```
+        C = -Σ(Fij × log(Fij / F..))
+        ```
+        - Maximum potential for development
+        - Upper bound on system organization
+        
+        ### **5. Robustness (R) - System Health**
+        ```
+        Robustness = -α × log(α)
+        where α = A/C
+        ```
+        - **Principle 6**: Balance of efficiency & resilience
+        - Peak robustness at α ≈ 0.37
+        - Window of Vitality: 0.2 < α < 0.6
+        
+        ### **6. Functional Diversity (Roles)**
+        ```
+        Roles = Π((Fij × F.. / (Fi. × F.j))^(Fij/F..))
+        ```
+        - **Principle 7**: Sufficient diversity
+        - Number of distinct functional roles
+        - Product over all non-zero flows
+        
+        ### **7. Mutualism Index**
+        ```
+        Direct Effects Matrix: [Dij]
+        Total Effects (direct + indirect): N = Σ(B^m)
+        Mutualism = Count(Nij > 0 AND Nji > 0) / Total pairs
+        ```
+        - **Principle 8**: Mutually-beneficial relationships
+        - Ratio of mutualistic to total relationships
+        
+        ### **8. Constructive/Extractive Ratio**
+        ```
+        C/E Ratio = Value-Add Activities / Extractive Activities
+        ```
+        - **Principle 9**: Constructive over extractive
+        - Distinguishes building from extracting
+        
+        ### **9. Average Mutual Information (AMI)**
+        ```
+        AMI = Σ(Fij × log(Fij × F.. / (Fi. × F.j))) / F..
+        ```
+        - Degree of constraint in the network
+        - Normalized measure of organization
+        
+        ### **10. Window of Vitality Assessment**
+        ```
+        if α < 0.2: "Too little diversity" (Brittleness)
+        if 0.2 ≤ α ≤ 0.6: "Sustainable balance"
+        if α > 0.6: "Too little efficiency" (Stagnation)
+        ```
+        - Empirically validated bounds
+        - Based on ecosystem observations
+        """)
+    
+    with tab3:
+        st.subheader("🌱 Regenerative Economics Formulations")
+        st.markdown("*Extended formulations for regenerative capacity assessment*")
+        
+        st.markdown("""
+        ### **Regenerative Capacity**
+        ```
+        RC = Robustness × (1 - |α - α_opt|)
+        where α_opt = 0.37
+        ```
+        - Combines robustness with distance from optimum
+        - Measures self-renewal potential
+        
+        ### **Flow Diversity (Shannon Entropy)**
+        ```
+        H = -Σ(pij × log(pij))
+        where pij = Tij / TST
+        ```
+        - Evenness of flow distribution
+        - Higher values = more distributed flows
+        
+        ### **Structural Information**
         ```
         SI = log(n²) - H
         ```
         - Network constraint independent of magnitudes
         - n = number of nodes
         
-        ### **Regenerative Capacity**
+        ### **Redundancy Measure**
         ```
-        RC = R × (1 - |α - α_opt|)
-        where α_opt = 0.37
+        Redundancy = Φ / C = 1 - α
         ```
-        - Combines robustness with distance from optimum
-        - Measures self-renewal potential
+        - Alternative pathways and backup capacity
+        - Complement of efficiency
+        
+        ### **Effective Link Density**
+        ```
+        ELD = (L_active / L_max) × (AMI / AMI_max)
+        ```
+        - Weighted connectivity measure
+        - Accounts for both structure and flow
         """)
     
-    with tab3:
+    with tab4:
         st.subheader("📊 Network Analysis Formulations")
         
         st.markdown("""
@@ -2117,7 +2212,7 @@ def formulas_reference_interface():
         - Indicates hierarchical organization
         """)
     
-    with tab4:
+    with tab5:
         st.subheader("🎯 Sustainability Assessment Formulations")
         
         st.markdown("""
@@ -2151,7 +2246,7 @@ def formulas_reference_interface():
         ```
         """)
     
-    with tab5:
+    with tab6:
         st.subheader("⚙️ Extended Indicator Formulations")
         
         st.markdown("""
