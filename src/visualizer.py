@@ -205,7 +205,7 @@ class SustainabilityVisualizer:
         fig.add_trace(
             go.Bar(x=extended_names, y=extended_values,
                    name='Extended Metrics',
-                   marker_color=['red', 'cyan', 'magenta', 'yellow', 'lime']),
+                   marker_color=['#dc2626', '#06b6d4', '#a855f7', '#f59e0b', '#84cc16']),
             row=2, col=1
         )
         
@@ -247,7 +247,7 @@ class SustainabilityVisualizer:
                         else 0.5 if 'MODERATE' in assessment or 'VIABLE' in assessment
                         else 0.2 for assessment in self.assessments.values()]
         
-        colors = ['green' if score == 1 else 'yellow' if score == 0.5 else 'red' for score in health_scores]
+        colors = ['#10b981' if score == 1 else '#f59e0b' if score == 0.5 else '#dc2626' for score in health_scores]
         
         fig.add_trace(
             go.Bar(x=health_categories, y=health_scores,

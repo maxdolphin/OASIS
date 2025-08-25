@@ -56,7 +56,7 @@ st.markdown("""
         font-weight: bold;
     }
     .status-moderate {
-        color: #ffc107;
+        color: #f59e0b;
         font-weight: bold;
     }
 </style>
@@ -64,6 +64,21 @@ st.markdown("""
 
 def main():
     """Main application function."""
+    
+    # Initialize session state for page navigation
+    if 'current_page' not in st.session_state:
+        st.session_state.current_page = 'main'
+    if 'analysis_data' not in st.session_state:
+        st.session_state.analysis_data = None
+    
+    # Show different pages based on current state
+    if st.session_state.current_page == 'analysis':
+        show_analysis_page()
+    else:
+        show_main_page()
+
+def show_main_page():
+    """Show the main interface page."""
     
     # Header
     st.markdown('<h1 class="main-header">🌱 Adaptive Organization Analysis</h1>', unsafe_allow_html=True)
@@ -142,8 +157,17 @@ def upload_data_interface():
                 preview_df = pd.DataFrame(flow_matrix, index=node_names, columns=node_names)
                 st.dataframe(preview_df.round(2))
                 
-                # Run analysis
-                run_analysis(flow_matrix, node_names, org_name)
+                # Run analysis button
+                if st.button("🚀 Run Analysis", type="primary"):
+                    # Store data in session state and navigate to analysis page
+                    st.session_state.analysis_data = {
+                        'flow_matrix': flow_matrix,
+                        'node_names': node_names,
+                        'org_name': org_name,
+                        'source': 'uploaded'
+                    }
+                    st.session_state.current_page = 'analysis'
+                    st.rerun()
                 
             except Exception as e:
                 st.error(f"Error loading file: {str(e)}")
@@ -282,22 +306,15 @@ def sample_data_interface():
             node_names = data['nodes']
             org_name = data.get('organization', selected_dataset.split(' - ')[0])  # Clean up display name
             
-            st.success(f"✅ Loaded {org_name}")
-            
-            # Show dataset info
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("Nodes", len(node_names))
-            with col2:
-                st.metric("Total Flow", f"{np.sum(flow_matrix):.1f}")
-            with col3:
-                st.metric("Connections", int(np.count_nonzero(flow_matrix)))
-            with col4:
-                density = np.count_nonzero(flow_matrix) / (len(node_names) ** 2)
-                st.metric("Density", f"{density:.4f}")
-            
-            # Run analysis
-            run_analysis(flow_matrix, node_names, org_name)
+            # Store data in session state and navigate to analysis page
+            st.session_state.analysis_data = {
+                'flow_matrix': flow_matrix,
+                'node_names': node_names,
+                'org_name': org_name,
+                'source': 'sample_data'
+            }
+            st.session_state.current_page = 'analysis'
+            st.rerun()
             
         except Exception as e:
             st.error(f"Error loading sample data: {str(e)}")
@@ -317,232 +334,127 @@ def synthetic_data_interface():
     if 'flow_matrix' not in st.session_state:
         st.session_state.flow_matrix = None
     
-    # Main interface layout
-    col1, col2 = st.columns([1, 2])
+    # Network Controls section
+    st.subheader("🎛️ Network Controls")
     
-    with col1:
-        st.subheader("🎛️ Network Controls")
-        
-        # Organization info
-        org_name = st.text_input("Organization Name", "Generated Network Org")
-        
-        # Network structure selection
-        st.markdown("### 🏗️ Network Structure")
-        network_type = st.selectbox(
+    # Organization info
+    org_name = st.text_input("Organization Name", "Generated Network Org")
+    
+    # Network structure selection
+    st.markdown("### 🏗️ Network Structure")
+    network_type = st.selectbox(
             "Network Type:",
             options=list(NETWORK_TYPES.keys()),
             format_func=lambda x: NETWORK_TYPES[x]["name"],
             help="Choose the organizational structure pattern"
-        )
-        
-        # Show network description
-        selected_type = NETWORK_TYPES[network_type]
-        st.info(f"**{selected_type['description']}**\n\n"
-                f"Characteristics: {selected_type['characteristics']}\n\n"
-                f"Use cases: {selected_type['use_cases']}")
-        
-        # Size controls
-        st.markdown("### 📏 Size Controls")
-        num_nodes = st.slider("Number of Nodes:", 3, 1000, 10, 
-                             help="Number of departments/units in the organization")
-        
-        # Adjust density range based on network size for performance
-        if num_nodes > 100:
-            max_density = min(0.3, 500 / (num_nodes * (num_nodes - 1)))
-            density = st.slider("Network Density:", 0.01, max_density, min(0.1, max_density/2),
-                               help="Density limited for large networks to ensure performance")
-        else:
-            density = st.slider("Network Density:", 0.1, 0.8, 0.3,
-                               help="Fraction of possible connections that exist")
-        
-        # Flow controls
-        st.markdown("### 💧 Flow Parameters")
-        flow_range = st.slider("Flow Intensity Range:", 1, 100, (5, 50),
-                              help="Minimum and maximum flow values")
-        
-        hub_amplification = st.slider("Hub Amplification:", 0.0, 2.0, 0.5,
-                                     help="How much extra flow large hubs receive")
-        
-        # Additional parameters based on network type
-        if network_type == 'small_world':
-            rewiring_prob = st.slider("Rewiring Probability:", 0.1, 0.9, 0.3,
-                                     help="Probability of rewiring edges for shortcuts")
-        elif network_type == 'hierarchical':
-            branching_factor = st.slider("Branching Factor:", 2, 5, 2,
-                                        help="Number of subordinates per manager")
-        elif network_type == 'community':
-            num_communities = st.slider("Number of Communities:", 2, 6, 3,
-                                       help="Number of distinct departments/groups")
-        
-        # Randomization
-        st.markdown("### 🎲 Randomization")
-        use_random_seed = st.checkbox("Use random seed", value=True)
-        if use_random_seed:
-            random_seed = st.number_input("Seed:", min_value=1, max_value=1000, value=42)
-        else:
-            random_seed = None
-        
-        # Performance warning for large networks
+    )
+    
+    # Show network description
+    selected_type = NETWORK_TYPES[network_type]
+    st.info(f"**{selected_type['description']}**\n\n"
+            f"Characteristics: {selected_type['characteristics']}\n\n"
+            f"Use cases: {selected_type['use_cases']}")
+    
+    # Size controls
+    st.markdown("### 📏 Size Controls")
+    num_nodes = st.slider("Number of Nodes:", 3, 1000, 10, 
+                         help="Number of departments/units in the organization")
+    
+    # Adjust density range based on network size for performance
+    if num_nodes > 100:
+        max_density = min(0.3, 500 / (num_nodes * (num_nodes - 1)))
+        density = st.slider("Network Density:", 0.01, max_density, min(0.1, max_density/2),
+                           help="Density limited for large networks to ensure performance")
+    else:
+        density = st.slider("Network Density:", 0.1, 0.8, 0.3,
+                           help="Fraction of possible connections that exist")
+    
+    # Flow controls
+    st.markdown("### 💧 Flow Parameters")
+    flow_range = st.slider("Flow Intensity Range:", 1, 100, (5, 50),
+                          help="Minimum and maximum flow values")
+    
+    hub_amplification = st.slider("Hub Amplification:", 0.0, 2.0, 0.5,
+                                 help="How much extra flow large hubs receive")
+    
+    # Additional parameters based on network type
+    if network_type == 'small_world':
+        rewiring_prob = st.slider("Rewiring Probability:", 0.1, 0.9, 0.3,
+                                 help="Probability of rewiring edges for shortcuts")
+    elif network_type == 'hierarchical':
+        branching_factor = st.slider("Branching Factor:", 2, 5, 2,
+                                    help="Number of subordinates per manager")
+    elif network_type == 'community':
+        num_communities = st.slider("Number of Communities:", 2, 6, 3,
+                                   help="Number of distinct departments/groups")
+    
+    # Randomization
+    st.markdown("### 🎲 Randomization")
+    use_random_seed = st.checkbox("Use random seed", value=True)
+    if use_random_seed:
+        random_seed = st.number_input("Seed:", min_value=1, max_value=1000, value=42)
+    else:
+        random_seed = None
+    
+    # Save option
+    save_to_samples = st.checkbox("💾 Save to Sample Data after generation", value=False,
+                                  help="Save this network to your sample data collection for future use")
+    
+    # Performance warning for large networks
+    if num_nodes > 500:
+        st.warning("⚠️ **Large Network**: Networks with >500 nodes may take longer to generate and analyze.")
+    elif num_nodes > 200:
+        st.info("ℹ️ **Medium Network**: Visualization will be replaced with degree distribution chart.")
+    
+    # Generate button
+    if st.button("🚀 Generate & Analyze Network", type="primary"):
+        generation_time = "Generating network..."
         if num_nodes > 500:
-            st.warning("⚠️ **Large Network**: Networks with >500 nodes may take longer to generate and analyze.")
-        elif num_nodes > 200:
-            st.info("ℹ️ **Medium Network**: Visualization will be replaced with degree distribution chart.")
-        
-        # Generate button
-        if st.button("🚀 Generate Network", type="primary"):
-            generation_time = "Generating network..."
-            if num_nodes > 500:
-                generation_time = "Generating large network... this may take a moment..."
-                
-            with st.spinner(generation_time):
-                # Initialize generator
-                generator = OrganizationalNetworkGenerator(seed=random_seed)
-                
-                # Additional kwargs based on network type
-                kwargs = {}
-                if network_type == 'small_world':
-                    kwargs['rewiring_prob'] = rewiring_prob
-                elif network_type == 'hierarchical':
-                    kwargs['branching_factor'] = branching_factor
-                elif network_type == 'community':
-                    kwargs['num_communities'] = num_communities
-                
-                # Generate network structure
-                G = generator.generate_network(network_type, num_nodes, density, **kwargs)
-                
-                # Add flow weights
-                G_weighted = generator.add_flow_weights(
-                    G, flow_range[0], flow_range[1], hub_amplification
-                )
-                
-                # Store in session state
-                st.session_state.generated_network = G_weighted
-                st.session_state.flow_matrix = generator.network_to_flow_matrix(G_weighted)
-                
-                success_msg = "✅ Network generated successfully!"
-                if num_nodes > 100:
-                    success_msg += f" ({num_nodes} nodes, {G_weighted.number_of_edges()} edges)"
-                st.success(success_msg)
-    
-    with col2:
-        st.subheader("🌐 Network Visualization")
-        
-        if st.session_state.generated_network is not None:
-            G = st.session_state.generated_network
+            generation_time = "Generating large network... this may take a moment..."
             
-            # Generate node names
-            node_names = [f"Unit_{i}" for i in range(G.number_of_nodes())]
+        with st.spinner(generation_time):
+            # Initialize generator
+            generator = OrganizationalNetworkGenerator(seed=random_seed)
             
-            # Show visualization for reasonable sizes, statistics for all
-            if G.number_of_nodes() <= 200:
-                # Create network visualization for smaller networks
-                generator = OrganizationalNetworkGenerator()
-                fig = generator.create_plotly_visualization(
-                    G, node_names, 
-                    title=f"{selected_type['name']} Network ({G.number_of_nodes()} nodes, {G.number_of_edges()} edges)"
-                )
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                # For large networks, show summary instead of visualization
-                st.info(f"🏢 **Large Network Generated**\n\n"
-                       f"Network too large for visualization ({G.number_of_nodes()} nodes)\n"
-                       f"Showing statistics and analysis instead.")
-                
-                # Show degree distribution for large networks
-                degrees = [G.degree(n) for n in G.nodes()]
-                degree_fig = px.histogram(
-                    x=degrees, 
-                    title=f"Degree Distribution - {selected_type['name']} Network",
-                    labels={"x": "Node Degree", "y": "Count"}
-                )
-                st.plotly_chart(degree_fig, use_container_width=True)
+            # Additional kwargs based on network type
+            kwargs = {}
+            if network_type == 'small_world':
+                kwargs['rewiring_prob'] = rewiring_prob
+            elif network_type == 'hierarchical':
+                kwargs['branching_factor'] = branching_factor
+            elif network_type == 'community':
+                kwargs['num_communities'] = num_communities
             
-            # Network statistics (always shown)
-            col2a, col2b, col2c, col2d = st.columns(4)
-            with col2a:
-                st.metric("Nodes", G.number_of_nodes())
-            with col2b:
-                st.metric("Edges", G.number_of_edges())
-            with col2c:
-                actual_density = G.number_of_edges() / (G.number_of_nodes() * (G.number_of_nodes() - 1))
-                st.metric("Actual Density", f"{actual_density:.4f}")
-            with col2d:
-                avg_degree = 2 * G.number_of_edges() / G.number_of_nodes()
-                st.metric("Avg Degree", f"{avg_degree:.1f}")
+            # Generate network structure
+            G = generator.generate_network(network_type, num_nodes, density, **kwargs)
             
-        else:
-            st.info("👆 Generate a network using the controls on the left to see the visualization here.")
-    
-    # Flow matrix preview and analysis
-    if st.session_state.flow_matrix is not None:
-        st.subheader("📊 Flow Matrix & Analysis")
-        
-        col3, col4 = st.columns([1, 1])
-        
-        with col3:
-            st.markdown("### Flow Matrix Preview")
-            flow_matrix = st.session_state.flow_matrix
+            # Add flow weights
+            G_weighted = generator.add_flow_weights(
+                G, flow_range[0], flow_range[1], hub_amplification
+            )
+            
+            # Generate flow matrix
+            flow_matrix = generator.network_to_flow_matrix(G_weighted)
             node_names = [f"Unit_{i}" for i in range(flow_matrix.shape[0])]
             
-            # Show different preview based on size
-            if flow_matrix.shape[0] <= 25:
-                # Full matrix for small networks
-                preview_df = pd.DataFrame(flow_matrix, index=node_names, columns=node_names)
-                st.dataframe(preview_df.round(1))
-            else:
-                # Summary statistics for large networks
-                st.write(f"**Matrix Size**: {flow_matrix.shape[0]} × {flow_matrix.shape[0]}")
-                st.write(f"**Total Flow**: {np.sum(flow_matrix):.1f}")
-                st.write(f"**Non-zero Connections**: {np.count_nonzero(flow_matrix)}")
-                st.write(f"**Average Flow**: {np.mean(flow_matrix[flow_matrix > 0]):.1f}")
-                st.write(f"**Max Flow**: {np.max(flow_matrix):.1f}")
-                
-                # Show top flows
-                if st.checkbox("Show Top 10 Flows"):
-                    # Find top flows
-                    flows = []
-                    for i in range(flow_matrix.shape[0]):
-                        for j in range(flow_matrix.shape[1]):
-                            if flow_matrix[i, j] > 0:
-                                flows.append({
-                                    'From': f"Unit_{i}",
-                                    'To': f"Unit_{j}", 
-                                    'Flow': flow_matrix[i, j]
-                                })
-                    
-                    flows_df = pd.DataFrame(flows).sort_values('Flow', ascending=False).head(10)
-                    st.dataframe(flows_df)
+            # Save to samples if requested
+            if save_to_samples:
+                save_network_to_samples(org_name, G_weighted, network_type, selected_type, 
+                                      num_nodes, density, flow_range, hub_amplification)
+                st.success("✅ Network saved to sample data!")
             
-            col_analyze, col_save = st.columns(2)
-            with col_analyze:
-                if st.button("🔍 Run Full Analysis", type="secondary"):
-                    run_analysis(flow_matrix, node_names, org_name)
+            # Store data in session state and navigate to analysis page
+            st.session_state.analysis_data = {
+                'flow_matrix': flow_matrix,
+                'node_names': node_names,
+                'org_name': org_name,
+                'network': G_weighted,
+                'source': 'synthetic'
+            }
+            st.session_state.current_page = 'analysis'
             
-            with col_save:
-                if st.button("💾 Save to Sample Data", type="secondary"):
-                    save_network_to_samples(org_name, st.session_state.generated_network, 
-                                           network_type, selected_type, num_nodes, density, 
-                                           flow_range, hub_amplification)
-        
-        with col4:
-            st.markdown("### Quick Sustainability Preview")
-            
-            # Quick metrics calculation
-            with st.spinner("Calculating metrics..."):
-                calculator = UlanowiczCalculator(flow_matrix, node_names)
-                metrics = calculator.get_sustainability_metrics()
-                
-                st.metric("Relative Ascendency (α)", f"{metrics['relative_ascendency']:.3f}")
-                st.metric("Robustness", f"{calculator.calculate_robustness():.3f}")
-                
-                viable = "✅ YES" if metrics['is_viable'] else "❌ NO"
-                st.metric("In Window of Viability", viable)
-                
-                assessment = calculator.assess_sustainability()
-                if "VIABLE" in assessment:
-                    st.success(assessment)
-                else:
-                    st.warning(assessment)
+            st.success("✅ Network generated successfully! Navigating to analysis...")
+            st.rerun()
 
 def save_network_to_samples(org_name, network, network_type, selected_type, num_nodes, density, flow_range, hub_amplification):
     """Save generated network to user sample data collection."""
@@ -733,10 +645,21 @@ def generate_synthetic_organization(departments, intensity, formality, age, seed
     
     return combined_matrix, departments
 
-def run_analysis(flow_matrix, node_names, org_name):
-    """Run the complete Ulanowicz analysis and display results."""
+def show_analysis_page():
+    """Show the analysis page with network visualization on top and sidebar navigation."""
     
-    st.header(f"📊 Analysis Results: {org_name}")
+    # Get analysis data from session state
+    if st.session_state.analysis_data is None:
+        st.error("No analysis data available")
+        if st.button("↩️ Back to Main"):
+            st.session_state.current_page = 'main'
+            st.rerun()
+        return
+    
+    data = st.session_state.analysis_data
+    flow_matrix = data['flow_matrix']
+    node_names = data['node_names']
+    org_name = data['org_name']
     
     # Calculate metrics
     with st.spinner("Calculating sustainability metrics..."):
@@ -744,26 +667,59 @@ def run_analysis(flow_matrix, node_names, org_name):
         extended_metrics = calculator.get_extended_metrics()
         assessments = calculator.assess_regenerative_health()
     
-    # Main metrics overview
-    display_metrics_overview(extended_metrics, assessments)
+    # Create the network graph for visualizations (will be used in Network Analysis section)
+    if 'network' in data and data['network'] is not None:
+        # Use existing network graph if available (for synthetic data)
+        G = data['network']
+    else:
+        # Create network graph from flow matrix (for sample/uploaded data)
+        import networkx as nx
+        G = nx.DiGraph()
+        for i, node in enumerate(node_names):
+            G.add_node(i, name=node)
+        for i in range(len(node_names)):
+            for j in range(len(node_names)):
+                if flow_matrix[i, j] > 0:
+                    G.add_edge(i, j, weight=flow_matrix[i, j])
     
-    # Detailed analysis tabs
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["🎯 Core Metrics", "🌱 Regenerative Indicators", "📊 Visualizations", "🔄 Network Analysis", "📋 Detailed Report"])
+    # Store network in session state for access in Network Analysis
+    st.session_state.analysis_data['network'] = G
     
-    with tab1:
-        display_core_metrics(extended_metrics)
+    # Sidebar with back button at the top
+    if st.sidebar.button("← Back to Data Selection", type="primary", use_container_width=True):
+        st.session_state.current_page = 'main'
+        st.session_state.analysis_data = None
+        st.rerun()
     
-    with tab2:
-        display_regenerative_metrics(extended_metrics, assessments)
+    st.sidebar.markdown("---")
     
-    with tab3:
-        display_visualizations(calculator, extended_metrics)
+    # Sidebar navigation for detailed analysis
+    st.sidebar.title("📊 Analysis Sections")
+    analysis_section = st.sidebar.radio(
+        "Choose Analysis View:",
+        ["🎯 Core Metrics", "🔄 Network Analysis", "📊 Visualizations", "📋 Detailed Report"]
+    )
     
-    with tab4:
+    # Display selected section
+    if analysis_section == "🎯 Core Metrics":
+        display_core_metrics_combined(extended_metrics, assessments, org_name, flow_matrix, node_names)
+    elif analysis_section == "🔄 Network Analysis":
         display_network_analysis(calculator, extended_metrics, flow_matrix, node_names)
-    
-    with tab5:
+    elif analysis_section == "📊 Visualizations":
+        display_visualizations_enhanced(G, flow_matrix, node_names, extended_metrics)
+    elif analysis_section == "📋 Detailed Report":
         display_detailed_report(calculator, extended_metrics, assessments, org_name)
+
+def run_analysis(flow_matrix, node_names, org_name):
+    """Legacy function - redirect to new analysis page."""
+    st.session_state.analysis_data = {
+        'flow_matrix': flow_matrix,
+        'node_names': node_names,
+        'org_name': org_name,
+        'source': 'direct'
+    }
+    st.session_state.current_page = 'analysis'
+    st.rerun()
 
 def display_metrics_overview(metrics, assessments):
     """Display high-level metrics overview."""
@@ -801,46 +757,491 @@ def display_metrics_overview(metrics, assessments):
     else:
         st.error(f"❌ {sustainability_status}")
 
-def display_core_metrics(metrics):
-    """Display core Ulanowicz metrics."""
+def display_visualizations_enhanced(G, flow_matrix, node_names, metrics):
+    """Display visualizations with network diagram, flow heatmap, and window of viability."""
     
-    st.subheader("📈 Core Ulanowicz Indicators")
+    st.header("📊 Visualizations")
+    
+    # Network Visualization first
+    st.subheader("🌐 Network Diagram")
+    
+    # Display network visualization
+    if len(node_names) <= 200:
+        from network_generator import OrganizationalNetworkGenerator
+        generator = OrganizationalNetworkGenerator()
+        fig = generator.create_plotly_visualization(
+            G, node_names,
+            title=f"Network Structure - {len(node_names)} nodes, {G.number_of_edges()} edges"
+        )
+        fig.update_layout(height=700)  # Large visualization
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info(f"🏢 Network too large for visualization ({len(node_names)} nodes).")
+        degrees = [G.degree(n) for n in G.nodes()]
+        degree_fig = px.histogram(
+            x=degrees, 
+            title=f"Degree Distribution",
+            labels={"x": "Node Degree", "y": "Count"}
+        )
+        st.plotly_chart(degree_fig, use_container_width=True)
+    
+    # Network Flow Heatmap second
+    st.subheader("🔥 Network Flow Heatmap")
+    flow_fig = create_flow_heatmap(flow_matrix, node_names)
+    st.plotly_chart(flow_fig, use_container_width=True)
+    
+    # Window of Viability last
+    st.subheader("🎯 Window of Viability")
+    robustness_fig = create_robustness_curve(metrics)
+    st.plotly_chart(robustness_fig, use_container_width=True)
+    
+    # Flow Statistics
+    st.subheader("📊 Flow Statistics")
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Total Flow", f"{np.sum(flow_matrix):.1f}")
+        st.metric("Active Connections", np.count_nonzero(flow_matrix))
+    with col2:
+        st.metric("Avg Flow", f"{np.mean(flow_matrix[flow_matrix > 0]):.2f}" if np.any(flow_matrix > 0) else "0")
+        st.metric("Median Flow", f"{np.median(flow_matrix[flow_matrix > 0]):.2f}" if np.any(flow_matrix > 0) else "0")
+    with col3:
+        st.metric("Max Flow", f"{np.max(flow_matrix):.1f}")
+        st.metric("Min Flow (>0)", f"{np.min(flow_matrix[flow_matrix > 0]):.2f}" if np.any(flow_matrix > 0) else "0")
+    with col4:
+        flow_std = np.std(flow_matrix[flow_matrix > 0]) if np.any(flow_matrix > 0) else 0
+        st.metric("Flow Std Dev", f"{flow_std:.2f}")
+        flow_cv = flow_std / np.mean(flow_matrix[flow_matrix > 0]) if np.any(flow_matrix > 0) and np.mean(flow_matrix[flow_matrix > 0]) > 0 else 0
+        st.metric("Coeff. of Variation", f"{flow_cv:.2f}")
+
+def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, node_names):
+    """Display combined core metrics including Ulanowicz and Regenerative indicators."""
+    
+    # Core Metrics header at the top
+    st.header("🎯 Core Metrics")
+    
+    # Network name and summary
+    st.markdown(f"### 🌐 {org_name}")
+    
+    # Quick summary metrics
+    col1, col2, col3, col4, col5 = st.columns(5)
+    with col1:
+        st.metric("Nodes", len(node_names))
+    with col2:
+        st.metric("Total Flow", f"{np.sum(flow_matrix):.1f}")
+    with col3:
+        st.metric("Relative Ascendency", f"{metrics['relative_ascendency']:.3f}")
+    with col4:
+        st.metric("Robustness", f"{metrics['robustness']:.3f}")
+    with col5:
+        viable = "✅ YES" if metrics['is_viable'] else "❌ NO"
+        st.metric("Viable", viable)
+    
+    st.markdown("---")
+    
+    # Section 1: Overview
+    st.subheader("📊 Overview")
+    st.markdown("### System Overview")
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("Relative Ascendency", f"{metrics['relative_ascendency']:.3f}")
+        st.caption("Organization level (α)")
+    
+    with col2:
+        st.metric("Robustness", f"{metrics['robustness']:.3f}")
+        st.caption("Resilience to shocks")
+    
+    with col3:
+        viable = "✅ YES" if metrics['is_viable'] else "❌ NO"
+        st.metric("Viable System", viable)
+        st.caption("Within sustainability bounds")
+    
+    with col4:
+        st.metric("Network Efficiency", f"{metrics['network_efficiency']:.3f}")
+        st.caption("Resource utilization")
+    
+    # Sustainability assessment
+    st.markdown("---")
+    st.subheader("🌱 Sustainability Assessment")
+    
+    ascendency = metrics['ascendency']
+    lower = metrics['viability_lower_bound']
+    upper = metrics['viability_upper_bound']
+    
+    if lower <= ascendency <= upper:
+        if ascendency < (lower + upper) / 2:
+            st.success("✅ VIABLE - System is sustainable with good flexibility")
+        else:
+            st.success("✅ VIABLE - System is sustainable with good organization")
+    elif ascendency < lower:
+        st.error("❌ UNSUSTAINABLE - System is too chaotic (low organization)")
+        st.info("💡 Recommendation: Increase structure and coordination")
+    else:
+        st.error("❌ UNSUSTAINABLE - System is too rigid (over-organized)")
+        st.info("💡 Recommendation: Increase flexibility and redundancy")
+    
+    
+    # Section 2: Ulanowicz Indicators
+    st.markdown("---")
+    st.subheader("📈 Ulanowicz Indicators")
+    
+    st.markdown("""
+    Fundamental metrics from Robert Ulanowicz's Information Theory approach to ecosystem analysis,
+    adapted for organizational networks.
+    """)
+    
+    # Main indicators
+    st.markdown("### 🔄 System Activity Metrics")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.metric("Total System Throughput (TST)", f"{metrics['total_system_throughput']:.1f}")
+        st.caption("Total flow/activity in the network")
+        
+        st.metric("Average Mutual Information (AMI)", f"{metrics['average_mutual_information']:.3f}")
+        st.caption("Degree of organization in flow patterns")
+        
+        st.metric("Ascendency (A)", f"{metrics['ascendency']:.1f}")
+        st.caption("Organized power (TST × AMI)")
+    
+    with col2:
+        st.metric("Development Capacity (C)", f"{metrics['development_capacity']:.1f}")
+        st.caption("Maximum possible organization")
+        
+        st.metric("Overhead/Reserve (Φ)", f"{metrics['overhead']:.1f}")
+        st.caption("Unutilized capacity (C - A)")
+        
+        st.metric("Flow Diversity (H)", f"{metrics['flow_diversity']:.3f}")
+        st.caption("Shannon entropy of flows")
+    
+    # Fundamental relationship
+    st.markdown("---")
+    st.markdown("### ⚖️ Fundamental Relationship")
+    
+    # Verify C = A + Φ
+    c = metrics['development_capacity']
+    a = metrics['ascendency']
+    phi = metrics['overhead']
+    calculated = a + phi
+    error = abs(c - calculated)
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("C (Capacity)", f"{c:.1f}")
+    with col2:
+        st.metric("A + Φ", f"{calculated:.1f}")
+    with col3:
+        if error < 0.01:
+            st.success(f"✅ Error: {error:.4f}")
+        else:
+            st.warning(f"⚠️ Error: {error:.4f}")
+    
+    st.caption("Fundamental IT relationship: C = A + Φ (Capacity = Ascendency + Overhead)")
+    
+    
+    # Section 3: Regenerative Metrics
+    st.markdown("---")
+    st.subheader("🌱 Regenerative Metrics")
     
     col1, col2 = st.columns(2)
     
     with col1:
-        st.markdown("### System Activity")
-        st.metric("Total System Throughput (TST)", f"{metrics['total_system_throughput']:.1f}")
-        st.metric("Average Mutual Information (AMI)", f"{metrics['average_mutual_information']:.3f}")
-        st.metric("Ascendency (A)", f"{metrics['ascendency']:.1f}")
-        
-    with col2:
-        st.markdown("### System Capacity")
-        st.metric("Development Capacity (C)", f"{metrics['development_capacity']:.1f}")  
-        st.metric("Overhead (Φ)", f"{metrics['overhead']:.1f}")
-        
-        # Ratios
-        st.markdown("### Key Ratios")
-        st.metric("Ascendency Ratio (A/C)", f"{metrics['ascendency_ratio']:.3f}")
-        st.metric("Overhead Ratio (Φ/C)", f"{metrics['overhead_ratio']:.3f}")
+        st.markdown("### Flow & Structure")
+        st.metric("Flow Diversity (H)", f"{metrics['flow_diversity']:.3f}")
+        st.metric("Structural Information (SI)", f"{metrics['structural_information']:.3f}")
+        st.metric("Effective Link Density", f"{metrics['effective_link_density']:.3f}")
+        st.metric("Trophic Depth", f"{metrics['trophic_depth']:.3f}")
     
-    # Window of Viability
-    st.subheader("🎯 Window of Viability")
+    with col2:
+        st.markdown("### System Dynamics")  
+        st.metric("Robustness (R)", f"{metrics['robustness']:.3f}")
+        st.metric("Redundancy", f"{metrics['redundancy']:.3f}")
+        st.metric("Network Efficiency", f"{metrics['network_efficiency']:.3f}")
+        st.metric("Regenerative Capacity", f"{metrics['regenerative_capacity']:.3f}")
+    
+    # Health assessments
+    st.markdown("---")
+    st.subheader("🏥 Health Assessment Breakdown")
+    
+    assessment_colors = {
+        'HIGH': '🟢', 'GOOD': '🟢', 'OPTIMAL': '🟢',
+        'MODERATE': '🟡', 'VIABLE': '🟡', 
+        'LOW': '🔴', 'UNSUSTAINABLE': '🔴', 'WEAK': '🔴'
+    }
+    
+    for category, assessment in assessments.items():
+        status = assessment.split(' - ')[0]
+        color = assessment_colors.get(status, '⚪')
+        st.write(f"{color} **{category.title()}**: {assessment}")
+    
+    
+    # Section 4: Balance Analysis
+    st.markdown("---")
+    st.subheader("⚖️ Balance Analysis")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        # Ascendency to Capacity ratio gauge
+        ratio = metrics['ascendency_ratio']
+        if ratio < 0.2:
+            color = "red"
+            status = "Too Chaotic"
+        elif ratio > 0.6:
+            color = "red"
+            status = "Too Rigid"
+        elif 0.35 <= ratio <= 0.4:
+            color = "green"
+            status = "Optimal"
+        else:
+            color = "#f59e0b"
+            status = "Acceptable"
+        
+        st.metric("Organization Ratio (A/C)", f"{ratio:.3f}")
+        st.markdown(f"Status: <span style='color:{color}'>{status}</span>", unsafe_allow_html=True)
+        st.progress(ratio)
+        st.caption("Degree of organization")
+    
+    with col2:
+        # Overhead ratio
+        overhead_ratio = metrics['overhead_ratio']
+        st.metric("Flexibility Ratio (Φ/C)", f"{overhead_ratio:.3f}")
+        if overhead_ratio < 0.4:
+            st.markdown("Status: <span style='color:red'>Low Reserve</span>", unsafe_allow_html=True)
+        elif overhead_ratio > 0.8:
+            st.markdown("Status: <span style='color:#f59e0b'>High Redundancy</span>", unsafe_allow_html=True)
+        else:
+            st.markdown("Status: <span style='color:green'>Good Balance</span>", unsafe_allow_html=True)
+        st.progress(overhead_ratio)
+        st.caption("Reserve capacity")
+    
+    # Window of Viability details
+    st.markdown("---")
+    st.subheader("🎯 Window of Viability Analysis")
+    
+    lower = metrics['viability_lower_bound']
+    upper = metrics['viability_upper_bound']
+    current = metrics['ascendency']
+    
+    # Visual representation
+    progress_val = (current - lower) / (upper - lower) if upper > lower else 0.5
+    progress_val = max(0, min(1, progress_val))  # Clamp between 0 and 1
+    
+    st.progress(progress_val)
+    
     col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Lower Bound", f"{lower:.1f}")
+        st.caption("20% of capacity")
+    with col2:
+        st.metric("Current Position", f"{current:.1f}")
+        if lower <= current <= upper:
+            st.caption("✅ Within bounds")
+        else:
+            st.caption("❌ Outside bounds")
+    with col3:
+        st.metric("Upper Bound", f"{upper:.1f}")
+        st.caption("60% of capacity")
+    
+    # Efficiency vs Redundancy balance
+    st.markdown("---")
+    balance = metrics['ascendency_ratio'] / (metrics['overhead_ratio'] + 0.001)
+    st.metric("Efficiency/Redundancy Balance", f"{balance:.2f}")
+    if 0.5 <= balance <= 2:
+        st.info("✅ System has good balance between efficiency and redundancy")
+    elif balance < 0.5:
+        st.warning("⚠️ System is too redundant - consider streamlining processes")
+    else:
+        st.warning("⚠️ System is too efficient - consider adding backup pathways")
+
+def display_core_metrics_simplified(metrics):
+    """Display simplified core metrics."""
+    
+    st.header("🎯 Core Metrics")
+    
+    # Quick overview metrics
+    col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        st.metric("Lower Bound", f"{metrics['viability_lower_bound']:.1f}")
+        st.metric("Relative Ascendency", f"{metrics['relative_ascendency']:.3f}")
+        st.caption("Organization level (α)")
+    
     with col2:
-        st.metric("Upper Bound", f"{metrics['viability_upper_bound']:.1f}")
+        st.metric("Robustness", f"{metrics['robustness']:.3f}")
+        st.caption("Resilience to shocks")
+    
     with col3:
-        current_pos = metrics['ascendency']
-        lower = metrics['viability_lower_bound']
-        upper = metrics['viability_upper_bound']
-        
-        if lower <= current_pos <= upper:
-            st.success(f"✅ Current: {current_pos:.1f}")
+        viable = "✅ YES" if metrics['is_viable'] else "❌ NO"
+        st.metric("Viable System", viable)
+        st.caption("Within sustainability bounds")
+    
+    with col4:
+        st.metric("Network Efficiency", f"{metrics['network_efficiency']:.3f}")
+        st.caption("Resource utilization")
+    
+    # Sustainability assessment
+    st.markdown("---")
+    st.subheader("🌱 Sustainability Assessment")
+    
+    ascendency = metrics['ascendency']
+    lower = metrics['viability_lower_bound']
+    upper = metrics['viability_upper_bound']
+    
+    if lower <= ascendency <= upper:
+        if ascendency < (lower + upper) / 2:
+            st.success("✅ VIABLE - System is sustainable with good flexibility")
         else:
-            st.error(f"❌ Current: {current_pos:.1f}")
+            st.success("✅ VIABLE - System is sustainable with good organization")
+    elif ascendency < lower:
+        st.error("❌ UNSUSTAINABLE - System is too chaotic (low organization)")
+        st.info("💡 Recommendation: Increase structure and coordination")
+    else:
+        st.error("❌ UNSUSTAINABLE - System is too rigid (over-organized)")
+        st.info("💡 Recommendation: Increase flexibility and redundancy")
+    
+    # Key ratios
+    st.markdown("---")
+    st.subheader("📊 Balance Indicators")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        # Ascendency to Capacity ratio gauge
+        ratio = metrics['ascendency_ratio']
+        if ratio < 0.2:
+            color = "red"
+            status = "Too Chaotic"
+        elif ratio > 0.6:
+            color = "red"
+            status = "Too Rigid"
+        elif 0.35 <= ratio <= 0.4:
+            color = "green"
+            status = "Optimal"
+        else:
+            color = "#f59e0b"
+            status = "Acceptable"
+        
+        st.metric("Organization Ratio (A/C)", f"{ratio:.3f}")
+        st.markdown(f"Status: <span style='color:{color}'>{status}</span>", unsafe_allow_html=True)
+    
+    with col2:
+        # Overhead ratio
+        overhead_ratio = metrics['overhead_ratio']
+        st.metric("Flexibility Ratio (Φ/C)", f"{overhead_ratio:.3f}")
+        if overhead_ratio < 0.4:
+            st.markdown("Status: <span style='color:red'>Low Reserve</span>", unsafe_allow_html=True)
+        elif overhead_ratio > 0.8:
+            st.markdown("Status: <span style='color:#f59e0b'>High Redundancy</span>", unsafe_allow_html=True)
+        else:
+            st.markdown("Status: <span style='color:green'>Good Balance</span>", unsafe_allow_html=True)
+
+def display_ulanowicz_indicators(metrics):
+    """Display detailed Ulanowicz indicators."""
+    
+    st.header("📈 Core Ulanowicz Indicators")
+    
+    st.markdown("""
+    These are the fundamental metrics from Robert Ulanowicz's Information Theory approach to ecosystem analysis,
+    adapted for organizational networks.
+    """)
+    
+    # Main indicators
+    st.subheader("🔄 System Activity Metrics")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.metric("Total System Throughput (TST)", f"{metrics['total_system_throughput']:.1f}")
+        st.caption("Total flow/activity in the network")
+        
+        st.metric("Average Mutual Information (AMI)", f"{metrics['average_mutual_information']:.3f}")
+        st.caption("Degree of organization in flow patterns")
+        
+        st.metric("Ascendency (A)", f"{metrics['ascendency']:.1f}")
+        st.caption("Organized power (TST × AMI)")
+    
+    with col2:
+        st.metric("Development Capacity (C)", f"{metrics['development_capacity']:.1f}")
+        st.caption("Maximum possible organization")
+        
+        st.metric("Overhead/Reserve (Φ)", f"{metrics['overhead']:.1f}")
+        st.caption("Unutilized capacity (C - A)")
+        
+        st.metric("Flow Diversity (H)", f"{metrics['flow_diversity']:.3f}")
+        st.caption("Shannon entropy of flows")
+    
+    # Fundamental relationship
+    st.markdown("---")
+    st.subheader("⚖️ Fundamental Relationship")
+    
+    # Verify C = A + Φ
+    c = metrics['development_capacity']
+    a = metrics['ascendency']
+    phi = metrics['overhead']
+    calculated = a + phi
+    error = abs(c - calculated)
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("C (Capacity)", f"{c:.1f}")
+    with col2:
+        st.metric("A + Φ", f"{calculated:.1f}")
+    with col3:
+        if error < 0.01:
+            st.success(f"✅ Error: {error:.4f}")
+        else:
+            st.warning(f"⚠️ Error: {error:.4f}")
+    
+    st.caption("Fundamental IT relationship: C = A + Φ (Capacity = Ascendency + Overhead)")
+    
+    # Ratios and percentages
+    st.markdown("---")
+    st.subheader("📊 Key Ratios")
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Ascendency Ratio (α = A/C)", f"{metrics['ascendency_ratio']:.3f}")
+        st.progress(metrics['ascendency_ratio'])
+        st.caption("Degree of organization")
+    
+    with col2:
+        st.metric("Overhead Ratio (Φ/C)", f"{metrics['overhead_ratio']:.3f}")
+        st.progress(metrics['overhead_ratio'])
+        st.caption("Reserve capacity")
+    
+    with col3:
+        # Efficiency vs Redundancy balance
+        balance = metrics['ascendency_ratio'] / (metrics['overhead_ratio'] + 0.001)
+        st.metric("Efficiency/Redundancy", f"{balance:.2f}")
+        if 0.5 <= balance <= 2:
+            st.caption("✅ Good balance")
+        else:
+            st.caption("⚠️ Imbalanced")
+    
+    # Window of Viability details
+    st.markdown("---")
+    st.subheader("🎯 Window of Viability Analysis")
+    
+    lower = metrics['viability_lower_bound']
+    upper = metrics['viability_upper_bound']
+    current = metrics['ascendency']
+    
+    # Visual representation
+    progress_val = (current - lower) / (upper - lower) if upper > lower else 0.5
+    progress_val = max(0, min(1, progress_val))  # Clamp between 0 and 1
+    
+    st.progress(progress_val)
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Lower Bound", f"{lower:.1f}")
+        st.caption("20% of capacity")
+    with col2:
+        st.metric("Current Position", f"{current:.1f}")
+        if lower <= current <= upper:
+            st.caption("✅ Within bounds")
+        else:
+            st.caption("❌ Outside bounds")
+    with col3:
+        st.metric("Upper Bound", f"{upper:.1f}")
+        st.caption("60% of capacity")
 
 def display_regenerative_metrics(metrics, assessments):
     """Display regenerative economics indicators."""
@@ -877,23 +1278,6 @@ def display_regenerative_metrics(metrics, assessments):
         color = assessment_colors.get(status, '⚪')
         st.write(f"{color} **{category.title()}**: {assessment}")
 
-def display_visualizations(calculator, metrics):
-    """Display interactive visualizations."""
-    
-    st.subheader("📊 Interactive Visualizations")
-    
-    # Create visualizer
-    visualizer = SustainabilityVisualizer(calculator)
-    
-    # Robustness curve
-    st.subheader("💪 Robustness Analysis")
-    robustness_fig = create_robustness_curve(metrics)
-    st.plotly_chart(robustness_fig, use_container_width=True)
-    
-    # Network flow heatmap
-    st.subheader("🔥 Network Flow Heatmap")
-    flow_fig = create_flow_heatmap(calculator.flow_matrix, calculator.node_names)
-    st.plotly_chart(flow_fig, use_container_width=True)
 
 
 def create_robustness_curve(metrics):
@@ -988,22 +1372,41 @@ def create_flow_heatmap(flow_matrix, node_names):
 
 
 def display_network_analysis(calculator, metrics, flow_matrix, node_names):
-    """Display network analysis details."""
+    """Display network analysis metrics and properties."""
     
-    st.subheader("🔗 Network Structure Analysis")
+    st.header("🔄 Network Analysis")
+    
+    # Get or create the network graph for metrics calculation
+    if st.session_state.analysis_data and 'network' in st.session_state.analysis_data and st.session_state.analysis_data['network'] is not None:
+        G = st.session_state.analysis_data['network']
+    else:
+        # Create network graph from flow matrix
+        import networkx as nx
+        G = nx.DiGraph()
+        for i, node in enumerate(node_names):
+            G.add_node(i, name=node)
+        for i in range(len(node_names)):
+            for j in range(len(node_names)):
+                if flow_matrix[i, j] > 0:
+                    G.add_edge(i, j, weight=flow_matrix[i, j])
+    
+    # Network Properties
+    st.subheader("🔗 Network Properties")
     
     col1, col2 = st.columns(2)
     
     with col1:
-        st.markdown("### Network Properties")
+        st.markdown("### Structure Metrics")
         st.write(f"**Nodes**: {calculator.n_nodes}")
+        st.write(f"**Edges**: {G.number_of_edges()}")
         st.write(f"**Total Connections**: {np.count_nonzero(flow_matrix)}")
         st.write(f"**Network Density**: {np.count_nonzero(flow_matrix) / (calculator.n_nodes ** 2):.3f}")
-        st.write(f"**Total Flow**: {np.sum(flow_matrix):.1f}")
-        st.write(f"**Average Flow**: {np.mean(flow_matrix[flow_matrix > 0]):.1f}")
+        st.write(f"**Avg Degree**: {2 * G.number_of_edges() / calculator.n_nodes:.2f}")
     
     with col2:
-        st.markdown("### Flow Statistics")
+        st.markdown("### Flow Metrics")
+        st.write(f"**Total Flow**: {np.sum(flow_matrix):.1f}")
+        st.write(f"**Average Flow**: {np.mean(flow_matrix[flow_matrix > 0]):.1f}")
         st.write(f"**Max Flow**: {np.max(flow_matrix):.1f}")
         st.write(f"**Min Flow**: {np.min(flow_matrix[flow_matrix > 0]):.1f}")
         st.write(f"**Flow Std Dev**: {np.std(flow_matrix[flow_matrix > 0]):.1f}")
@@ -1677,9 +2080,7 @@ def show_app_version():
     st.markdown("""
     <div style="text-align: center; color: #666; font-size: 0.9rem; margin-top: 2rem;">
         <strong>Adaptive Organization Analysis System</strong><br>
-        Version 2.0.0 - Information Theory Corrected<br>
-        Built with Ulanowicz-Fath Regenerative Economics Framework<br>
-        <em>Phase 1 Complete: Core IT Formulations Implemented</em>
+        Version 2.1.0 - Enhanced Interactive Visualization
     </div>
     """, unsafe_allow_html=True)
 
