@@ -1,0 +1,53 @@
+{
+  "organization": "Cone Spring Ecosystem (Eutrophicated)",
+  "nodes": [
+    "Plants",
+    "Detritus",
+    "Bacteria", 
+    "Detritivores",
+    "Carnivores"
+  ],
+  "flows": [
+    [0, 16881, 0, 0, 0],
+    [2003, 0, 11109, 0, 0],
+    [0, 635, 0, 0, 255],
+    [0, 200, 0, 0, 75],
+    [0, 167, 370, 1814, 0]
+  ],
+  "metadata": {
+    "source": "Ulanowicz et al. 2009 - Quantifying Sustainability",
+    "original_source": "Tilly 1968 (modified)",
+    "description": "Cone Spring ecosystem after eutrophication simulation",
+    "modification": "Added 8000 kcal m⁻² y⁻¹ to pathway 1→2→3",
+    "units": "kcal m⁻² y⁻¹",
+    "published_metrics": {
+      "relative_ascendency": 0.529,
+      "optimal_alpha": 0.460,
+      "note": "System above optimal - excess ascendency over reserve",
+      "marginal_contributions": {
+        "description": "After eutrophication, contributions inverted",
+        "key_change": "Pathway 1→2→3 now has contributions <1, parallel flows have >1"
+      }
+    },
+    "exogenous_inputs": {
+      "to_plants": 19184,
+      "to_detritus": 2003,
+      "to_bacteria": 635,
+      "to_carnivores": 203
+    },
+    "exogenous_outputs": {
+      "from_plants": 2003,
+      "from_detritus": 3109,
+      "from_bacteria": 255,
+      "from_detritivores": 75,
+      "from_carnivores": 203
+    },
+    "dissipations": {
+      "plants": 300,
+      "detritus": 860,
+      "bacteria": 1600,
+      "detritivores": 200,
+      "carnivores": 203
+    }
+  }
+}

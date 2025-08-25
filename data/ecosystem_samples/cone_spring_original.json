@@ -1,0 +1,52 @@
+{
+  "organization": "Cone Spring Ecosystem",
+  "nodes": [
+    "Plants",
+    "Detritus", 
+    "Bacteria",
+    "Detritivores",
+    "Carnivores"
+  ],
+  "flows": [
+    [0, 8881, 0, 0, 0],
+    [2003, 0, 3109, 0, 0],
+    [0, 635, 0, 0, 255],
+    [0, 200, 0, 0, 75],
+    [0, 167, 370, 1814, 0]
+  ],
+  "metadata": {
+    "source": "Ulanowicz et al. 2009 - Quantifying Sustainability",
+    "original_source": "Tilly 1968",
+    "description": "Energy flows in the Cone Spring ecosystem",
+    "units": "kcal m⁻² y⁻¹",
+    "published_metrics": {
+      "relative_ascendency": 0.418,
+      "optimal_alpha": 0.460,
+      "note": "System below optimal - can still grow and develop",
+      "marginal_contributions": {
+        "description": "Values in parentheses show contribution at margin",
+        "key_pathways": "Increases along 1→2→3 pathway favored for sustainability"
+      }
+    },
+    "exogenous_inputs": {
+      "to_plants": 11184,
+      "to_detritus": 2003,
+      "to_bacteria": 635,
+      "to_carnivores": 203
+    },
+    "exogenous_outputs": {
+      "from_plants": 2003,
+      "from_detritus": 3109,
+      "from_bacteria": 255,
+      "from_detritivores": 75,
+      "from_carnivores": 203
+    },
+    "dissipations": {
+      "plants": 300,
+      "detritus": 860,
+      "bacteria": 1600,
+      "detritivores": 200,
+      "carnivores": 203
+    }
+  }
+}

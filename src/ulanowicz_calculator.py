@@ -5,11 +5,11 @@ UPDATED: Now implements CORRECT Information Theory formulations from
 Ulanowicz et al. (2009) "Quantifying sustainability: Resilience, efficiency 
 and the return of information theory" - the foundational paper.
 
-Core Information Theory Metrics (Corrected):
+Core Information Theory Metrics (Corrected - Using Natural Logarithms):
 - Total System Throughput (TST)
-- Development Capacity: C = -Σ(T_ij * log(T_ij/T··)) [Eq. 11]
-- Ascendency: A = Σ(T_ij * log(T_ij*T·· / (T_i·*T_·j))) [Eq. 12]  
-- Reserve: Φ = Σ(T_ij * log(T_ij² / (T_i·*T_·j))) [Eq. 13]
+- Development Capacity: C = -Σ(T_ij * ln(T_ij/T··)) [Eq. 11]
+- Ascendency: A = Σ(T_ij * ln(T_ij*T·· / (T_i·*T_·j))) [Eq. 12]  
+- Reserve: Φ = Σ(T_ij * ln(T_ij² / (T_i·*T_·j))) [Eq. 13]
 - Fundamental relationship: C = A + Φ [Eq. 14]
 - Relative Ascendency: α = A/C (key sustainability metric)
 
@@ -107,7 +107,7 @@ class UlanowiczCalculator:
                     if output_i > 0 and input_j > 0:
                         # Calculate mutual information term
                         ratio = (flow_ij * tst) / (output_i * input_j)
-                        ami_sum += flow_ij * math.log2(ratio)
+                        ami_sum += flow_ij * math.log(ratio)
         
         return ami_sum / tst if tst > 0 else 0
     
@@ -139,7 +139,7 @@ class UlanowiczCalculator:
                     if output_i > 0 and input_j > 0:
                         # Direct ascendency calculation
                         ratio = (flow_ij * tst) / (output_i * input_j)
-                        ascendency_sum += flow_ij * math.log2(ratio)
+                        ascendency_sum += flow_ij * math.log(ratio)
         
         return ascendency_sum
     
@@ -166,7 +166,7 @@ class UlanowiczCalculator:
                 flow_ij = self.flow_matrix[i, j]
                 if flow_ij > 0:
                     # Direct capacity calculation: T_ij * log(T_ij / T··)
-                    capacity_sum += flow_ij * math.log2(flow_ij / tst)
+                    capacity_sum += flow_ij * math.log(flow_ij / tst)
         
         return -capacity_sum
     
@@ -362,7 +362,7 @@ class UlanowiczCalculator:
                 flow_ij = self.flow_matrix[i, j]
                 if flow_ij > 0:
                     p_ij = flow_ij / tst
-                    diversity_sum += p_ij * math.log2(p_ij)
+                    diversity_sum += p_ij * math.log(p_ij)
         
         return -diversity_sum
     
@@ -379,7 +379,7 @@ class UlanowiczCalculator:
         Returns:
             Structural Information value
         """
-        max_diversity = math.log2(self.n_nodes ** 2)
+        max_diversity = math.log(self.n_nodes ** 2)
         flow_diversity = self.calculate_flow_diversity()
         return max_diversity - flow_diversity
     
@@ -406,7 +406,7 @@ class UlanowiczCalculator:
         a_c_ratio = ascendency / development_capacity
         # Correct robustness formula: R = -α·log₂(α)
         if 0 < a_c_ratio < 1:
-            robustness = -a_c_ratio * math.log2(a_c_ratio)
+            robustness = -a_c_ratio * math.log(a_c_ratio)
         else:
             robustness = 0
         
@@ -449,7 +449,7 @@ class UlanowiczCalculator:
         
         # Weight by flow distribution
         ami = self.calculate_ami()
-        max_ami = math.log2(max_links) if max_links > 0 else 0
+        max_ami = math.log(max_links) if max_links > 0 else 0
         
         if max_ami == 0:
             return active_links / max_links

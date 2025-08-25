@@ -95,7 +95,7 @@ def show_main_page():
     st.sidebar.title("🎛️ Control Panel")
     analysis_mode = st.sidebar.radio(
         "Choose Analysis Mode:",
-        ["📊 Upload Data", "🧪 Use Sample Data", "⚡ Generate Synthetic Data", "📚 Learn More", "🔬 Formulas Reference"]
+        ["📊 Upload Data", "🧪 Use Sample Data", "⚡ Generate Synthetic Data", "📚 Learn More", "🌱 10 Principles", "🔬 Formulas Reference"]
     )
     
     if analysis_mode == "📊 Upload Data":
@@ -106,6 +106,8 @@ def show_main_page():
         synthetic_data_interface()
     elif analysis_mode == "📚 Learn More":
         learn_more_interface()
+    elif analysis_mode == "🌱 10 Principles":
+        ten_principles_interface()
     elif analysis_mode == "🔬 Formulas Reference":
         formulas_reference_interface()
 
@@ -1833,6 +1835,144 @@ def learn_more_interface():
         *Ready to transform your organization? Start with the Visual Network Generator to explore possibilities.*
         """)
 
+def ten_principles_interface():
+    """Display the 10 Principles of Regenerative Economics."""
+    
+    st.header("🌱 10 Principles of Regenerative Economics")
+    st.markdown("""
+    These principles, developed by **Fath, Fiscus, Goerner, Berea & Ulanowicz (2019)**, provide a comprehensive 
+    framework for understanding and measuring systemic economic health based on decades of research in 
+    ecological network analysis and complex systems science.
+    """)
+    
+    # Add reference with link
+    st.info("""
+    📚 **Source**: Fath, B.D., Fiscus, D.A., Goerner, S.J., Berea, A., & Ulanowicz, R.E. (2019). 
+    "Measuring regenerative economics: 10 principles and measures undergirding systemic economic health." 
+    *Global Transitions*, 1, 15-27.
+    """)
+    
+    # Create four main categories as expandable sections
+    with st.expander("🔄 **CIRCULATION** (Principles 1-4)", expanded=True):
+        st.markdown("""
+        ### **Principle 1: Maintain Robust Cross-Scale Circulation**
+        - **What**: Ensure money, information, resources flow across all scales
+        - **Why**: All sectors and levels play mutually supportive, interlinked roles
+        - **Measure**: Network Aggradation = TST/Σzi (Total System Throughput / Total Inputs)
+        - **Example**: Low wages reduce circulation → economic necrosis
+        
+        ### **Principle 2: Regenerative Re-Investment**
+        - **What**: Continuously invest in human, social, natural, and physical capital
+        - **Why**: Systems must be self-nourishing and self-renewing to thrive
+        - **Measure**: Finn Cycling Index (FCI) = ΣTci/TST
+        - **Example**: Every $1 on GI Bill returned $7 to economy
+        
+        ### **Principle 3: Maintain Reliable Inputs**
+        - **What**: Ensure steady supply of critical resources (energy, water, information)
+        - **Why**: Systems collapse without essential inputs
+        - **Measure**: % renewable energy, EROI trends, supply chain resilience
+        - **Example**: Fossil fuel dependency creates systemic vulnerability
+        
+        ### **Principle 4: Maintain Healthy Outputs**
+        - **What**: Minimize harmful waste and environmental damage
+        - **Why**: Systems that foul their environment cannot survive
+        - **Measure**: Pollution levels, carbon sequestration capacity
+        - **Example**: Circular economy principles, zero-waste initiatives
+        """)
+    
+    with st.expander("🏗️ **STRUCTURE** (Principles 5-6)", expanded=True):
+        st.markdown("""
+        ### **Principle 5: Balance Small, Medium & Large Organizations**
+        - **What**: Maintain fractal/power-law distribution of organizational sizes
+        - **Why**: Each scale serves unique functions; imbalance creates brittleness
+        - **Measure**: Compare size distribution against xⁿ power-law patterns
+        - **Example**: Too many "too-big-to-fail" banks → 2008 crisis
+        
+        ### **Principle 6: Balance Resilience and Efficiency**
+        - **What**: Maintain optimal trade-off between streamlining and redundancy
+        - **Why**: Too much efficiency → brittleness; too much redundancy → stagnation
+        - **Measure**: Robustness = -α·log(α) where α = A/C
+        - **Window of Vitality**: 0.2 < α < 0.6 (optimal sustainability range)
+        """)
+    
+    with st.expander("🤝 **RELATIONSHIPS & VALUES** (Principles 7-8)", expanded=True):
+        st.markdown("""
+        ### **Principle 7: Maintain Sufficient Diversity**
+        - **What**: Ensure adequate variety of roles, functions, and specialists
+        - **Why**: Diversity enables filling niches and finding new solutions
+        - **Measure**: Number of functional roles = Π(Fij·F../Fi·F·j)^(Fij/F..)
+        - **Example**: Monocultures are vulnerable; diverse ecosystems are resilient
+        
+        ### **Principle 8: Promote Mutually-Beneficial Relationships**
+        - **What**: Foster cooperation and common-cause values over pure competition
+        - **Why**: Collaboration produces more than isolated self-interest
+        - **Measure**: Ratio of mutualistic (+,+) to exploitative (+,-) relationships
+        - **Example**: Trust, justice, and reciprocity enhance economic vitality
+        """)
+    
+    with st.expander("📚 **COLLECTIVE LEARNING** (Principles 9-10)", expanded=True):
+        st.markdown("""
+        ### **Principle 9: Promote Constructive over Extractive Activity**
+        - **What**: Build value and capacity rather than extract existing wealth
+        - **Why**: Extraction without regeneration leads to systemic decline
+        - **Measure**: Ratio of value-add activities to speculation/extraction
+        - **Example**: Real economy investment vs. financial speculation
+        
+        ### **Principle 10: Promote Effective Collective Learning**
+        - **What**: Enable society-wide adaptation and knowledge evolution
+        - **Why**: Learning is humanity's core survival strategy
+        - **Measure**: Education investment, innovation indices, civic engagement
+        - **Example**: Societies that stop learning eventually collapse
+        """)
+    
+    # Add practical application section
+    st.markdown("---")
+    st.subheader("🎯 Practical Application")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("""
+        ### **For Organizations**
+        - Assess circulation patterns
+        - Balance efficiency with resilience
+        - Invest in human capital
+        - Foster collaborative culture
+        - Measure constructive vs extractive activities
+        """)
+    
+    with col2:
+        st.markdown("""
+        ### **For Policymakers**
+        - Support cross-scale circulation
+        - Prevent excessive concentration
+        - Incentivize regenerative investment
+        - Maintain diversity of enterprises
+        - Enable collective learning systems
+        """)
+    
+    # Add key insights
+    st.markdown("---")
+    st.subheader("💡 Key Insights")
+    
+    st.success("""
+    **The Window of Vitality**: Natural systems teach us that sustainability requires balancing 
+    efficiency (α ≈ 0.37) within a viable range (0.2 < α < 0.6). Too much order leads to brittleness; 
+    too much chaos leads to stagnation. The sweet spot enables both productivity and adaptability.
+    """)
+    
+    st.warning("""
+    **Current Challenge**: Most modern economies over-emphasize efficiency and size (Principles 5 & 6), 
+    leading to systemic fragility. The 2008 financial crisis exemplified this imbalance. 
+    Regenerative economics seeks to restore healthy balance across all 10 principles.
+    """)
+    
+    st.info("""
+    **Path Forward**: These principles are not just idealistic goals but measurable, 
+    scientifically-grounded metrics. By tracking and optimizing these indicators, 
+    organizations and societies can build truly sustainable, regenerative systems.
+    """)
+
 def formulas_reference_interface():
     """Complete formulas reference for all indicators."""
     
@@ -1843,9 +1983,9 @@ def formulas_reference_interface():
     """)
     
     # Create tabs for different categories
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "🧮 Core Ulanowicz IT", "🌱 Regenerative Economics", "📊 Network Analysis", 
-        "🎯 Sustainability Metrics", "⚙️ Extended Indicators"
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "🧮 Core Ulanowicz IT", "🔄 Fath et al. (2019)", "🌱 Regenerative Economics", 
+        "📊 Network Analysis", "🎯 Sustainability Metrics", "⚙️ Extended Indicators"
     ])
     
     with tab1:
@@ -2080,7 +2220,7 @@ def show_app_version():
     st.markdown("""
     <div style="text-align: center; color: #666; font-size: 0.9rem; margin-top: 2rem;">
         <strong>Adaptive Organization Analysis System</strong><br>
-        Version 2.1.0 - Enhanced Interactive Visualization
+        Version 2.1.1 - Formula Validation & Accuracy
     </div>
     """, unsafe_allow_html=True)
 
