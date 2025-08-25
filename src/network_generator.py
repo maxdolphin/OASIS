@@ -211,7 +211,10 @@ class OrganizationalNetworkGenerator:
                                    node_names: Optional[List[str]] = None,
                                    title: str = "Network Visualization") -> go.Figure:
         """
-        Create interactive Plotly visualization of the network.
+        Create interactive Plotly visualization of the network with enhanced features:
+        - Node sizes proportional to total flow (in + out)
+        - Directional arrows showing flow direction
+        - Edge thickness and color based on flow intensity
         
         Args:
             G: NetworkX directed graph
@@ -222,38 +225,101 @@ class OrganizationalNetworkGenerator:
             Plotly figure
         """
         # Calculate layout
-        pos = nx.spring_layout(G, seed=self.seed)
+        pos = nx.spring_layout(G, seed=self.seed, k=1.5, iterations=50)
         
-        # Calculate node sizes based on degree centrality
-        centrality = nx.degree_centrality(G)
-        node_sizes = [20 + 40 * centrality.get(node, 0) for node in G.nodes()]
+        # Calculate node metrics
+        in_flow = {}
+        out_flow = {}
+        total_flow = {}
         
-        # Create edge traces
-        edge_x = []
-        edge_y = []
-        edge_weights = []
+        for node in G.nodes():
+            in_flow[node] = sum(G.edges[u, v].get('weight', 1) for u, v in G.in_edges(node))
+            out_flow[node] = sum(G.edges[u, v].get('weight', 1) for u, v in G.out_edges(node))
+            total_flow[node] = in_flow[node] + out_flow[node]
+        
+        # Normalize node sizes based on total flow
+        max_flow = max(total_flow.values()) if total_flow else 1
+        min_flow = min(total_flow.values()) if total_flow else 0
+        flow_range = max_flow - min_flow if max_flow != min_flow else 1
+        
+        node_sizes = []
+        for node in G.nodes():
+            # Size from 40 to 100 based on total flow (larger for better visibility)
+            normalized = (total_flow[node] - min_flow) / flow_range if flow_range > 0 else 0.5
+            size = 40 + 60 * normalized
+            node_sizes.append(size)
+        
+        # Get all edge weights for normalization
+        all_weights = [G.edges[e].get('weight', 1) for e in G.edges()]
+        max_weight = max(all_weights) if all_weights else 1
+        min_weight = min(all_weights) if all_weights else 0
+        weight_range = max_weight - min_weight if max_weight != min_weight else 1
+        
+        # Create edge traces with varying thickness and color
+        edge_traces = []
+        arrow_annotations = []
         
         for edge in G.edges():
             x0, y0 = pos[edge[0]]
             x1, y1 = pos[edge[1]]
-            edge_x.extend([x0, x1, None])
-            edge_y.extend([y0, y1, None])
             weight = G.edges[edge].get('weight', 1)
-            edge_weights.append(weight)
-        
-        # Edge trace
-        edge_trace = go.Scatter(
-            x=edge_x, y=edge_y,
-            line=dict(width=1, color='#888'),
-            hoverinfo='none',
-            mode='lines'
-        )
+            
+            # Normalize weight for visualization
+            normalized_weight = (weight - min_weight) / weight_range if weight_range > 0 else 0.5
+            
+            # Edge width from 0.5 to 3 based on flow
+            edge_width = 0.5 + 2.5 * normalized_weight
+            
+            # Simpler color scheme: light gray to dark gray based on flow intensity
+            # This provides good contrast without being too distracting
+            gray_value = int(200 - 100 * normalized_weight)  # From light (200) to darker (100)
+            edge_color = f'rgba({gray_value}, {gray_value}, {gray_value}, 0.7)'
+            
+            # Create edge line
+            edge_trace = go.Scatter(
+                x=[x0, x1], y=[y0, y1],
+                line=dict(width=edge_width, color=edge_color),
+                hoverinfo='text',
+                hovertext=f'Flow: {weight:.1f}',
+                mode='lines',
+                showlegend=False
+            )
+            edge_traces.append(edge_trace)
+            
+            # Add arrowhead annotation
+            # Calculate arrow position (85% along the edge to avoid overlapping with target node)
+            arrow_scale = 0.85
+            arrow_x = x0 + arrow_scale * (x1 - x0)
+            arrow_y = y0 + arrow_scale * (y1 - y0)
+            
+            # Calculate arrow direction
+            dx = x1 - x0
+            dy = y1 - y0
+            
+            # Create arrow annotation
+            arrow = dict(
+                ax=arrow_x - 0.02 * dx,  # Start point slightly back
+                ay=arrow_y - 0.02 * dy,
+                x=arrow_x,  # End point
+                y=arrow_y,
+                xref='x',
+                yref='y',
+                axref='x',
+                ayref='y',
+                showarrow=True,
+                arrowhead=2,
+                arrowsize=1,
+                arrowwidth=edge_width,
+                arrowcolor=edge_color,
+            )
+            arrow_annotations.append(arrow)
         
         # Node trace
         node_x = []
         node_y = []
         node_text = []
         node_info = []
+        node_colors = []
         
         for node in G.nodes():
             x, y = pos[node]
@@ -266,54 +332,252 @@ class OrganizationalNetworkGenerator:
             else:
                 label = f"Node {node}"
             
-            node_text.append(label)
+            # Shorten label for display if too long
+            display_label = label[:12] + "..." if len(label) > 15 else label
+            node_text.append(display_label)
             
-            # Node info for hover
-            degree = G.degree(node)
-            in_degree = G.in_degree(node)
-            out_degree = G.out_degree(node)
+            # Node info for hover with flow details
+            node_info.append(
+                f"<b>{label}</b><br>"
+                f"<br><b>Flow Metrics:</b><br>"
+                f"Inbound Flow: {in_flow[node]:.1f}<br>"
+                f"Outbound Flow: {out_flow[node]:.1f}<br>"
+                f"Total Flow: {total_flow[node]:.1f}<br>"
+                f"<br><b>Network Position:</b><br>"
+                f"In-degree: {G.in_degree(node)}<br>"
+                f"Out-degree: {G.out_degree(node)}<br>"
+                f"Total Connections: {G.degree(node)}"
+            )
             
-            node_info.append(f"{label}<br>"
-                           f"Total Degree: {degree}<br>"
-                           f"In-degree: {in_degree}<br>"
-                           f"Out-degree: {out_degree}<br>"
-                           f"Centrality: {centrality.get(node, 0):.3f}")
+            # Color based on flow balance (more inflow = blue, more outflow = red, balanced = green)
+            if total_flow[node] > 0:
+                balance = (out_flow[node] - in_flow[node]) / total_flow[node]
+                # -1 = all inflow (blue), 0 = balanced (green), 1 = all outflow (red)
+                node_colors.append(balance)
+            else:
+                node_colors.append(0)
         
+        # Create custom colorscale with better contrast
+        # Using more saturated, distinct colors
+        custom_colorscale = [
+            [0.0, '#1e3a8a'],  # Deep blue for receivers
+            [0.25, '#3b82f6'], # Bright blue
+            [0.5, '#10b981'],  # Green (balanced)
+            [0.75, '#f59e0b'], # Orange
+            [1.0, '#dc2626']   # Red for sources
+        ]
+        
+        # Create text annotations separately for better control
+        text_annotations = []
+        for idx, (x, y) in enumerate(zip(node_x, node_y)):
+            if node_text[idx]:  # Only add if there's text
+                # Add text with background
+                text_annotations.append(dict(
+                    x=x,
+                    y=y,
+                    text=node_text[idx],
+                    showarrow=False,
+                    font=dict(
+                        size=14,
+                        color='white',
+                        family='Arial, sans-serif'
+                    ),
+                    bgcolor='rgba(0, 0, 0, 0.5)',  # More transparent black background
+                    borderpad=4,
+                    bordercolor='rgba(0, 0, 0, 0.5)',
+                    borderwidth=1,
+                    xanchor='center',
+                    yanchor='middle'
+                ))
+        
+        # Create node trace with both markers and text for better interaction
         node_trace = go.Scatter(
             x=node_x, y=node_y,
-            mode='markers+text',
+            mode='markers+text',  # Include both markers and text for full clickable area
+            text=node_text,  # Add text back to make it interactive
+            textposition="middle center",
+            textfont=dict(
+                size=14,
+                color='white',
+                family='Arial, sans-serif'
+            ),
             hoverinfo='text',
             hovertext=node_info,
-            text=node_text,
-            textposition="middle center",
+            customdata=list(G.nodes()),  # Store node indices for click detection
             marker=dict(
                 size=node_sizes,
-                color=[centrality.get(node, 0) for node in G.nodes()],
-                colorscale='Viridis',
-                colorbar=dict(title="Node Centrality"),
-                line=dict(width=2, color='white')
+                color=node_colors,
+                colorscale=custom_colorscale,
+                colorbar=dict(
+                    title="Flow Balance",
+                    tickmode='array',
+                    tickvals=[-1, -0.5, 0, 0.5, 1],
+                    ticktext=['Receiver', 'More In', 'Balanced', 'More Out', 'Source'],
+                    len=0.5,
+                    y=0.5,
+                    thickness=15,
+                    tickfont=dict(size=11)
+                ),
+                line=dict(width=3, color='white'),  # Thicker white border for contrast
+                cmin=-1,
+                cmax=1
             )
         )
         
-        # Create figure
-        fig = go.Figure(data=[edge_trace, node_trace],
+        # Combine all edge traces and node trace
+        all_traces = edge_traces + [node_trace]
+        
+        # Create figure with arrows (text is now part of node trace)
+        fig = go.Figure(data=all_traces,
                        layout=go.Layout(
                            title=dict(text=title, font=dict(size=16)),
                            showlegend=False,
                            hovermode='closest',
                            margin=dict(b=20,l=5,r=5,t=40),
-                           annotations=[ dict(
-                               text="Hover over nodes for details",
+                           annotations=arrow_annotations + [dict(
+                               text="Node size = Total flow | Color = Flow balance | Arrow = Flow direction | Use dropdown to highlight connections",
                                showarrow=False,
                                xref="paper", yref="paper",
-                               x=0.005, y=-0.002,
-                               xanchor="left", yanchor="bottom",
-                               font=dict(color="#888", size=12)
+                               x=0.5, y=-0.05,
+                               xanchor="center", yanchor="bottom",
+                               font=dict(color="#666", size=10)
                            )],
                            xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
                            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-                           plot_bgcolor='white'
+                           plot_bgcolor='#f8f9fa',  # Slightly lighter background for better contrast
+                           paper_bgcolor='white'
                        ))
+        
+        # Add interactive highlighting with custom JavaScript
+        # This creates a more interactive experience
+        fig = self._add_interactive_highlighting(fig, G, pos, node_names, all_traces, 
+                                                arrow_annotations, in_flow, out_flow, total_flow)
+        
+        return fig
+    
+    def _add_interactive_highlighting(self, fig, G, pos, node_names, all_traces, 
+                                     arrow_annotations, in_flow, out_flow, total_flow):
+        """Add interactive highlighting capability to the network visualization."""
+        
+        # Create edge connectivity map for efficient lookup
+        edge_map = {}
+        for i, edge in enumerate(G.edges()):
+            if edge[0] not in edge_map:
+                edge_map[edge[0]] = {'out': [], 'in': []}
+            if edge[1] not in edge_map:
+                edge_map[edge[1]] = {'out': [], 'in': []}
+            edge_map[edge[0]]['out'].append(i)
+            edge_map[edge[1]]['in'].append(i)
+        
+        # Store original edge colors
+        original_data = []
+        for trace in fig.data[:-1]:  # All edge traces except the last node trace
+            original_data.append({
+                'line_color': trace.line.color if hasattr(trace.line, 'color') else 'gray',
+                'line_width': trace.line.width if hasattr(trace.line, 'width') else 1,
+                'opacity': 1.0
+            })
+        
+        # Create dropdown menu for node selection
+        buttons = [dict(
+            label='🔄 Clear Selection',
+            method='update',
+            args=[{
+                'line.color': [od['line_color'] for od in original_data],
+                'line.width': [od['line_width'] for od in original_data],
+                'opacity': [1.0] * len(original_data)
+            },
+            {'title': dict(text=fig.layout.title.text, font=dict(size=16))}],
+            args2=[None]  # Reset on second click
+        )]
+        
+        # Add button for each node
+        for node_idx in G.nodes():
+            # Create node label
+            if node_names and node_idx < len(node_names):
+                node_label = node_names[node_idx][:20]  # Truncate long names
+            else:
+                node_label = f"Node {node_idx}"
+            
+            # Prepare edge colors and widths for highlighting
+            edge_colors = []
+            edge_widths = []
+            edge_opacities = []
+            
+            edge_trace_idx = 0
+            for edge in G.edges():
+                is_inbound = (edge[1] == node_idx)  # Edge points TO this node
+                is_outbound = (edge[0] == node_idx)  # Edge points FROM this node
+                
+                if is_inbound:
+                    edge_colors.append('rgba(59, 130, 246, 0.9)')  # Bright blue for inbound
+                    edge_widths.append(4)  # Thicker line
+                    edge_opacities.append(1.0)
+                elif is_outbound:
+                    edge_colors.append('rgba(239, 68, 68, 0.9)')  # Bright red for outbound
+                    edge_widths.append(4)  # Thicker line
+                    edge_opacities.append(1.0)
+                else:
+                    # Not connected - make it very faint
+                    edge_colors.append('rgba(200, 200, 200, 0.2)')  # Very light gray
+                    edge_widths.append(0.5)  # Thin line
+                    edge_opacities.append(0.2)
+                
+                edge_trace_idx += 1
+            
+            # Count connections for info
+            in_edges = list(G.in_edges(node_idx))
+            out_edges = list(G.out_edges(node_idx))
+            
+            buttons.append(dict(
+                label=f"📍 {node_label}",
+                method='update',
+                args=[{
+                    'line.color': edge_colors,
+                    'line.width': edge_widths,
+                    'opacity': edge_opacities
+                },
+                {'title': dict(
+                    text=f"{fig.layout.title.text}<br><sub>Selected: {node_label} | " +
+                         f"<span style='color:blue'>← {len(in_edges)} inbound</span> | " +
+                         f"<span style='color:red'>→ {len(out_edges)} outbound</span></sub>",
+                    font=dict(size=16)
+                )}]
+            ))
+        
+        # Add the dropdown menu to the figure with enhanced styling
+        fig.update_layout(
+            updatemenus=[
+                dict(
+                    type='dropdown',
+                    showactive=True,
+                    buttons=buttons,
+                    x=0.02,
+                    xanchor='left',
+                    y=0.98,
+                    yanchor='top',
+                    bgcolor='#e0f2fe',  # Light blue background
+                    bordercolor='#1e3a8a',  # Dark blue border
+                    borderwidth=2,
+                    font=dict(size=13, color='#1e3a8a', family='Arial, sans-serif'),
+                    active=0  # Start with "Clear Selection" active
+                )
+            ]
+        )
+        
+        # Add more prominent instruction text with better styling
+        fig.add_annotation(
+            text="<b>👆 Select node to highlight connections</b>",
+            xref="paper", yref="paper",
+            x=0.35, y=0.98,
+            xanchor="left", yanchor="top",
+            showarrow=False,
+            font=dict(size=12, color="#1e3a8a"),
+            bgcolor="rgba(255, 245, 157, 0.9)",  # Light yellow background for visibility
+            bordercolor="#1e3a8a",
+            borderwidth=1,
+            borderpad=4
+        )
         
         return fig
     
