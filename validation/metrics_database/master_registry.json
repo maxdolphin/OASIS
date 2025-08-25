@@ -1,0 +1,79 @@
+{
+  "version": "2.1.4",
+  "created": "2025-08-25",
+  "description": "Master registry of all networks with published and calculated metrics",
+  "metrics_definitions": {
+    "tst": {
+      "full_name": "Total System Throughput",
+      "symbol": "T..",
+      "typical_units": ["mg C m⁻² y⁻¹", "kcal m⁻² y⁻¹", "flow units"]
+    },
+    "development_capacity": {
+      "full_name": "Development Capacity",
+      "symbol": "C",
+      "typical_units": ["flow-bits", "flow-nats", "mg C-bits m⁻² y⁻¹"]
+    },
+    "ascendency": {
+      "full_name": "Ascendency",
+      "symbol": "A",
+      "typical_units": ["flow-bits", "flow-nats", "mg C-bits m⁻² y⁻¹"]
+    },
+    "reserve": {
+      "full_name": "Reserve/Overhead",
+      "symbol": "Φ",
+      "typical_units": ["flow-bits", "flow-nats", "mg C-bits m⁻² y⁻¹"]
+    },
+    "relative_ascendency": {
+      "full_name": "Relative Ascendency",
+      "symbol": "α",
+      "typical_units": ["dimensionless"]
+    },
+    "robustness": {
+      "full_name": "Robustness",
+      "symbol": "R",
+      "typical_units": ["dimensionless", "flow units"]
+    },
+    "ami": {
+      "full_name": "Average Mutual Information",
+      "symbol": "AMI",
+      "typical_units": ["bits", "nats"]
+    },
+    "flow_diversity": {
+      "full_name": "Flow Diversity",
+      "symbol": "H",
+      "typical_units": ["bits", "nats"]
+    }
+  },
+  "networks": [
+    {
+      "id": "cone_spring_original",
+      "name": "Cone Spring Ecosystem (Original)",
+      "source": "Ulanowicz et al. 2009",
+      "status": "pending"
+    },
+    {
+      "id": "cone_spring_eutrophicated",
+      "name": "Cone Spring Ecosystem (Eutrophicated)",
+      "source": "Ulanowicz et al. 2009",
+      "status": "pending"
+    },
+    {
+      "id": "prawns_alligator_original",
+      "name": "Prawns-Alligator (3 Pathways)",
+      "source": "Ulanowicz et al. 2009",
+      "status": "pending"
+    },
+    {
+      "id": "prawns_alligator_efficient",
+      "name": "Prawns-Alligator (Efficient Only)",
+      "source": "Ulanowicz et al. 2009",
+      "status": "pending"
+    },
+    {
+      "id": "prawns_alligator_adapted",
+      "name": "Prawns-Alligator (After Fish Loss)",
+      "source": "Ulanowicz et al. 2009",
+      "status": "pending"
+    }
+  ]
+}

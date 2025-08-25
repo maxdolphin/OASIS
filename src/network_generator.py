@@ -390,17 +390,17 @@ class OrganizationalNetworkGenerator:
                     yanchor='middle'
                 ))
         
-        # Create node trace with both markers and text for better interaction
+        # Create node trace with markers only (text will be in annotations with backgrounds)
         node_trace = go.Scatter(
             x=node_x, y=node_y,
-            mode='markers+text',  # Include both markers and text for full clickable area
-            text=node_text,  # Add text back to make it interactive
-            textposition="middle center",
-            textfont=dict(
-                size=14,
-                color='white',
-                family='Arial, sans-serif'
-            ),
+            mode='markers',  # Markers only, text will be in annotations
+            # text=node_text,  # Removed - using annotations instead
+            # textposition="middle center",  # Removed - using annotations instead
+            # textfont=dict(  # Removed - using annotations instead
+            #     size=14,
+            #     color='white',
+            #     family='Arial, sans-serif'
+            # ),
             hoverinfo='text',
             hovertext=node_info,
             customdata=list(G.nodes()),  # Store node indices for click detection
@@ -427,14 +427,14 @@ class OrganizationalNetworkGenerator:
         # Combine all edge traces and node trace
         all_traces = edge_traces + [node_trace]
         
-        # Create figure with arrows (text is now part of node trace)
+        # Create figure with arrows and text annotations with backgrounds
         fig = go.Figure(data=all_traces,
                        layout=go.Layout(
                            title=dict(text=title, font=dict(size=16)),
                            showlegend=False,
                            hovermode='closest',
                            margin=dict(b=20,l=5,r=5,t=40),
-                           annotations=arrow_annotations + [dict(
+                           annotations=arrow_annotations + text_annotations + [dict(
                                text="Node size = Total flow | Color = Flow balance | Arrow = Flow direction | Use dropdown to highlight connections",
                                showarrow=False,
                                xref="paper", yref="paper",

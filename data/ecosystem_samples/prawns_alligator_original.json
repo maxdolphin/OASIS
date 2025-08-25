@@ -1,0 +1,34 @@
+{
+  "organization": "Prawns-Alligator Ecosystem (Original with Fish)",
+  "nodes": [
+    "Prawns",
+    "Fish",
+    "Turtles",
+    "Snakes", 
+    "Alligators"
+  ],
+  "flows": [
+    [0, 20.5, 74.3, 7.7, 0],
+    [0, 0, 0, 0, 9.16],
+    [0, 0, 0, 0, 7.20],
+    [0, 0, 0, 0, 2.06],
+    [0, 0, 0, 0, 0]
+  ],
+  "metadata": {
+    "source": "Ulanowicz et al. 2009 - Quantifying Sustainability",
+    "figure": "Figure 1",
+    "description": "Three parallel pathways from prawns to alligators in South Florida ecosystem",
+    "units": "mg C m⁻² y⁻¹",
+    "published_metrics": {
+      "total_system_throughput": 102.5,
+      "ascendency": 53.9,
+      "reserve": 121.3,
+      "note": "Original configuration with three parallel pathways providing resilience"
+    },
+    "pathways": [
+      "Prawns → Fish → Alligators (most efficient)",
+      "Prawns → Turtles → Alligators",
+      "Prawns → Snakes → Alligators"
+    ]
+  }
+}

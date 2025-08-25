@@ -1,0 +1,172 @@
+{
+  "network_id": "prawns_alligator_original",
+  "network_name": "Prawns-Alligator Ecosystem (Original with 3 Pathways)",
+  "source": {
+    "paper": "Ulanowicz et al. 2009",
+    "title": "Quantifying sustainability: Resilience, efficiency and the return of information theory",
+    "doi": "10.1016/j.ecocom.2008.10.005",
+    "figure": "Figure 1",
+    "page": 28
+  },
+  "network_data": {
+    "nodes": [
+      "Prawns",
+      "Fish",
+      "Turtles",
+      "Snakes",
+      "Alligators"
+    ],
+    "flows": [
+      [
+        0,
+        20.5,
+        74.3,
+        7.7,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        9.16
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        7.2
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        2.06
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    ],
+    "units": "mg C m\u207b\u00b2 y\u207b\u00b9"
+  },
+  "published_metrics": {
+    "tst": {
+      "value": 102.6,
+      "unit": "mg C m\u207b\u00b2 y\u207b\u00b9",
+      "reported": true,
+      "source_location": "Page 28"
+    },
+    "development_capacity": {
+      "value": null,
+      "unit": "mg C-bits m\u207b\u00b2 y\u207b\u00b9",
+      "reported": false,
+      "calculated_from_paper": 175.2,
+      "note": "Can be derived: A + \u03a6 = 53.9 + 121.3 = 175.2"
+    },
+    "ascendency": {
+      "value": 53.9,
+      "unit": "mg C-bits m\u207b\u00b2 y\u207b\u00b9",
+      "reported": true,
+      "source_location": "Page 28"
+    },
+    "reserve": {
+      "value": 121.3,
+      "unit": "mg C-bits m\u207b\u00b2 y\u207b\u00b9",
+      "reported": true,
+      "source_location": "Page 28"
+    },
+    "relative_ascendency": {
+      "value": null,
+      "unit": "dimensionless",
+      "reported": false,
+      "calculated_from_paper": 0.308,
+      "note": "Can be derived: 53.9/(53.9+121.3) = 0.308"
+    },
+    "robustness": {
+      "value": null,
+      "unit": "dimensionless",
+      "reported": false
+    },
+    "ami": {
+      "value": null,
+      "unit": "bits",
+      "reported": false
+    },
+    "flow_diversity": {
+      "value": null,
+      "unit": "bits",
+      "reported": false
+    }
+  },
+  "calculated_metrics": {
+    "tst": {
+      "value": 120.92,
+      "unit": "mg C m\u207b\u00b2 y\u207b\u00b9",
+      "calculation_date": "2025-08-25"
+    },
+    "development_capacity": {
+      "value": 146.10812010572505,
+      "unit": "flow-nats",
+      "calculation_date": "2025-08-25"
+    },
+    "ascendency": {
+      "value": 51.600572263540485,
+      "unit": "flow-nats",
+      "calculation_date": "2025-08-25"
+    },
+    "reserve": {
+      "value": 94.50754784218456,
+      "unit": "flow-nats",
+      "calculation_date": "2025-08-25"
+    },
+    "relative_ascendency": {
+      "value": 0.3531670397661806,
+      "unit": "dimensionless",
+      "calculation_date": "2025-08-25"
+    },
+    "robustness": {
+      "value": 0.3675812464757423,
+      "unit": "dimensionless",
+      "calculation_date": "2025-08-25"
+    },
+    "ami": {
+      "value": null,
+      "unit": "nats",
+      "calculation_date": null
+    },
+    "flow_diversity": {
+      "value": null,
+      "unit": "nats",
+      "calculation_date": null
+    }
+  },
+  "comparison": {
+    "tst_match": {
+      "published": 102.6,
+      "calculated": 120.92,
+      "error_abs": 18.320000000000007,
+      "error_pct": 17.855750487329445,
+      "status": "DISCREPANCY"
+    },
+    "ascendency_match": {
+      "published": 53.9,
+      "calculated": 51.600572263540485,
+      "error_abs": 2.2994277364595135,
+      "error_pct": 4.266099696585368,
+      "status": "GOOD"
+    },
+    "reserve_match": {
+      "published": 121.3,
+      "calculated": 94.50754784218456,
+      "error_abs": 26.792452157815433,
+      "error_pct": 22.087759404629377,
+      "status": "DISCREPANCY"
+    },
+    "fundamental_check": {
+      "C_equals_A_plus_Phi": 

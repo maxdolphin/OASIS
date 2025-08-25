@@ -1,0 +1,27 @@
+{
+  "organization": "Prawns-Alligator Ecosystem (Most Efficient Only)",
+  "nodes": [
+    "Prawns",
+    "Fish",
+    "Alligators"
+  ],
+  "flows": [
+    [0, 102.5, 0],
+    [0, 0, 102.5],
+    [0, 0, 0]
+  ],
+  "metadata": {
+    "source": "Ulanowicz et al. 2009 - Quantifying Sustainability",
+    "figure": "Figure 2",
+    "description": "Hypothetical configuration with only the most efficient pathway",
+    "units": "mg C m⁻² y⁻¹",
+    "published_metrics": {
+      "total_system_throughput": 121.8,
+      "ascendency": 100.3,
+      "reserve": 0,
+      "note": "Maximum efficiency but zero resilience - system collapses if fish fail"
+    },
+    "warning": "This configuration demonstrates the danger of pure efficiency without redundancy",
+    "ecological_lesson": "Shows why systems need balance between efficiency and resilience"
+  }
+}

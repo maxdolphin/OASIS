@@ -1,0 +1,31 @@
+{
+  "organization": "Prawns-Alligator Ecosystem (After Fish Loss)",
+  "nodes": [
+    "Prawns",
+    "Turtles", 
+    "Snakes",
+    "Alligators"
+  ],
+  "flows": [
+    [0, 74.3, 16.1, 0],
+    [0, 0, 0, 7.20],
+    [0, 0, 0, 2.06],
+    [0, 0, 0, 0]
+  ],
+  "metadata": {
+    "source": "Ulanowicz et al. 2009 - Quantifying Sustainability",
+    "figure": "Figure 3",
+    "description": "Possible accommodation by turtles and snakes to the disappearance of fish as intermediaries between prawns and alligators",
+    "context": "System after adaptation to fish loss, showing alternative pathways",
+    "units": "mg C m⁻² y⁻¹",
+    "published_metrics": {
+      "total_system_throughput": 99.66,
+      "note": "System adapted after loss of fish, maintaining function through alternative pathways"
+    },
+    "ecological_significance": {
+      "resilience_demonstration": "Shows how ecosystems can reorganize after species loss",
+      "pathway_redundancy": "Turtles and snakes provide alternative energy transfer routes",
+      "adaptation": "System maintains 97% of original throughput despite fish loss"
+    }
+  }
+}
