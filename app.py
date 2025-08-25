@@ -1984,7 +1984,7 @@ def formulas_reference_interface():
     
     # Create tabs for different categories
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-        "🧮 Core Ulanowicz IT", "🔄 Fath et al. (2019)", "🌱 Regenerative Economics", 
+        "🧮 Core Ulanowicz IT", "💚 Regenerative Health", "🌱 Regenerative Economics", 
         "📊 Network Analysis", "🎯 Sustainability Metrics", "⚙️ Extended Indicators"
     ])
     
@@ -2040,10 +2040,10 @@ def formulas_reference_interface():
         """)
     
     with tab2:
-        st.subheader("🔄 Fath et al. (2019) - Measuring Regenerative Economics")
-        st.markdown("*Complete formulas from 'Measuring regenerative economics: 10 principles and measures undergirding systemic economic health'*")
+        st.subheader("💚 Regenerative Health Metrics")
+        st.markdown("*Key formulas for measuring systemic health based on the 10 principles of regenerative economics*")
         
-        st.info("📚 **Reference**: Fath, B.D., Fiscus, D.A., Goerner, S.J., Berea, A., & Ulanowicz, R.E. (2019). Global Transitions, 1, 15-27.")
+        st.info("📚 **Source**: Fath et al. (2019) - 'Measuring regenerative economics: 10 principles and measures undergirding systemic economic health', Global Transitions, 1, 15-27.")
         
         st.markdown("""
         ### **1. Network Aggradation (Cross-Scale Circulation)**
