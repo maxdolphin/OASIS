@@ -1,0 +1,125 @@
+#!/usr/bin/env python3
+"""
+Test the improved Window of Viability visualization
+"""
+
+import numpy as np
+import matplotlib.pyplot as plt
+import json
+from pathlib import Path
+import sys
+
+# Add parent directory
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from src.ulanowicz_calculator import UlanowiczCalculator
+
+def load_network(filename):
+    filepath = Path(__file__).parent.parent / 'data' / 'ecosystem_samples' / filename
+    with open(filepath, 'r') as f:
+        return json.load(f)
+
+def calculate_metrics(data):
+    flows = np.array(data['flows'])
+    calc = UlanowiczCalculator(flows)
+    basic = calc.get_sustainability_metrics()
+    extended = calc.get_extended_metrics()
+    return {
+        'alpha': basic['relative_ascendency'],
+        'robustness': extended['robustness']
+    }
+
+# Load and calculate metrics
+original = calculate_metrics(load_network('prawns_alligator_original.json'))
+efficient = calculate_metrics(load_network('prawns_alligator_efficient.json'))
+adapted = calculate_metrics(load_network('prawns_alligator_adapted.json'))
+
+# Create improved visualization
+fig, ax = plt.subplots(figsize=(14, 8))
+
+# Define the window
+alpha_range = np.linspace(0, 1, 100)
+optimal_alpha = 0.460
+
+# Robustness curve
+b = 1.288
+robustness_curve = []
+for a in alpha_range:
+    if a > 0 and a < 1:
+        r = -(np.e/np.log(np.e)) * a**b * np.log(a**b)
+    else:
+        r = 0
+    robustness_curve.append(max(0, r))
+
+# Plot robustness curve
+ax.plot(alpha_range, robustness_curve, 'k-', linewidth=2, label='Theoretical Robustness', alpha=0.5)
+
+# Mark the window of viability
+ax.axvspan(0.2, 0.6, alpha=0.2, color='green', label='Window of Viability')
+ax.axvline(optimal_alpha, color='orange', linestyle='--', linewidth=2, label=f'Optimal α = {optimal_alpha}')
+
+# Plot our three networks with improved positioning
+network_data = [
+    ('Original\n(3 paths)', original['alpha'], original['robustness'], 'green', 'o'),
+    ('Efficient\nOnly', efficient['alpha'], efficient['robustness'], 'red', 's'),
+    ('Adapted\n(no fish)', adapted['alpha'], adapted['robustness'], 'blue', '^')
+]
+
+for name, alpha, robustness, color, marker in network_data:
+    ax.scatter(alpha, robustness, s=250, c=color, marker=marker, 
+              edgecolors='black', linewidth=2, label=name, zorder=5)
+    
+    # Improved text positioning
+    if "Efficient" in name:
+        # Position efficient network label to the left to avoid edge
+        ax.annotate(name, (alpha, robustness),
+                    xytext=(-70, 20), textcoords='offset points',
+                    fontsize=10, fontweight='bold',
+                    ha='center', va='bottom',
+                    bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.7))
+    elif "Original" in name:
+        # Position original network label above
+        ax.annotate(name, (alpha, robustness),
+                    xytext=(0, 15), textcoords='offset points',
+                    fontsize=10, fontweight='bold',
+                    ha='center', va='bottom')
+    else:
+        # Position adapted network label to the right
+        ax.annotate(name, (alpha, robustness),
+                    xytext=(15, -5), textcoords='offset points',
+                    fontsize=10, fontweight='bold',
+                    ha='left', va='center')
+
+# Add regions labels with better positioning
+ax.text(0.1, 0.25, 'TOO\nCHAOTIC', ha='center', va='center', 
+        fontsize=12, color='red', fontweight='bold', alpha=0.7)
+ax.text(0.4, 0.35, 'VIABLE\nSYSTEMS', ha='center', va='center', 
+        fontsize=12, color='green', fontweight='bold', alpha=0.7)
+ax.text(0.8, 0.15, 'TOO\nRIGID', ha='center', va='center', 
+        fontsize=12, color='red', fontweight='bold', alpha=0.7)
+
+ax.set_xlabel('Relative Ascendency (α)', fontsize=13)
+ax.set_ylabel('Robustness', fontsize=13)
+ax.set_title('Prawns-Alligator Networks on the Window of Viability', 
+            fontsize=16, fontweight='bold', pad=20)
+ax.grid(True, alpha=0.3)
+ax.legend(loc='upper left', fontsize=10)
+ax.set_xlim(-0.05, 1.08)  # Extend x-axis slightly for efficient network label
+ax.set_ylim(-0.02, 0.52)
+
+# Add a note about the efficient network
+ax.text(0.98, 0.48, 'Zero resilience!\nSystem collapses\nif any link fails', 
+        ha='right', va='top', fontsize=9, color='darkred',
+        bbox=dict(boxstyle='round,pad=0.4', facecolor='yellow', alpha=0.2))
+
+plt.tight_layout()
+plt.savefig('validation/window_viability_improved.png', dpi=150, bbox_inches='tight')
+print("\n✓ Improved Window of Viability plot saved as 'window_viability_improved.png'")
+
+# Print positions for verification
+print("\nNetwork Positions:")
+print("=" * 50)
+print(f"Original:  α = {original['alpha']:.3f}, R = {original['robustness']:.3f}")
+print(f"Efficient: α = {efficient['alpha']:.3f}, R = {efficient['robustness']:.3f}")
+print(f"Adapted:   α = {adapted['alpha']:.3f}, R = {adapted['robustness']:.3f}")
+
+plt.show()

@@ -447,6 +447,87 @@ class SustainabilityVisualizer:
         
         return fig
     
+    def create_sankey_diagram(self) -> go.Figure:
+        """
+        Create a Sankey diagram showing directed flows between nodes.
+        
+        Returns:
+            Plotly Figure object with Sankey diagram
+        """
+        flow_matrix = self.calculator.flow_matrix
+        node_names = self.calculator.node_names if hasattr(self.calculator, 'node_names') else [f"Node {i+1}" for i in range(len(flow_matrix))]
+        
+        # Prepare data for Sankey diagram
+        source = []
+        target = []
+        value = []
+        link_colors = []
+        
+        # Get max flow for color scaling
+        max_flow = np.max(flow_matrix) if np.max(flow_matrix) > 0 else 1
+        
+        for i in range(len(flow_matrix)):
+            for j in range(len(flow_matrix[0])):
+                if flow_matrix[i][j] > 0:  # Only include non-zero flows
+                    source.append(i)
+                    target.append(j)
+                    value.append(flow_matrix[i][j])
+                    # Color based on flow strength
+                    intensity = flow_matrix[i][j] / max_flow
+                    if intensity > 0.7:
+                        link_colors.append('rgba(255, 65, 54, 0.6)')  # Red for strong flows
+                    elif intensity > 0.3:
+                        link_colors.append('rgba(255, 193, 7, 0.6)')  # Yellow for medium flows
+                    else:
+                        link_colors.append('rgba(102, 126, 234, 0.6)')  # Blue for weak flows
+        
+        # Create node colors based on total throughput
+        node_throughput = [sum(flow_matrix[i, :]) + sum(flow_matrix[:, i]) for i in range(len(flow_matrix))]
+        max_throughput = max(node_throughput) if max(node_throughput) > 0 else 1
+        node_colors = []
+        for throughput in node_throughput:
+            intensity = throughput / max_throughput
+            if intensity > 0.7:
+                node_colors.append('rgba(255, 65, 54, 0.8)')
+            elif intensity > 0.3:
+                node_colors.append('rgba(255, 193, 7, 0.8)')
+            else:
+                node_colors.append('rgba(102, 126, 234, 0.8)')
+        
+        # Create Sankey diagram
+        fig = go.Figure(data=[go.Sankey(
+            node=dict(
+                pad=15,
+                thickness=20,
+                line=dict(color="black", width=0.5),
+                label=node_names,
+                color=node_colors,
+                hovertemplate='%{label}<br>Total Throughput: %{value:.1f}<extra></extra>'
+            ),
+            link=dict(
+                source=source,
+                target=target,
+                value=value,
+                color=link_colors,
+                hovertemplate='%{source.label} → %{target.label}<br>Flow: %{value:.2f}<extra></extra>'
+            )
+        )])
+        
+        fig.update_layout(
+            title={
+                'text': "Network Flow Sankey Diagram",
+                'x': 0.5,
+                'xanchor': 'center',
+                'font': {'size': 20}
+            },
+            font={'size': 12},
+            height=600,
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)'
+        )
+        
+        return fig
+    
     def save_visualization(self, filename: str, format: str = 'html'):
         """
         Save visualization to file.

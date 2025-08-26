@@ -1,122 +1,74 @@
 {
   "network_id": "prawns_alligator_original",
-  "network_name": "Prawns-Alligator Ecosystem (Original with 3 Pathways)",
+  "network_name": "Prawns-Alligator Ecosystem (Original with Fish)",
   "source": {
     "paper": "Ulanowicz et al. 2009",
-    "title": "Quantifying sustainability: Resilience, efficiency and the return of information theory",
     "doi": "10.1016/j.ecocom.2008.10.005",
-    "figure": "Figure 1",
-    "page": 28
+    "figure": "Figure 3a",
+    "page": 31
   },
   "network_data": {
-    "nodes": [
-      "Prawns",
-      "Fish",
-      "Turtles",
-      "Snakes",
-      "Alligators"
-    ],
+    "nodes": ["Prawns", "Fish", "Turtles", "Snakes", "Alligators"],
     "flows": [
-      [
-        0,
-        20.5,
-        74.3,
-        7.7,
-        0
-      ],
-      [
-        0,
-        0,
-        0,
-        0,
-        9.16
-      ],
-      [
-        0,
-        0,
-        0,
-        0,
-        7.2
-      ],
-      [
-        0,
-        0,
-        0,
-        0,
-        2.06
-      ],
-      [
-        0,
-        0,
-        0,
-        0,
-        0
-      ]
+      [0, 20.5, 74.3, 7.7, 0],
+      [0, 0, 0, 0, 9.16],
+      [0, 0, 0, 0, 7.20],
+      [0, 0, 0, 0, 2.06],
+      [0, 0, 0, 0, 0]
     ],
-    "units": "mg C m\u207b\u00b2 y\u207b\u00b9"
+    "units": "mg C m⁻² y⁻¹"
   },
   "published_metrics": {
     "tst": {
-      "value": 102.6,
-      "unit": "mg C m\u207b\u00b2 y\u207b\u00b9",
+      "value": 102.5,
+      "unit": "mg C m⁻² y⁻¹",
       "reported": true,
-      "source_location": "Page 28"
+      "source_text": "The hypothetical network involves 102.5 mg C m⁻² y⁻¹ flowing from prawns",
+      "source_location": "Page 31, Section 3"
     },
     "development_capacity": {
       "value": null,
-      "unit": "mg C-bits m\u207b\u00b2 y\u207b\u00b9",
-      "reported": false,
-      "calculated_from_paper": 175.2,
-      "note": "Can be derived: A + \u03a6 = 53.9 + 121.3 = 175.2"
+      "unit": "mg C-bits m⁻² y⁻¹",
+      "reported": false
     },
     "ascendency": {
       "value": 53.9,
-      "unit": "mg C-bits m\u207b\u00b2 y\u207b\u00b9",
+      "unit": "mg C-bits m⁻² y⁻¹",
       "reported": true,
-      "source_location": "Page 28"
+      "source_text": "Its ascendency is A = 53.9 mg C-bits m⁻² y⁻¹",
+      "source_location": "Page 31, Figure 3 discussion"
     },
     "reserve": {
       "value": 121.3,
-      "unit": "mg C-bits m\u207b\u00b2 y\u207b\u00b9",
+      "unit": "mg C-bits m⁻² y⁻¹",
       "reported": true,
-      "source_location": "Page 28"
+      "source_text": "Its reserve is Φ = 121.3 mg C-bits m⁻² y⁻¹",
+      "source_location": "Page 31, Figure 3 discussion"
     },
     "relative_ascendency": {
       "value": null,
       "unit": "dimensionless",
-      "reported": false,
-      "calculated_from_paper": 0.308,
-      "note": "Can be derived: 53.9/(53.9+121.3) = 0.308"
+      "reported": false
     },
     "robustness": {
       "value": null,
       "unit": "dimensionless",
-      "reported": false
-    },
-    "ami": {
-      "value": null,
-      "unit": "bits",
-      "reported": false
-    },
-    "flow_diversity": {
-      "value": null,
-      "unit": "bits",
       "reported": false
     }
   },
   "calculated_metrics": {
     "tst": {
       "value": 120.92,
-      "unit": "mg C m\u207b\u00b2 y\u207b\u00b9",
+      "unit": "mg C m⁻² y⁻¹",
       "calculation_date": "2025-08-25"
     },
     "development_capacity": {
-      "value": 146.10812010572505,
+      "value": 146.10811992703003,
       "unit": "flow-nats",
       "calculation_date": "2025-08-25"
     },
     "ascendency": {
-      "value": 51.600572263540485,
+      "value": 51.60057208484548,
       "unit": "flow-nats",
       "calculation_date": "2025-08-25"
     },
@@ -126,39 +78,29 @@
       "calculation_date": "2025-08-25"
     },
     "relative_ascendency": {
-      "value": 0.3531670397661806,
+      "value": 0.35316709620193404,
       "unit": "dimensionless",
       "calculation_date": "2025-08-25"
     },
     "robustness": {
-      "value": 0.3675812464757423,
+      "value": 0.36758083654922134,
       "unit": "dimensionless",
       "calculation_date": "2025-08-25"
-    },
-    "ami": {
-      "value": null,
-      "unit": "nats",
-      "calculation_date": null
-    },
-    "flow_diversity": {
-      "value": null,
-      "unit": "nats",
-      "calculation_date": null
     }
   },
   "comparison": {
     "tst_match": {
-      "published": 102.6,
+      "published": 102.5,
       "calculated": 120.92,
-      "error_abs": 18.320000000000007,
-      "error_pct": 17.855750487329445,
+      "error_abs": 18.420000000000002,
+      "error_pct": 17.97073170731707,
       "status": "DISCREPANCY"
     },
     "ascendency_match": {
       "published": 53.9,
-      "calculated": 51.600572263540485,
-      "error_abs": 2.2994277364595135,
-      "error_pct": 4.266099696585368,
+      "calculated": 51.60057208484548,
+      "error_abs": 2.299427915154522,
+      "error_pct": 4.266001324897818,
       "status": "GOOD"
     },
     "reserve_match": {
@@ -169,4 +111,16 @@
       "status": "DISCREPANCY"
     },
     "fundamental_check": {
-      "C_equals_A_plus_Phi": 
+      "C_equals_A_plus_Phi": true,
+      "calculated_C": 146.10811992703003,
+      "calculated_A_plus_Phi": 146.10811992703003,
+      "error": 0.0,
+      "status": "PERFECT"
+    }
+  },
+  "metadata": {
+    "date_extracted": "2025-08-25",
+    "extracted_by": "validation_v2.1.4",
+    "notes": "Original configuration with three parallel pathways providing resilience"
+  }
+}

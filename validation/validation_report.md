@@ -72,12 +72,31 @@ Our implementation of the Ulanowicz formulas is mathematically correct and inter
 
 For practical use in organizational analysis (our primary domain), the implementation is robust and provides meaningful insights about system balance between efficiency and resilience. The exact α values may differ from ecological studies, but the principles and relationships remain valid.
 
+## Future Validation with Large-Scale Datasets
+
+Our validation framework has been extended to support large-scale real-world datasets across multiple domains:
+
+### Available for Testing
+- **🏭 Supply Chain**: DataCo Smart Supply Chain, Logistics datasets
+- **⚡ Energy Networks**: European Power Grid, Smart Grid datasets  
+- **💰 Financial Flows**: PaySim, Banking transaction networks
+- **🌍 Trade & Materials**: OECD, WTO, Eurostat official datasets
+
+For detailed information on these datasets, see:
+- [Dataset Sources Summary](dataset_sources_summary.md)
+- [Flow Datasets Documentation](../docs/flow_datasets_documentation.md)
+- [Requirements Specification](../requirements_and_ideas/flow_datasets_requirements.md)
+
+These large-scale datasets will allow validation of our implementation at massive scales and across diverse flow domains, providing additional confidence in the calculation methods and their applicability to real-world networks.
+
 ## Technical Notes
 
 - All formulas use natural logarithms (ln) not log₂
 - Flow matrix convention: flow[i,j] = flow from node i to node j  
 - Total System Throughput (TST) = sum of all flows in the system
 - The fundamental relationship C = A + Φ must always hold (use as validation check)
+- Large-scale datasets require conversion to our standard JSON format
+- Official datasets (OECD, Eurostat, WTO) provide highest validation confidence
 
 ---
-*End of Validation Report*
+*Validation Report - Last Updated: January 27, 2025*

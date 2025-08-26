@@ -232,6 +232,48 @@ This implementation is based on:
 - **Email vs. Document Flows**: Separate analysis of communication types
 - **Synthetic Data Generator**: Create custom organizations with realistic patterns
 
+## 📚 Documentation
+
+### Core Documentation
+- **[Flow Datasets Documentation](docs/flow_datasets_documentation.md)** - Comprehensive guide to large-scale real-world datasets
+- **[Flow Datasets Requirements](requirements_and_ideas/flow_datasets_requirements.md)** - Technical requirements and specifications
+- **[Webapp Guide](WEBAPP_GUIDE.md)** - Complete application usage guide
+- **[Project Summary](PROJECT_SUMMARY.md)** - High-level system overview
+
+### 🚀 Real-World Datasets - Ready for Immediate Analysis
+The system includes **9 fully processed, ready-to-use** flow datasets from multiple domains:
+
+#### ⚡ Energy Flow Networks (2 datasets)
+- **✅ European Power Grid Network** - 10 nodes, continental energy distribution (9,832 MW total flow)
+- **✅ Smart Grid Real-Time Monitoring** - Smart grid monitoring system
+
+#### 🏭 Supply Chain Networks (2 datasets)  
+- **✅ DataCo Smart Supply Chain** - 12 nodes, multi-tier supply network (suppliers→retail)
+- **✅ Logistics and Supply Chain Network** - Modern distribution system
+
+#### 💰 Financial Flow Networks (2 datasets)
+- **✅ PaySim Mobile Money Network** - 16 nodes, banking ecosystem with payment flows
+- **✅ Banking Transaction Network** - Financial transaction system
+
+#### 🌍 Trade & Material Networks (3 datasets)
+- **✅ OECD Input-Output Network** - 15 economic sectors, international flows
+- **✅ EU Material Flow Network** - 20 EU countries, material resource flows  
+- **✅ WTO Global Trade Network** - 20 countries, international trade flows
+
+**No conversion needed** - All datasets processed and ready for immediate Ulanowicz analysis!
+
+### Validation & Research
+- **[Validation Notebooks](validation/)** - Jupyter notebooks validating calculations
+- **[Prawns-Alligator Analysis](validation/prawns_alligator_validation.ipynb)** - Ecosystem validation
+- **[Research Papers](papers/)** - Scientific literature and references
+
+### Technical Resources
+- **[API Documentation](src/)** - Core calculation modules
+- **[Requirements](docs/requirements.txt)** - System dependencies
+- **[Contributing Guidelines](CONTRIBUTING.md)** - Development participation
+
+Access these datasets through the **"🌍 Real Life Data"** section in the application's sample data interface.
+
 ## 🤝 Contributing
 
 Contributions are welcome! Please feel free to:

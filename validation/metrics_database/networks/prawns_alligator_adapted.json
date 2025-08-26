@@ -23,7 +23,8 @@
       "value": 99.7,
       "unit": "mg C m⁻² y⁻¹",
       "reported": true,
-      "source_location": "Figure 3 caption"
+      "source_text": "A third possibility would involve 99.7 mg C m⁻² y⁻¹",
+      "source_location": "Page 31, Figure 3c caption"
     },
     "development_capacity": {
       "value": null,
@@ -35,13 +36,15 @@
       "value": 44.5,
       "unit": "mg C-bits m⁻² y⁻¹",
       "reported": true,
-      "source_location": "Page 31"
+      "source_text": "The ascendency would now become A = 44.5 mg C-bits m⁻² y⁻¹",
+      "source_location": "Page 31, Section 3"
     },
     "reserve": {
       "value": 68.2,
       "unit": "mg C-bits m⁻² y⁻¹",
       "reported": true,
-      "source_location": "Page 31"
+      "source_text": "The reserve would be Φ = 68.2 mg C-bits m⁻² y⁻¹",
+      "source_location": "Page 31, Section 3"
     },
     "relative_ascendency": {
       "value": null,

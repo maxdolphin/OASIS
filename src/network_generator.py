@@ -257,7 +257,7 @@ class OrganizationalNetworkGenerator:
         
         # Create edge traces with varying thickness and color
         edge_traces = []
-        arrow_annotations = []
+        edge_annotations = []
         
         for edge in G.edges():
             x0, y0 = pos[edge[0]]
@@ -270,49 +270,51 @@ class OrganizationalNetworkGenerator:
             # Edge width from 0.5 to 3 based on flow
             edge_width = 0.5 + 2.5 * normalized_weight
             
-            # Simpler color scheme: light gray to dark gray based on flow intensity
-            # This provides good contrast without being too distracting
-            gray_value = int(200 - 100 * normalized_weight)  # From light (200) to darker (100)
+            # Simple color scheme
+            gray_value = int(200 - 100 * normalized_weight)
             edge_color = f'rgba({gray_value}, {gray_value}, {gray_value}, 0.7)'
             
             # Create edge line
             edge_trace = go.Scatter(
-                x=[x0, x1], y=[y0, y1],
-                line=dict(width=edge_width, color=edge_color),
+                x=[x0, x1, None], 
+                y=[y0, y1, None],
+                line=dict(
+                    width=edge_width, 
+                    color=edge_color
+                ),
                 hoverinfo='text',
-                hovertext=f'Flow: {weight:.1f}',
+                hovertext=f'Flow: {weight:.1f}<br>From: Node {edge[0]}<br>To: Node {edge[1]}',
                 mode='lines',
                 showlegend=False
             )
             edge_traces.append(edge_trace)
             
-            # Add arrowhead annotation
-            # Calculate arrow position (85% along the edge to avoid overlapping with target node)
-            arrow_scale = 0.85
-            arrow_x = x0 + arrow_scale * (x1 - x0)
-            arrow_y = y0 + arrow_scale * (y1 - y0)
+            # Add arrow annotation using Plotly's annotation system
+            # Position arrow at 80% along the edge
+            arrow_pos = 0.8
+            arrow_x = x0 + arrow_pos * (x1 - x0)
+            arrow_y = y0 + arrow_pos * (y1 - y0)
             
-            # Calculate arrow direction
-            dx = x1 - x0
-            dy = y1 - y0
+            # Create arrow that points from current position toward end
+            arrow_end_x = arrow_x + 0.1 * (x1 - x0)
+            arrow_end_y = arrow_y + 0.1 * (y1 - y0)
             
-            # Create arrow annotation
-            arrow = dict(
-                ax=arrow_x - 0.02 * dx,  # Start point slightly back
-                ay=arrow_y - 0.02 * dy,
-                x=arrow_x,  # End point
-                y=arrow_y,
+            arrow_annotation = dict(
+                ax=arrow_x,
+                ay=arrow_y,
+                x=arrow_end_x,
+                y=arrow_end_y,
                 xref='x',
                 yref='y',
                 axref='x',
                 ayref='y',
                 showarrow=True,
                 arrowhead=2,
-                arrowsize=1,
-                arrowwidth=edge_width,
+                arrowsize=1.2,
+                arrowwidth=max(1.5, edge_width * 0.8),
                 arrowcolor=edge_color,
             )
-            arrow_annotations.append(arrow)
+            edge_annotations.append(arrow_annotation)
         
         # Node trace
         node_x = []
@@ -371,23 +373,25 @@ class OrganizationalNetworkGenerator:
         text_annotations = []
         for idx, (x, y) in enumerate(zip(node_x, node_y)):
             if node_text[idx]:  # Only add if there's text
-                # Add text with background
+                # Add text with styled background
                 text_annotations.append(dict(
                     x=x,
                     y=y,
-                    text=node_text[idx],
+                    text=f"<b>{node_text[idx]}</b>",  # Bold text for better visibility
                     showarrow=False,
                     font=dict(
-                        size=14,
+                        size=13,
                         color='white',
-                        family='Arial, sans-serif'
+                        family='Arial Rounded MT, Arial, sans-serif'  # Try rounded font first
                     ),
-                    bgcolor='rgba(0, 0, 0, 0.5)',  # More transparent black background
-                    borderpad=4,
-                    bordercolor='rgba(0, 0, 0, 0.5)',
-                    borderwidth=1,
+                    bgcolor='rgba(20, 20, 20, 0.5)',  # 50% opaque background
+                    borderpad=8,  # Good padding
+                    bordercolor='rgba(255, 255, 255, 0.3)',  # More visible white border
+                    borderwidth=1,  # Slightly thicker border
                     xanchor='center',
-                    yanchor='middle'
+                    yanchor='middle',
+                    align='center',
+                    valign='middle',
                 ))
         
         # Create node trace with markers only (text will be in annotations with backgrounds)
@@ -427,15 +431,15 @@ class OrganizationalNetworkGenerator:
         # Combine all edge traces and node trace
         all_traces = edge_traces + [node_trace]
         
-        # Create figure with arrows and text annotations with backgrounds
+        # Create figure with arrow and text annotations
         fig = go.Figure(data=all_traces,
                        layout=go.Layout(
                            title=dict(text=title, font=dict(size=16)),
                            showlegend=False,
                            hovermode='closest',
                            margin=dict(b=20,l=5,r=5,t=40),
-                           annotations=arrow_annotations + text_annotations + [dict(
-                               text="Node size = Total flow | Color = Flow balance | Arrow = Flow direction | Use dropdown to highlight connections",
+                           annotations=edge_annotations + text_annotations + [dict(
+                               text="Node size = Total flow | Color = Flow balance | Edge thickness = Flow volume | Arrows show flow direction | Use dropdown to highlight connections",
                                showarrow=False,
                                xref="paper", yref="paper",
                                x=0.5, y=-0.05,
@@ -448,15 +452,14 @@ class OrganizationalNetworkGenerator:
                            paper_bgcolor='white'
                        ))
         
-        # Add interactive highlighting with custom JavaScript
-        # This creates a more interactive experience
+        # Add interactive highlighting
         fig = self._add_interactive_highlighting(fig, G, pos, node_names, all_traces, 
-                                                arrow_annotations, in_flow, out_flow, total_flow)
+                                                in_flow, out_flow, total_flow)
         
         return fig
     
     def _add_interactive_highlighting(self, fig, G, pos, node_names, all_traces, 
-                                     arrow_annotations, in_flow, out_flow, total_flow):
+                                     in_flow, out_flow, total_flow):
         """Add interactive highlighting capability to the network visualization."""
         
         # Create edge connectivity map for efficient lookup
@@ -601,6 +604,60 @@ class OrganizationalNetworkGenerator:
                     matrix[i, j] = G.edges[u, v].get('weight', 1.0)
         
         return matrix
+    
+    def flow_matrix_to_network(self, flow_matrix: np.ndarray, node_names: list = None) -> nx.DiGraph:
+        """
+        Convert flow matrix to NetworkX directed graph.
+        
+        Args:
+            flow_matrix: Flow matrix as numpy array
+            node_names: Optional list of node names
+            
+        Returns:
+            NetworkX directed graph with edge weights
+        """
+        n = len(flow_matrix)
+        if node_names is None:
+            node_names = [f"Node_{i+1}" for i in range(n)]
+        
+        G = nx.DiGraph()
+        
+        # Add nodes
+        for i, name in enumerate(node_names):
+            G.add_node(i, label=name)
+        
+        # Add edges with weights from flow matrix
+        for i in range(n):
+            for j in range(n):
+                if flow_matrix[i, j] > 0:
+                    G.add_edge(i, j, weight=flow_matrix[i, j])
+        
+        return G
+    
+    def visualize_directed_network(self, G: nx.DiGraph, title: str = "Network Diagram", show_arrows: bool = True) -> go.Figure:
+        """
+        Create an interactive directed network visualization.
+        
+        Args:
+            G: NetworkX directed graph
+            title: Title for the visualization
+            show_arrows: Whether to show arrow annotations (not used, arrows always shown)
+            
+        Returns:
+            Plotly Figure object
+        """
+        # Get node labels
+        node_labels = []
+        for node in G.nodes():
+            if 'label' in G.nodes[node]:
+                node_labels.append(G.nodes[node]['label'])
+            elif 'name' in G.nodes[node]:
+                node_labels.append(G.nodes[node]['name'])
+            else:
+                node_labels.append(f"Node {node}")
+        
+        # Use the existing visualization method (arrows are always shown)
+        return self.create_plotly_visualization(G, node_labels, title=title)
 
 
 # Network type descriptions for UI
