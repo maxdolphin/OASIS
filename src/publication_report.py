@@ -60,10 +60,10 @@ The ascendency measure (A = {self.metrics['ascendency']:.3f}) relative to develo
 of its potential for organized behavior, with {self.metrics['overhead_ratio']*100:.1f}% maintained as overhead 
 for adaptability and resilience.
 
-Network topology analysis reveals an effective link density of {self.metrics['effective_link_density']:.3f} 
-and trophic depth of {self.metrics['trophic_depth']:.3f}, indicating {'a hierarchically structured' if self.metrics['trophic_depth'] > 2 else 'a relatively flat'} 
-organizational architecture. The flow diversity index (H = {self.metrics['flow_diversity']:.3f}) suggests 
-{'high' if self.metrics['flow_diversity'] > 3 else 'moderate' if self.metrics['flow_diversity'] > 2 else 'low'} 
+Network topology analysis reveals an effective link density of {self.metrics.get('effective_link_density', 0):.3f} 
+and trophic depth of {self.metrics.get('trophic_depth', 0):.3f}, indicating {'a hierarchically structured' if self.metrics.get('trophic_depth', 0) > 2 else 'a relatively flat'} 
+organizational architecture. The flow diversity index (H = {self.metrics.get('flow_diversity', 0):.3f}) suggests 
+{'high' if self.metrics.get('flow_diversity', 0) > 3 else 'moderate' if self.metrics.get('flow_diversity', 0) > 2 else 'low'} 
 information distribution complexity.
 
 These findings have significant implications for organizational sustainability and adaptive capacity, 

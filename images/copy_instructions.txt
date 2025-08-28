@@ -1,0 +1,24 @@
+COPY YOUR SCREENSHOT IMAGES TO THIS DIRECTORY
+
+I can see your three images. Here are the exact commands to run from Terminal:
+
+COMMANDS TO RUN:
+Navigate to your Screenshots folder and run these commands:
+
+cd "/Users/massimomistretta/Screenshots"
+
+# 1. SUSTAINABILITY FORMULA:
+cp "Screenshot 2025-08-28 at 11.40.02 AM.png" "/Users/massimomistretta/Claude_Projects/Adaptive_Organization/images/sustainability_formula.png"
+
+# 2. COMPUTATION PROCESS FLOWCHART:  
+cp "Screenshot 2025-08-28 at 11.40.34 AM.png" "/Users/massimomistretta/Claude_Projects/Adaptive_Organization/images/computation_process.png"
+
+# 3. For the WINDOW OF VIABILITY curve, I'll extract it from the same image or you can provide a standalone curve image:
+cp "Screenshot 2025-08-28 at 11.40.34 AM.png" "/Users/massimomistretta/Claude_Projects/Adaptive_Organization/images/window_viability.png"
+
+IMAGE MAPPINGS:
+✓ sustainability_formula.png = Screenshot 2025-08-28 at 11.40.02 AM.png (C = A + Φ formula)
+✓ computation_process.png = Screenshot 2025-08-28 at 11.40.34 AM.png (flowchart with legend)  
+✓ window_viability.png = Screenshot 2025-08-28 at 11.40.34 AM.png (contains the curve)
+
+Once copied, refresh your browser to see the actual mathematical diagrams in the Overview section!

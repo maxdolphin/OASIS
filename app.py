@@ -1687,6 +1687,7 @@ def run_optimized_analysis(flow_matrix, node_names, progress_bar, status_text, s
     
     # Phase 5-6: Network analysis (selective)
     status_text.text("🔗 Phase 5-6/8: Selective network analysis...")
+    phase_start = time.time()  # Add missing phase_start definition
     extended_metrics = {
         **basic_metrics,
         'flow_diversity': calculator.calculate_flow_diversity(),
@@ -2117,7 +2118,7 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
         st.metric("Network Density", f"{metrics.get('network_density', 0):.3f}")
         st.caption("ρ = L/N² [0-1]")
         st.metric("Connectance", f"{metrics.get('connectance', 0):.3f}")
-        st.caption("C = L/(N×(N-1)) [0-1]")
+        st.caption("C = L/(N*(N-1)) [0-1]")
     with col3:
         st.metric("Avg Path Length", f"{metrics.get('average_path_length', 0):.2f}")
         st.caption("⟨l⟩ [steps]")
@@ -2153,7 +2154,7 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
         st.metric("Conditional Entropy", f"{metrics.get('conditional_entropy', 0):.3f}")
         st.caption("Hc = H - I [bits]")
     with col4:
-        st.metric("Redundancy", f"{metrics['redundancy']:.3f}")
+        st.metric("Redundancy", f"{metrics.get('redundancy', 0):.3f}")
         st.caption("Φ/C [dimensionless]")
     
     # Step 3: Ascendency and Capacity
@@ -2161,16 +2162,16 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric("Ascendency", f"{metrics['ascendency']:.1f}")
-        st.caption("A = TST × I [flow·bits]")
+        st.caption("A = TST * I [flow·bits]")
     with col2:
         st.metric("Overhead", f"{metrics['overhead']:.1f}")
-        st.caption("Φ = TST × Hc [flow·bits]")
+        st.caption("Φ = TST * Hc [flow·bits]")
     with col3:
         st.metric("Capacity", f"{metrics['development_capacity']:.1f}")
-        st.caption("C = TST × H [flow·bits]")
+        st.caption("C = TST * H [flow·bits]")
     with col4:
         st.metric("Realized Capacity", f"{metrics.get('realized_capacity', metrics['ascendency']/metrics['development_capacity']*100):.1f}%")
-        st.caption("A/C × 100 [%]")
+        st.caption("A/C * 100 [%]")
     
     # Step 4: Relative metrics
     st.markdown("#### Step 4: Relative Metrics & Robustness")
@@ -2237,7 +2238,7 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
             st.caption("FCI [0-1]")
         else:
             st.metric("7. Circulation", "Low/None")
-            st.caption("FCI ≈ 0 (no cycles detected)")
+            st.caption("FCI ~ 0 (no cycles detected)")
     with col3:
         st.metric("8. Reserve Cap.", f"{metrics['overhead_ratio']:.3f}")
         st.caption("Φ/C [0-1]")
@@ -2264,7 +2265,7 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
     with col2:
         if lower <= ascendency <= upper:
             if 0.35 <= alpha <= 0.40:
-                st.success("✅ OPTIMAL - System at peak sustainability (α ≈ 0.37)")
+                st.success("✅ OPTIMAL - System at peak sustainability (α ~ 0.37)")
             elif alpha < 0.35:
                 st.success("✅ VIABLE - Good flexibility, moderate organization")
             else:
@@ -2313,10 +2314,10 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
         st.metric("Structural Info", f"{metrics['structural_information']:.3f}")
         st.caption("SI [bits]")
     with col2:
-        st.metric("Effective Links", f"{metrics['effective_link_density']:.3f}")
+        st.metric("Effective Links", f"{metrics.get('effective_link_density', 0):.3f}")
         st.caption("ELD [links/node]")
     with col3:
-        st.metric("Trophic Depth", f"{metrics['trophic_depth']:.3f}")
+        st.metric("Trophic Depth", f"{metrics.get('trophic_depth', 0):.3f}")
         st.caption("TD [levels]")
     with col4:
         st.metric("Regen. Capacity", f"{metrics['regenerative_capacity']:.3f}")
@@ -2371,6 +2372,90 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
                 color = assessment_colors.get(status, '⚪')
                 st.write(f"{color} **{category.title()}**")
                 st.caption(assessment.split(' - ')[-1] if ' - ' in assessment else status)
+    
+    # Network Roles & Functional Specialization
+    st.markdown("---")
+    st.subheader("🎭 Level 4: Network Roles & Functional Specialization")
+    st.markdown("*Based on Zorach & Ulanowicz (2003) - Quantifying the complexity of flow networks*")
+    
+    # Core roles metrics
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Number of Roles", f"{metrics.get('number_of_roles', 0):.2f}")
+        st.caption("R = exp(AMI) [roles]")
+        
+    with col2:
+        st.metric("Effective Nodes", f"{metrics.get('effective_nodes', 0):.2f}")
+        st.caption("N = weighted nodes [nodes]")
+        
+    with col3:
+        st.metric("Effective Flows", f"{metrics.get('effective_flows', 0):.2f}")
+        st.caption("F = weighted flows [flows]")
+        
+    with col4:
+        st.metric("Effective Connectivity", f"{metrics.get('effective_connectivity', 0):.2f}")
+        st.caption("C = F/N [flows/node]")
+    
+    # Interpretation metrics
+    st.markdown("#### 🔍 Specialization Analysis")
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        roles_per_node = metrics.get('roles_per_node', 0)
+        st.metric("Roles per Node", f"{roles_per_node:.3f}")
+        st.caption("R/N [roles/node]")
+        
+    with col2:
+        spec_index = metrics.get('specialization_index', 0)
+        st.metric("Specialization Index", f"{spec_index:.3f}")
+        st.caption("R/N_actual [dimensionless]")
+        
+    with col3:
+        # Compare actual vs effective
+        actual_nodes = len(node_names)
+        eff_nodes = metrics.get('effective_nodes', 0)
+        node_ratio = eff_nodes / actual_nodes if actual_nodes > 0 else 0
+        st.metric("Node Utilization", f"{node_ratio:.2%}")
+        st.caption("N_eff/N_actual [%]")
+        
+    with col4:
+        # Verification
+        verif_error = metrics.get('roles_verification_error', 0)
+        if verif_error < 0.01:
+            st.metric("Math Check", "✅ Valid")
+        else:
+            st.metric("Math Check", f"⚠️ {verif_error:.4f}")
+        st.caption("R = N²/F = F/C² check")
+    
+    # Assessment based on roles
+    num_roles = metrics.get('number_of_roles', 0)
+    if num_roles < 2:
+        assessment = "⚠️ **Low Specialization**: System lacks functional differentiation"
+    elif 2 <= num_roles <= 5:
+        assessment = "✅ **Optimal Specialization**: Natural range for sustainable systems"
+    else:
+        assessment = "⚠️ **Over-Specialized**: System may be brittle or overly complex"
+    
+    st.info(assessment)
+    
+    # Add small visualization if feasible
+    if num_roles <= 10 and len(node_names) > 0:
+        # Create simple bar chart comparing actual vs effective
+        import plotly.graph_objects as go
+        
+        fig = go.Figure(data=[
+            go.Bar(name='Actual', x=['Nodes', 'Flows'], 
+                   y=[len(node_names), np.count_nonzero(flow_matrix)]),
+            go.Bar(name='Effective', x=['Nodes', 'Flows'],
+                   y=[metrics.get('effective_nodes', 0), metrics.get('effective_flows', 0)])
+        ])
+        fig.update_layout(
+            title="Actual vs Effective Network Components",
+            barmode='group',
+            height=300,
+            showlegend=True
+        )
+        st.plotly_chart(fig, use_container_width=True)
     
     # Mathematical validation
     st.markdown("---")
@@ -2514,7 +2599,7 @@ def display_ulanowicz_indicators(metrics):
         st.caption("Degree of organization in flow patterns")
         
         st.metric("Ascendency (A)", f"{metrics['ascendency']:.1f}")
-        st.caption("Organized power (TST × AMI)")
+        st.caption("Organized power (TST * AMI)")
     
     with col2:
         st.metric("Development Capacity (C)", f"{metrics['development_capacity']:.1f}")
@@ -2613,13 +2698,13 @@ def display_regenerative_metrics(metrics, assessments):
         st.markdown("### Flow & Structure")
         st.metric("Flow Diversity (H)", f"{metrics['flow_diversity']:.3f}")
         st.metric("Structural Information (SI)", f"{metrics['structural_information']:.3f}")
-        st.metric("Effective Link Density", f"{metrics['effective_link_density']:.3f}")
-        st.metric("Trophic Depth", f"{metrics['trophic_depth']:.3f}")
+        st.metric("Effective Link Density", f"{metrics.get('effective_link_density', 0):.3f}")
+        st.metric("Trophic Depth", f"{metrics.get('trophic_depth', 0):.3f}")
     
     with col2:
         st.markdown("### System Dynamics")  
         st.metric("Robustness (R)", f"{metrics['robustness']:.3f}")
-        st.metric("Redundancy", f"{metrics['redundancy']:.3f}")
+        st.metric("Redundancy", f"{metrics.get('redundancy', 0):.3f}")
         st.metric("Network Efficiency", f"{metrics['network_efficiency']:.3f}")
         st.metric("Regenerative Capacity", f"{metrics['regenerative_capacity']:.3f}")
     
@@ -2872,7 +2957,7 @@ def create_robustness_curve(metrics):
     development_capacity = metrics['development_capacity']
     
     # Create normalized robustness curve using symmetric formula (shape only, not absolute values)
-    # Formula: R = -α·log(α), maximum at α = 1/e ≈ 0.368
+    # Formula: R = -α·log(α), maximum at α = 1/e ~ 0.368
     normalized_robustness = []
     for eff in efficiency_range:
         # Symmetric robustness function: R = -α·log(α) (normalized without log(C) scaling)
@@ -3066,7 +3151,7 @@ def display_network_analysis(calculator, metrics, flow_matrix, node_names):
         st.caption("L [count]")
     with col2:
         st.metric("Density", f"{network_metrics['basic']['density']:.3f}")
-        st.caption("ρ = L/(N×(N-1)) [0-1]")
+        st.caption("ρ = L/(N*(N-1)) [0-1]")
         st.metric("Components", network_metrics['basic']['num_components'])
         st.caption("Weakly connected")
     with col3:
@@ -3641,8 +3726,8 @@ NETWORK PROPERTIES
 Nodes: {calculator.n_nodes}
 Total Connections: {np.count_nonzero(calculator.flow_matrix)}
 Network Density: {np.count_nonzero(calculator.flow_matrix) / (calculator.n_nodes ** 2):.3f}
-Effective Link Density: {metrics['effective_link_density']:.3f}
-Trophic Depth: {metrics['trophic_depth']:.3f}
+Effective Link Density: {metrics.get('effective_link_density', 0):.3f}
+Trophic Depth: {metrics.get('trophic_depth', 0):.3f}
 
 RECOMMENDATIONS
 ===============
@@ -3878,8 +3963,8 @@ def learn_more_interface():
         We use Shannon entropy and mutual information to quantify organization:
         
         <div class="formula-box">
-        H = -Σ (p_i × log₂(p_i))  // Entropy: System diversity
-        AMI = Σ (f_ij/TST × log₂((f_ij×TST)/(T_i×T_j)))  // Organization level
+        H = -Σ (p_i * log₂(p_i))  // Entropy: System diversity
+        AMI = Σ (f_ij/TST * log₂((f_ij*TST)/(T_i*T_j)))  // Organization level
         </div>
         
         #### The Ascendency Concept
@@ -3894,7 +3979,7 @@ def learn_more_interface():
         <div class="highlight-box">
         <h4>The Fundamental Equation of Organizational Sustainability</h4>
         
-        <strong>Robustness = Efficiency × Resilience</strong><br><br>
+        <strong>Robustness = Efficiency * Resilience</strong><br><br>
         
         Where:<br>
         • Efficiency = A/C (organized activity / total capacity)<br>
@@ -3982,7 +4067,7 @@ def learn_more_interface():
         The average amount of constraint or organization in system flows.
         
         <h4>Formula</h4>
-        <code>AMI = Σᵢⱼ (fᵢⱼ/TST) × log₂((fᵢⱼ×TST)/(Tᵢ×Tⱼ))</code>
+        <code>AMI = Σᵢⱼ (fᵢⱼ/TST) * log₂((fᵢⱼ*TST)/(Tᵢ*Tⱼ))</code>
         
         <h4>What it Tells You</h4>
         • Degree of organization and specialization<br>
@@ -4002,7 +4087,7 @@ def learn_more_interface():
         The organized power of the system; product of size and organization.
         
         <h4>Formula</h4>
-        <code>A = TST × AMI</code>
+        <code>A = TST * AMI</code>
         
         <h4>What it Tells You</h4>
         • Current organizational capacity in use<br>
@@ -4022,7 +4107,7 @@ def learn_more_interface():
         The upper bound on system ascendency; maximum organizational potential.
         
         <h4>Formula</h4>
-        <code>C = TST × H</code><br>
+        <code>C = TST * H</code><br>
         where H is flow diversity (Shannon entropy)
         
         <h4>What it Tells You</h4>
@@ -4066,7 +4151,7 @@ def learn_more_interface():
         Robustness quantifies the system's ability to persist and maintain function.
         
         <strong>Formula:</strong><br>
-        <code>R = -α × log(α) - (1-α) × log(1-α)</code><br>
+        <code>R = -α * log(α) - (1-α) * log(1-α)</code><br>
         where α = A/C (efficiency ratio)
         
         <strong>Key Properties:</strong><br>
@@ -4089,7 +4174,7 @@ def learn_more_interface():
         
         **Regenerative Capacity**
         - System's ability to renew and regenerate
-        - Formula: `RC = Robustness × (1 - Distance from Optimum)`
+        - Formula: `RC = Robustness * (1 - Distance from Optimum)`
         - Target: > 0.6 for regenerative systems
         
         ### Network-Specific Metrics
@@ -4098,7 +4183,7 @@ def learn_more_interface():
         
         **Connectance**
         - Ratio of actual to possible connections
-        - Formula: `Conn = Actual Links / (n × (n-1))`
+        - Formula: `Conn = Actual Links / (n * (n-1))`
         - Optimal: 0.2 - 0.3 (not too sparse, not too dense)
         
         **Centralization**
@@ -4288,10 +4373,10 @@ def learn_more_interface():
         #### The Robustness Curve
         
         <div class="formula-box">
-        Robustness peaks at α = 1/e ≈ 0.368 (36.8% efficiency)
+        Robustness peaks at α = 1/e ~ 0.368 (36.8% efficiency)
         
         This is derived from maximizing:
-        R = -α × ln(α) - (1-α) × ln(1-α)
+        R = -α * ln(α) - (1-α) * ln(1-α)
         
         Setting dR/dα = 0 yields α = 1/e
         </div>
@@ -4503,7 +4588,7 @@ def learn_more_interface():
         - **Channel Capacity**: Understanding communication limits
         
         <div class="formula-box">
-        Shannon Entropy: H = -Σ p(x) × log₂ p(x)
+        Shannon Entropy: H = -Σ p(x) * log₂ p(x)
         
         Applied to organizations: Measures diversity and potential
         </div>
@@ -4598,7 +4683,7 @@ def learn_more_interface():
         L = R(α) - λ(α - A/C)
         
         Maximizing R subject to efficiency constraint
-        Yields optimal α = 1/e ≈ 0.368
+        Yields optimal α = 1/e ~ 0.368
         ```
         
         ### Cross-Disciplinary Validation
@@ -5658,7 +5743,7 @@ def ten_principles_interface():
     
     st.success("""
     **The Window of Vitality**: Natural systems teach us that sustainability requires balancing 
-    efficiency (α ≈ 0.37) within a viable range (0.2 < α < 0.6). Too much order leads to brittleness; 
+    efficiency (α ~ 0.37) within a viable range (0.2 < α < 0.6). Too much order leads to brittleness; 
     too much chaos leads to stagnation. The sweet spot enables both productivity and adaptability.
     """)
     
@@ -5684,10 +5769,183 @@ def formulas_reference_interface():
     """)
     
     # Create tabs for different categories
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-        "🧮 Core Ulanowicz IT", "💚 Regenerative Health", "🌱 Regenerative Economics", 
+    tab0, tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "📖 Overview", "🧮 Core Ulanowicz IT", "💚 Regenerative Health", "🌱 Regenerative Economics", 
         "📊 Network Analysis", "🎯 Sustainability Metrics", "⚙️ Extended Indicators"
     ])
+    
+    with tab0:
+        st.subheader("📖 Overview: The Sustainability Balance Framework")
+        st.markdown("*Understanding the mathematical foundation of organizational sustainability*")
+        
+        st.markdown("""
+        ### **The Fundamental Balance Equation**
+        
+        The core principle of Ulanowicz's sustainability theory is that system viability emerges from 
+        balancing **efficiency** (organized structure) with **resilience** (adaptive capacity):
+        
+        ```
+        C = A + Φ
+        ```
+        
+        Where:
+        - **C** = Development Capacity (total system potential)
+        - **A** = Ascendency (organized, efficient flows)
+        - **Φ** = Overhead (reserve capacity, resilience)
+        
+        This fundamental equation reveals that a system's total capacity is the sum of its organized 
+        structure and its reserve flexibility.
+        
+        ### **Information Theory Foundation**
+        
+        The mathematical formulation uses information theory to quantify organization:
+        
+        """)
+        
+        # Display the actual sustainability formula image
+        try:
+            st.image("images/Balance Formula.png", 
+                    caption="The Sustainability Balance Formula: C = A + Φ", 
+                    use_container_width=True)
+        except:
+            st.warning("📷 Add Balance Formula.png to images/ directory to display the mathematical formula diagram")
+        
+        st.markdown("""
+        
+        - The first term (≥0) represents **structured, predictable flows** 
+        - The second term (≥0) represents **flexibility and alternative pathways**
+        - Both components are essential for sustainability
+        
+        ### **The Computation Process**
+        
+        The analysis follows a systematic process from data collection to sustainability assessment:
+        """)
+        
+        # Display the actual computation process image
+        try:
+            st.image("images/Process.png", 
+                    caption="Computation Process Flow: From Data to Sustainability Assessment", 
+                    use_container_width=True)
+        except:
+            st.warning("📷 Add Process.png to images/ directory to display the process flowchart")
+        
+        st.markdown("""
+        **Legend:**
+        - **TST** = Total System Throughput
+        - **A** = System Efficiency / Ascendency
+        - **Φ** = Overhead / Resilience  
+        - **C** = Capacity for Development
+        - **α** = Degree of Order
+        - **R** = Robustness
+        """)
+        
+        st.markdown("""
+        **Step 1: Data Collection**
+        - Gather flow data between organizational units/ecosystem compartments
+        - Examples: emails, documents, resources, energy, materials
+        
+        **Step 2: Network Abstraction**
+        - Model the system as nodes (departments/species) and directed flows
+        - Create adjacency matrix representation
+        
+        **Step 3: Matrix Encoding**
+        - Code flows into T_ij matrix where T_ij = flow from node i to node j
+        - Ensure non-negative values and proper units
+        
+        **Step 4: Core Metrics Calculation**
+        - **TST** (Total System Throughput) = Σ T_ij
+        - **A** (Ascendency) = organized complexity
+        - **Φ** (Overhead) = reserve capacity
+        - **C** (Development Capacity) = A + Φ
+        
+        **Step 5: Degree of Order**
+        - **α** = A/C (ratio of organization to total capacity)
+        - Values range from 0 (pure chaos) to 1 (rigid order)
+        
+        **Step 6: Robustness Calculation**
+        - **R** = -α * log(α)
+        - Maximum robustness at α ~ 0.37
+        - Feeds into Window of Viability assessment
+        
+        ### **The Window of Viability**
+        
+        Research on real ecosystems reveals a critical insight: sustainable systems cluster within 
+        a specific range of organization called the **"Window of Viability"**:
+        
+        **Key Boundaries:**
+        - **Lower Bound (α ~ 0.2)**: Below this, systems lack sufficient organization
+        - **Upper Bound (α ~ 0.6)**: Above this, systems become too rigid
+        - **Optimum (α ~ 0.37)**: Natural ecosystems converge here
+        
+        **System States:**
+        
+        1. **Too Much Resilience (α < 0.2)**
+           - Excessive diversity without coordination
+           - System tends toward stagnation
+           - Energy dissipated without productive work
+        
+        2. **Window of Viability (0.2 < α < 0.6)**
+           - Balance of efficiency and adaptability
+           - System can respond to perturbations
+           - Sustainable long-term operation
+        
+        3. **Too Much Efficiency (α > 0.6)** 
+           - Over-specialized and brittle
+           - Vulnerable to disruption
+           - Tends toward brittleness and collapse
+        """)
+        
+        st.markdown("""
+        ### **The Robustness Curve**
+        
+        The relationship between organization (α) and robustness (R) follows a characteristic curve:
+        """)
+        
+        # Display the actual window of viability curve image
+        try:
+            st.image("images/Window  of viability.png", 
+                    caption="Window of Viability: The Robustness Curve showing optimal sustainability zone", 
+                    use_container_width=True)
+        except:
+            st.warning("📷 Add Window of viability.png to images/ directory to display the robustness curve diagram")
+        
+        st.markdown("""
+        **Key Points:**
+        - **Mathematical Form**: R = -α * log(α)  
+        - **Shape**: Inverted parabola peaking at α = 1/e ~ 0.368
+        - **Window of Viability**: Natural ecosystems cluster in the optimal zone
+        - **Left Side (α < 0.2)**: Too much resilience leads to stagnation
+        - **Right Side (α > 0.6)**: Too much efficiency leads to brittleness
+        - **Optimum (α ~ 0.37)**: Maximum sustainability and robustness
+        
+        This curve is derived from the **Fitness for Evolution** principle:
+        ```
+        F = -α * log(α)
+        ```
+        
+        Where fitness represents the system's capacity to persist and evolve.
+        
+        ### **Practical Implications**
+        
+        For organizational management:
+        
+        - **Monitor α ratio**: Track your position relative to the window
+        - **Avoid extremes**: Both chaos and rigidity lead to failure
+        - **Target zone**: Aim for α between 0.3-0.5 for most organizations
+        - **Balance interventions**: Add structure if α < 0.2, add flexibility if α > 0.6
+        
+        ### **Scientific Validation**
+        
+        This framework has been validated across:
+        - 35+ real ecosystems (Ulanowicz database)
+        - Economic input-output systems
+        - Supply chain networks
+        - Neural networks
+        - Social systems
+        
+        The consistent emergence of the window of viability across diverse systems suggests 
+        fundamental principles governing all complex adaptive systems.
+        """)
     
     with tab1:
         st.subheader("🧮 Core Information Theory Formulations")
@@ -5702,7 +5960,7 @@ def formulas_reference_interface():
         
         ### **Development Capacity (C)** 
         ```
-        C = -Σ(T_ij × log(T_ij / T··))
+        C = -Σ(T_ij * log(T_ij / T··))
         ```
         - **Equation (11)** from Ulanowicz et al. (2009)
         - Represents scaled system indeterminacy
@@ -5710,7 +5968,7 @@ def formulas_reference_interface():
         
         ### **Ascendency (A)**
         ```
-        A = Σ(T_ij × log(T_ij × T·· / (T_i· × T_·j)))
+        A = Σ(T_ij * log(T_ij * T·· / (T_i· * T_·j)))
         ```
         - **Equation (12)** from Ulanowicz et al. (2009)
         - Scaled mutual constraint (organized power)
@@ -5758,7 +6016,7 @@ def formulas_reference_interface():
         ### **2. Finn Cycling Index (Regenerative Re-investment)**
         ```
         FCI = ΣTci / TST
-        where Tci = ((nii - 1) / nii) × Ti
+        where Tci = ((nii - 1) / nii) * Ti
         ```
         - **Principle 2**: Regenerative re-investment
         - Fraction of total flow that is recycled
@@ -5766,7 +6024,7 @@ def formulas_reference_interface():
         
         ### **3. Ascendency (A) - Organization Measure**
         ```
-        A = Σ(Fij × log(Fij × F.. / (Fi. × F.j)))
+        A = Σ(Fij * log(Fij * F.. / (Fi. * F.j)))
         ```
         - Core measure of system organization
         - Fij = flow from i to j
@@ -5774,27 +6032,48 @@ def formulas_reference_interface():
         
         ### **4. Development Capacity (C) - System Potential**
         ```
-        C = -Σ(Fij × log(Fij / F..))
+        C = -Σ(Fij * log(Fij / F..))
         ```
         - Maximum potential for development
         - Upper bound on system organization
         
         ### **5. Robustness (R) - System Health**
         ```
-        Robustness = -α × log(α)
+        Robustness = -α * log(α)
         where α = A/C
         ```
         - **Principle 6**: Balance of efficiency & resilience
         - Systems viable at α between 0.2-0.6
         - Window of Vitality: 0.2 < α < 0.6
         
-        ### **6. Functional Diversity (Roles)**
+        ### **6. Functional Diversity (Roles) - Zorach & Ulanowicz (2003)**
+        
+        The number of functional roles quantifies system complexity and specialization:
+        
         ```
-        Roles = Π((Fij × F.. / (Fi. × F.j))^(Fij/F..))
+        Number of Roles:     R = exp(AMI) = Π((Tij*T••/(Ti•*T•j))^(Tij/T••))
+        Effective Nodes:     N = Π((T••²/(Ti•*T•j))^(1/2*Tij/T••))  
+        Effective Flows:     F = Π((Tij/T••)^(-Tij/T••))
+        Effective Connect:   C = Π((Tij²/(Ti•*T•j))^(1/2*Tij/T••))
+        
+        Fundamental Relationships:
+        - R = N²/F = F/C² = N/C
+        - log(R) = AMI (Average Mutual Information)
+        - R measures degree of functional specialization
         ```
-        - **Principle 7**: Sufficient diversity
-        - Number of distinct functional roles
-        - Product over all non-zero flows
+        
+        **Interpretation:**
+        - **R < 2**: Undifferentiated system, all nodes perform similar functions
+        - **2 ≤ R ≤ 5**: Natural range for sustainable ecosystems  
+        - **R > 5**: Over-specialized, potentially brittle system
+        
+        **Applications:**
+        - Organizational structure analysis
+        - Ecosystem complexity assessment  
+        - Supply chain specialization evaluation
+        - Neural network functional diversity
+        
+        **Reference:** Zorach, A.C., & Ulanowicz, R.E. (2003). Quantifying the complexity of flow networks: How many roles are there? Complexity, 8(3), 68-76.
         
         ### **7. Mutualism Index**
         ```
@@ -5814,7 +6093,7 @@ def formulas_reference_interface():
         
         ### **9. Average Mutual Information (AMI)**
         ```
-        AMI = Σ(Fij × log(Fij × F.. / (Fi. × F.j))) / F..
+        AMI = Σ(Fij * log(Fij * F.. / (Fi. * F.j))) / F..
         ```
         - Degree of constraint in the network
         - Normalized measure of organization
@@ -5836,7 +6115,7 @@ def formulas_reference_interface():
         st.markdown("""
         ### **Regenerative Capacity**
         ```
-        RC = Robustness × (1 - |α - α_opt|)
+        RC = Robustness * (1 - |α - α_opt|)
         where α_opt = 0.37
         ```
         - Combines robustness with distance from optimum
@@ -5844,7 +6123,7 @@ def formulas_reference_interface():
         
         ### **Flow Diversity (Shannon Entropy)**
         ```
-        H = -Σ(pij × log(pij))
+        H = -Σ(pij * log(pij))
         where pij = Tij / TST
         ```
         - Evenness of flow distribution
@@ -5866,7 +6145,7 @@ def formulas_reference_interface():
         
         ### **Effective Link Density**
         ```
-        ELD = (L_active / L_max) × (AMI / AMI_max)
+        ELD = (L_active / L_max) * (AMI / AMI_max)
         ```
         - Weighted connectivity measure
         - Accounts for both structure and flow
@@ -5892,14 +6171,14 @@ def formulas_reference_interface():
         
         ### **Average Mutual Information (AMI)**
         ```
-        AMI = Σ(T_ij × log(T_ij × TST / (T_i· × T_·j))) / TST
+        AMI = Σ(T_ij * log(T_ij * TST / (T_i· * T_·j))) / TST
         ```
         - Degree of organization in flow patterns
         - Higher values = more structured
         
         ### **Effective Link Density**
         ```
-        ELD = (L_active / L_max) × (AMI / AMI_max)
+        ELD = (L_active / L_max) * (AMI / AMI_max)
         ```
         - L_active = number of non-zero flows
         - L_max = n²
@@ -5919,8 +6198,8 @@ def formulas_reference_interface():
         st.markdown("""
         ### **Window of Viability**
         ```
-        Lower Bound = 0.2 × C
-        Upper Bound = 0.6 × C
+        Lower Bound = 0.2 * C
+        Upper Bound = 0.6 * C
         Viable = Lower Bound ≤ A ≤ Upper Bound
         ```
         - **Empirical bounds** from Ulanowicz research
@@ -5972,7 +6251,7 @@ def formulas_reference_interface():
         ### **Network Density**
         ```
         Density = L_active / L_possible
-        where L_possible = n × (n-1)
+        where L_possible = n * (n-1)
         ```
         - Fraction of possible connections actually used
         
