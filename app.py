@@ -3486,10 +3486,11 @@ def display_visual_summary_cards(metrics, assessments):
     with col1:
         efficiency = metrics.get('network_efficiency', 0)
         color, icon = get_status_color(efficiency, (0.3, 0.5), (0.2, 0.6))
+        color_hex = {'green': '28a745', 'orange': 'ffc107', 'red': 'dc3545'}[color]
         st.markdown(f"""
-        <div style="background: linear-gradient(135deg, #{{'green': '28a745', 'orange': 'ffc107', 'red': 'dc3545'}[color]}22 0%, transparent 100%); 
-                    padding: 20px; border-radius: 10px; border-left: 4px solid #{{'green': '28a745', 'orange': 'ffc107', 'red': 'dc3545'}[color]};">
-            <h4 style="margin: 0; color: #{{'green': '28a745', 'orange': 'ffc107', 'red': 'dc3545'}[color]};">{icon} Efficiency</h4>
+        <div style="background: linear-gradient(135deg, #{color_hex}22 0%, transparent 100%); 
+                    padding: 20px; border-radius: 10px; border-left: 4px solid #{color_hex};">
+            <h4 style="margin: 0; color: #{color_hex};">{icon} Efficiency</h4>
             <h2 style="margin: 10px 0;">{efficiency:.3f}</h2>
             <p style="margin: 0; opacity: 0.8; font-size: 12px;">Optimal: 0.3-0.5</p>
         </div>
@@ -3498,10 +3499,11 @@ def display_visual_summary_cards(metrics, assessments):
     with col2:
         robustness = metrics.get('robustness', 0)
         color, icon = get_status_color(robustness, (0.25, 1.0), (0.15, 1.0))
+        color_hex = {'green': '28a745', 'orange': 'ffc107', 'red': 'dc3545'}[color]
         st.markdown(f"""
-        <div style="background: linear-gradient(135deg, #{{'green': '28a745', 'orange': 'ffc107', 'red': 'dc3545'}[color]}22 0%, transparent 100%); 
-                    padding: 20px; border-radius: 10px; border-left: 4px solid #{{'green': '28a745', 'orange': 'ffc107', 'red': 'dc3545'}[color]};">
-            <h4 style="margin: 0; color: #{{'green': '28a745', 'orange': 'ffc107', 'red': 'dc3545'}[color]};">{icon} Robustness</h4>
+        <div style="background: linear-gradient(135deg, #{color_hex}22 0%, transparent 100%); 
+                    padding: 20px; border-radius: 10px; border-left: 4px solid #{color_hex};">
+            <h4 style="margin: 0; color: #{color_hex};">{icon} Robustness</h4>
             <h2 style="margin: 10px 0;">{robustness:.3f}</h2>
             <p style="margin: 0; opacity: 0.8; font-size: 12px;">Minimum: 0.25</p>
         </div>
@@ -3512,10 +3514,11 @@ def display_visual_summary_cards(metrics, assessments):
         viability_window = metrics.get('viability_window_position', 0)
         color = "green" if viable else "red"
         icon = "✅" if viable else "❌"
+        color_hex = {'green': '28a745', 'red': 'dc3545'}[color]
         st.markdown(f"""
-        <div style="background: linear-gradient(135deg, #{{'green': '28a745', 'red': 'dc3545'}[color]}22 0%, transparent 100%); 
-                    padding: 20px; border-radius: 10px; border-left: 4px solid #{{'green': '28a745', 'red': 'dc3545'}[color]};">
-            <h4 style="margin: 0; color: #{{'green': '28a745', 'red': 'dc3545'}[color]};">{icon} Viability</h4>
+        <div style="background: linear-gradient(135deg, #{color_hex}22 0%, transparent 100%); 
+                    padding: 20px; border-radius: 10px; border-left: 4px solid #{color_hex};">
+            <h4 style="margin: 0; color: #{color_hex};">{icon} Viability</h4>
             <h2 style="margin: 10px 0;">{'YES' if viable else 'NO'}</h2>
             <p style="margin: 0; opacity: 0.8; font-size: 12px;">Window: {viability_window:.1%}</p>
         </div>
@@ -3524,10 +3527,11 @@ def display_visual_summary_cards(metrics, assessments):
     with col4:
         roles = metrics.get('number_of_roles', 0)
         color, icon = get_status_color(roles, (2, 5), (1.5, 6))
+        color_hex = {'green': '28a745', 'orange': 'ffc107', 'red': 'dc3545'}[color]
         st.markdown(f"""
-        <div style="background: linear-gradient(135deg, #{{'green': '28a745', 'orange': 'ffc107', 'red': 'dc3545'}[color]}22 0%, transparent 100%); 
-                    padding: 20px; border-radius: 10px; border-left: 4px solid #{{'green': '28a745', 'orange': 'ffc107', 'red': 'dc3545'}[color]};">
-            <h4 style="margin: 0; color: #{{'green': '28a745', 'orange': 'ffc107', 'red': 'dc3545'}[color]};">{icon} Roles</h4>
+        <div style="background: linear-gradient(135deg, #{color_hex}22 0%, transparent 100%); 
+                    padding: 20px; border-radius: 10px; border-left: 4px solid #{color_hex};">
+            <h4 style="margin: 0; color: #{color_hex};">{icon} Roles</h4>
             <h2 style="margin: 10px 0;">{roles:.2f}</h2>
             <p style="margin: 0; opacity: 0.8; font-size: 12px;">Natural: 2-5</p>
         </div>
