@@ -2322,7 +2322,7 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
     st.markdown("#### Flow-based Metrics")
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric("Structural Info", f"{metrics['structural_information']:.3f}")
+        st.metric("Structural Info", f"{metrics.get('structural_information', 0):.3f}")
         st.caption("SI [bits]")
     with col2:
         st.metric("Effective Links", f"{metrics.get('effective_link_density', 0):.3f}")
@@ -2331,14 +2331,14 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
         st.metric("Trophic Depth", f"{metrics.get('trophic_depth', 0):.3f}")
         st.caption("TD [levels]")
     with col4:
-        st.metric("Regen. Capacity", f"{metrics['regenerative_capacity']:.3f}")
+        st.metric("Regen. Capacity", f"{metrics.get('regenerative_capacity', 0):.3f}")
         st.caption("RC [0-1]")
     
     # Balance indicators
     st.markdown("#### Balance Indicators")
     col1, col2, col3 = st.columns(3)
     with col1:
-        ratio = metrics['ascendency_ratio']
+        ratio = metrics.get('ascendency_ratio', metrics.get('relative_ascendency', 0))
         st.metric("Organization", f"{ratio:.3f}")
         if ratio < 0.2:
             st.caption("α = A/C [0-1] 🔴 Chaotic")
@@ -2349,7 +2349,7 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
         else:
             st.caption("α = A/C [0-1] 🟡 Acceptable")
     with col2:
-        overhead_ratio = metrics['overhead_ratio']
+        overhead_ratio = metrics.get('overhead_ratio', 0)
         st.metric("Flexibility", f"{overhead_ratio:.3f}")
         if overhead_ratio < 0.4:
             st.caption("Φ/C [0-1] 🟡 Low reserve")
