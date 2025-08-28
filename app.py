@@ -2053,29 +2053,38 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
     # Network name
     st.markdown(f"### 🌐 {org_name}")
     
-    # Top-level sustainability indicators
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Relative Ascendency", f"{metrics['relative_ascendency']:.3f}")
-        st.caption("α = A/C [dimensionless]")
-    with col2:
-        st.metric("Robustness", f"{metrics['robustness']:.3f}")
-        st.caption("R = -α·log(α) [bits]")
-    with col3:
-        viable = "✅ YES" if metrics['is_viable'] else "❌ NO"
-        st.metric("Viable System", viable)
-        st.caption("α ∈ [0.2, 0.6]")
-    with col4:
-        st.metric("Network Efficiency", f"{metrics['network_efficiency']:.3f}")
-        st.caption("η = Eeff/Emax [0-1]")
+    # Add interactive dashboard layout with tabs
+    tab1, tab2, tab3, tab4 = st.tabs(["📈 Overview", "📊 Detailed Metrics", "🔬 Analysis Levels", "📋 Summary"])
     
-    st.markdown("---")
+    with tab1:
+        # Visual summary cards
+        display_visual_summary_cards(metrics, assessments)
     
-    # LEVEL 1: Data & Flow Statistics (moved from visualizations)
-    st.subheader("📊 Level 1: Data & Flow Statistics")
-    st.markdown("*Foundation: Raw flow data and basic statistics*")
-    
-    col1, col2, col3, col4 = st.columns(4)
+    with tab2:
+        # Top-level sustainability indicators
+        st.subheader("🎯 Key Performance Indicators")
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Relative Ascendency", f"{metrics['relative_ascendency']:.3f}")
+            st.caption("α = A/C [dimensionless]")
+        with col2:
+            st.metric("Robustness", f"{metrics['robustness']:.3f}")
+            st.caption("R = -α·log(α) [bits]")
+        with col3:
+            viable = "✅ YES" if metrics['is_viable'] else "❌ NO"
+            st.metric("Viable System", viable)
+            st.caption("α ∈ [0.2, 0.6]")
+        with col4:
+            st.metric("Network Efficiency", f"{metrics['network_efficiency']:.3f}")
+            st.caption("η = Eeff/Emax [0-1]")
+        
+        st.markdown("---")
+        
+        # LEVEL 1: Data & Flow Statistics (moved from visualizations)
+        with st.expander("📊 **Level 1: Data & Flow Statistics**", expanded=True):
+            st.markdown("*Foundation: Raw flow data and basic statistics*")
+            
+            col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric("Total Flow", f"{np.sum(flow_matrix):.1f}")
         st.caption("ΣTij [flow units]")
@@ -2102,13 +2111,12 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
         st.caption("σ(Tij) [flow units]")
         st.metric("Coeff. of Variation", f"{flow_cv:.2f}")
         st.caption("CV = σ/μ [dimensionless]")
-    
-    # LEVEL 2: Network Structure & Topology
-    st.markdown("---")
-    st.subheader("🌐 Level 2: Network Structure & Topology")
-    st.markdown("*Network analysis: Nodes, connections, and structural patterns*")
-    
-    col1, col2, col3, col4 = st.columns(4)
+        
+        # LEVEL 2: Network Structure & Topology
+        with st.expander("🌐 **Level 2: Network Structure & Topology**", expanded=True):
+            st.markdown("*Network analysis: Nodes, connections, and structural patterns*")
+            
+            col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric("Nodes", len(node_names))
         st.caption("N [count]")
@@ -2129,37 +2137,36 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
         st.caption("C_deg [0-1]")
         st.metric("Link Density", f"{metrics.get('link_density', 0):.3f}")
         st.caption("LD = L/N [links/node]")
-    
-    # LEVEL 3: Ulanowicz Core Metrics (computation flow)
-    st.markdown("---")
-    st.subheader("📈 Level 3: Ulanowicz Core Metrics")
-    st.markdown("*Information-theoretic metrics following computation flow: TST → A,Φ → C → α → R*")
-    
-    # Step 1: TST (foundation)
-    st.markdown("#### Step 1: Total System Throughput")
-    st.metric("Total System Throughput (TST)", f"{metrics['total_system_throughput']:.1f}")
-    st.caption("TST = ΣTij = Sum of all flows in the network [flow units]")
-    st.info("ℹ️ Note: External flows (imports/exports/respiration) require additional data beyond the flow matrix")
-    
-    # Step 2: Information metrics
-    st.markdown("#### Step 2: Information Metrics")
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("AMI", f"{metrics['average_mutual_information']:.3f}")
-        st.caption("I = Organized info [bits]")
-    with col2:
-        st.metric("Flow Diversity", f"{metrics['flow_diversity']:.3f}")
-        st.caption("H = Total info [bits]")
-    with col3:
-        st.metric("Conditional Entropy", f"{metrics.get('conditional_entropy', 0):.3f}")
-        st.caption("Hc = H - I [bits]")
-    with col4:
-        st.metric("Redundancy", f"{metrics.get('redundancy', 0):.3f}")
-        st.caption("Φ/C [dimensionless]")
-    
-    # Step 3: Ascendency and Capacity
-    st.markdown("#### Step 3: Ascendency & Development Capacity")
-    col1, col2, col3, col4 = st.columns(4)
+        
+        # LEVEL 3: Ulanowicz Core Metrics (computation flow)
+        with st.expander("📈 **Level 3: Ulanowicz Core Metrics**", expanded=True):
+            st.markdown("*Information-theoretic metrics following computation flow: TST → A,Φ → C → α → R*")
+            
+            # Step 1: TST (foundation)
+            st.markdown("#### Step 1: Total System Throughput")
+            st.metric("Total System Throughput (TST)", f"{metrics['total_system_throughput']:.1f}")
+            st.caption("TST = ΣTij = Sum of all flows in the network [flow units]")
+            st.info("ℹ️ Note: External flows (imports/exports/respiration) require additional data beyond the flow matrix")
+            
+            # Step 2: Information metrics
+            st.markdown("#### Step 2: Information Metrics")
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("AMI", f"{metrics['average_mutual_information']:.3f}")
+                st.caption("I = Organized info [bits]")
+            with col2:
+                st.metric("Flow Diversity", f"{metrics['flow_diversity']:.3f}")
+                st.caption("H = Total info [bits]")
+            with col3:
+                st.metric("Conditional Entropy", f"{metrics.get('conditional_entropy', 0):.3f}")
+                st.caption("Hc = H - I [bits]")
+            with col4:
+                st.metric("Redundancy", f"{metrics.get('redundancy', 0):.3f}")
+                st.caption("Φ/C [dimensionless]")
+            
+            # Step 3: Ascendency and Capacity
+            st.markdown("#### Step 3: Ascendency & Development Capacity")
+            col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric("Ascendency", f"{metrics['ascendency']:.1f}")
         st.caption("A = TST * I [flow·bits]")
@@ -3374,11 +3381,194 @@ def display_network_analysis(calculator, metrics, flow_matrix, node_names):
     with st.expander("📄 Network Science Report"):
         st.text(analyzer.get_summary_report())
 
+def create_radar_chart(metrics):
+    """Create a radar/spider chart for multi-metric comparison."""
+    import plotly.graph_objects as go
+    
+    # Prepare data for radar chart
+    categories = ['Efficiency', 'Robustness', 'Viability', 'Roles Score', 'Connectivity', 'Regenerative']
+    
+    # Normalize metrics to 0-1 scale for comparison
+    efficiency = metrics.get('network_efficiency', 0)
+    robustness = metrics.get('robustness', 0)
+    viability = 1.0 if metrics.get('is_viable', False) else metrics.get('viability_window_position', 0)
+    roles = min(metrics.get('number_of_roles', 0) / 5, 1)  # Normalize to 5 max
+    connectivity = min(metrics.get('effective_connectivity', 1) / 3.25, 1)  # Normalize to 3.25 max
+    regenerative = metrics.get('regenerative_capacity', 0)
+    
+    actual_values = [efficiency, robustness, viability, roles, connectivity, regenerative]
+    
+    # Ideal ranges (normalized)
+    ideal_values = [0.4, 0.5, 1.0, 0.6, 0.7, 0.5]  # Middle of optimal ranges
+    
+    # Create radar chart
+    fig = go.Figure()
+    
+    # Add actual values
+    fig.add_trace(go.Scatterpolar(
+        r=actual_values,
+        theta=categories,
+        fill='toself',
+        fillcolor='rgba(44, 160, 101, 0.2)',
+        line=dict(color='rgb(44, 160, 101)', width=2),
+        name='Current System',
+        hovertemplate='%{theta}: %{r:.3f}<extra></extra>'
+    ))
+    
+    # Add ideal values
+    fig.add_trace(go.Scatterpolar(
+        r=ideal_values,
+        theta=categories,
+        fill='toself',
+        fillcolor='rgba(93, 164, 214, 0.1)',
+        line=dict(color='rgb(93, 164, 214)', width=2, dash='dash'),
+        name='Optimal Range',
+        hovertemplate='%{theta}: %{r:.3f}<extra></extra>'
+    ))
+    
+    # Update layout
+    fig.update_layout(
+        polar=dict(
+            radialaxis=dict(
+                visible=True,
+                range=[0, 1],
+                tickmode='linear',
+                tick0=0,
+                dtick=0.2,
+                gridcolor='rgba(0,0,0,0.1)',
+                gridwidth=1,
+                showticklabels=True,
+                tickfont=dict(size=10)
+            ),
+            angularaxis=dict(
+                gridcolor='rgba(0,0,0,0.1)',
+                gridwidth=1
+            ),
+            bgcolor='rgba(255,255,255,0)'
+        ),
+        showlegend=True,
+        legend=dict(
+            yanchor="top",
+            y=1.1,
+            xanchor="center",
+            x=0.5,
+            orientation="h"
+        ),
+        title=dict(
+            text="System Health Radar",
+            font=dict(size=16, color='#333'),
+            x=0.5,
+            xanchor='center'
+        ),
+        height=400,
+        margin=dict(l=80, r=80, t=100, b=80)
+    )
+    
+    return fig
+
+def display_visual_summary_cards(metrics, assessments):
+    """Display visual summary cards with color-coded indicators."""
+    st.subheader("🎯 System Health Dashboard")
+    
+    # Define thresholds for color coding
+    def get_status_color(value, optimal_range, warning_range):
+        """Get color based on value and ranges."""
+        if optimal_range[0] <= value <= optimal_range[1]:
+            return "green", "✅"
+        elif warning_range[0] <= value <= warning_range[1]:
+            return "orange", "⚠️"
+        else:
+            return "red", "❌"
+    
+    # Create metric cards in columns
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        efficiency = metrics.get('network_efficiency', 0)
+        color, icon = get_status_color(efficiency, (0.3, 0.5), (0.2, 0.6))
+        st.markdown(f"""
+        <div style="background: linear-gradient(135deg, #{{'green': '28a745', 'orange': 'ffc107', 'red': 'dc3545'}[color]}22 0%, transparent 100%); 
+                    padding: 20px; border-radius: 10px; border-left: 4px solid #{{'green': '28a745', 'orange': 'ffc107', 'red': 'dc3545'}[color]};">
+            <h4 style="margin: 0; color: #{{'green': '28a745', 'orange': 'ffc107', 'red': 'dc3545'}[color]};">{icon} Efficiency</h4>
+            <h2 style="margin: 10px 0;">{efficiency:.3f}</h2>
+            <p style="margin: 0; opacity: 0.8; font-size: 12px;">Optimal: 0.3-0.5</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        robustness = metrics.get('robustness', 0)
+        color, icon = get_status_color(robustness, (0.25, 1.0), (0.15, 1.0))
+        st.markdown(f"""
+        <div style="background: linear-gradient(135deg, #{{'green': '28a745', 'orange': 'ffc107', 'red': 'dc3545'}[color]}22 0%, transparent 100%); 
+                    padding: 20px; border-radius: 10px; border-left: 4px solid #{{'green': '28a745', 'orange': 'ffc107', 'red': 'dc3545'}[color]};">
+            <h4 style="margin: 0; color: #{{'green': '28a745', 'orange': 'ffc107', 'red': 'dc3545'}[color]};">{icon} Robustness</h4>
+            <h2 style="margin: 10px 0;">{robustness:.3f}</h2>
+            <p style="margin: 0; opacity: 0.8; font-size: 12px;">Minimum: 0.25</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col3:
+        viable = metrics.get('is_viable', False)
+        viability_window = metrics.get('viability_window_position', 0)
+        color = "green" if viable else "red"
+        icon = "✅" if viable else "❌"
+        st.markdown(f"""
+        <div style="background: linear-gradient(135deg, #{{'green': '28a745', 'red': 'dc3545'}[color]}22 0%, transparent 100%); 
+                    padding: 20px; border-radius: 10px; border-left: 4px solid #{{'green': '28a745', 'red': 'dc3545'}[color]};">
+            <h4 style="margin: 0; color: #{{'green': '28a745', 'red': 'dc3545'}[color]};">{icon} Viability</h4>
+            <h2 style="margin: 10px 0;">{'YES' if viable else 'NO'}</h2>
+            <p style="margin: 0; opacity: 0.8; font-size: 12px;">Window: {viability_window:.1%}</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col4:
+        roles = metrics.get('number_of_roles', 0)
+        color, icon = get_status_color(roles, (2, 5), (1.5, 6))
+        st.markdown(f"""
+        <div style="background: linear-gradient(135deg, #{{'green': '28a745', 'orange': 'ffc107', 'red': 'dc3545'}[color]}22 0%, transparent 100%); 
+                    padding: 20px; border-radius: 10px; border-left: 4px solid #{{'green': '28a745', 'orange': 'ffc107', 'red': 'dc3545'}[color]};">
+            <h4 style="margin: 0; color: #{{'green': '28a745', 'orange': 'ffc107', 'red': 'dc3545'}[color]};">{icon} Roles</h4>
+            <h2 style="margin: 10px 0;">{roles:.2f}</h2>
+            <p style="margin: 0; opacity: 0.8; font-size: 12px;">Natural: 2-5</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # Add progress bars for key ratios
+    st.markdown("---")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.markdown("**Efficiency Progress**")
+        efficiency_pct = min(max(efficiency, 0), 1)
+        st.progress(efficiency_pct)
+        st.caption(f"{efficiency_pct:.1%} - {'Optimal' if 0.3 <= efficiency <= 0.5 else 'Suboptimal'}")
+    
+    with col2:
+        st.markdown("**Robustness Level**")
+        robustness_pct = min(max(robustness, 0), 1)
+        st.progress(robustness_pct)
+        st.caption(f"{robustness_pct:.1%} - {'Strong' if robustness > 0.25 else 'Weak'}")
+    
+    with col3:
+        st.markdown("**Viability Window**")
+        viability_pct = metrics.get('viability_window_position', 0)
+        st.progress(viability_pct)
+        st.caption(f"{viability_pct:.1%} - {'In window' if viable else 'Outside window'}")
+    
+    # Add radar chart
+    st.markdown("---")
+    st.subheader("📊 Multi-Metric Comparison")
+    radar_fig = create_radar_chart(metrics)
+    st.plotly_chart(radar_fig, use_container_width=True)
+
 def display_detailed_report(calculator, metrics, assessments, org_name):
     """Display scientific analysis report with embedded visualizations."""
     
     st.header("📚 Analysis Report")
     st.markdown("*Comprehensive visual assessment with charts, methodology, results, and recommendations*")
+    
+    # Add visual summary cards at the top
+    display_visual_summary_cards(metrics, assessments)
     
     # Single report format with integrated executive summary
     tab1, = st.tabs(["📖 Report"])
