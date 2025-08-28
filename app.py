@@ -3413,10 +3413,11 @@ def create_radar_chart(metrics):
         r=actual_values,
         theta=categories,
         fill='toself',
-        fillcolor='rgba(44, 160, 101, 0.2)',
-        line=dict(color='rgb(44, 160, 101)', width=2),
+        fillcolor='rgba(44, 160, 101, 0.3)',
+        line=dict(color='rgb(44, 160, 101)', width=4),
         name='Current System',
-        hovertemplate='%{theta}: %{r:.3f}<extra></extra>'
+        hovertemplate='%{theta}: %{r:.3f}<extra></extra>',
+        marker=dict(size=10)
     ))
     
     # Add ideal values
@@ -3424,10 +3425,11 @@ def create_radar_chart(metrics):
         r=ideal_values,
         theta=categories,
         fill='toself',
-        fillcolor='rgba(93, 164, 214, 0.1)',
-        line=dict(color='rgb(93, 164, 214)', width=2, dash='dash'),
+        fillcolor='rgba(93, 164, 214, 0.15)',
+        line=dict(color='rgb(93, 164, 214)', width=3, dash='dash'),
         name='Optimal Range',
-        hovertemplate='%{theta}: %{r:.3f}<extra></extra>'
+        hovertemplate='%{theta}: %{r:.3f}<extra></extra>',
+        marker=dict(size=8)
     ))
     
     # Update layout
@@ -3440,32 +3442,34 @@ def create_radar_chart(metrics):
                 tick0=0,
                 dtick=0.2,
                 gridcolor='rgba(0,0,0,0.1)',
-                gridwidth=1,
+                gridwidth=2,
                 showticklabels=True,
-                tickfont=dict(size=10)
+                tickfont=dict(size=14)
             ),
             angularaxis=dict(
                 gridcolor='rgba(0,0,0,0.1)',
-                gridwidth=1
+                gridwidth=2,
+                tickfont=dict(size=16)
             ),
             bgcolor='rgba(255,255,255,0)'
         ),
         showlegend=True,
         legend=dict(
             yanchor="top",
-            y=1.1,
+            y=1.08,
             xanchor="center",
             x=0.5,
-            orientation="h"
+            orientation="h",
+            font=dict(size=16)
         ),
         title=dict(
             text="System Health Radar",
-            font=dict(size=16, color='#333'),
+            font=dict(size=24, color='#333'),
             x=0.5,
             xanchor='center'
         ),
-        height=400,
-        margin=dict(l=80, r=80, t=100, b=80)
+        height=800,
+        margin=dict(l=120, r=120, t=150, b=120)
     )
     
     return fig
