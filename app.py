@@ -2012,11 +2012,11 @@ def display_visualizations_enhanced(G, flow_matrix, node_names, metrics, org_nam
         with col2:
             threshold_pct = st.slider(
                 "Show top % of flows",
-                min_value=10,
+                min_value=1,
                 max_value=100,
-                value=70 if n_edges > 500 else 90,  # Show much more by default
+                value=95 if n_edges > 500 else 100,  # Show almost all flows by default
                 step=5,
-                help="Show only the largest flows"
+                help="Show only the largest flows (default: show all)"
             )
         with col3:
             st.info(f"📊 {n_edges} total flows\n💡 Adjust sliders for performance")
@@ -2735,7 +2735,7 @@ def display_regenerative_metrics(metrics, assessments):
 
 
 
-def create_sankey_diagram(flow_matrix, node_names, max_nodes=50, threshold_percentile=75):
+def create_sankey_diagram(flow_matrix, node_names, max_nodes=50, threshold_percentile=100):
     """Create a Sankey diagram showing directed flows between nodes.
     
     Args:
@@ -2777,17 +2777,20 @@ def create_sankey_diagram(flow_matrix, node_names, max_nodes=50, threshold_perce
     medium_flow_color = 'rgba(254, 196, 79, 0.5)'   # Orange for medium flows  
     weak_flow_color = 'rgba(100, 181, 246, 0.5)'    # Light blue for weak flows
     
-    # Filter small flows for performance - but use much lower thresholds
-    if threshold_percentile > 0 and n_nodes > 10:
+    # Filter small flows for performance - but be very permissive
+    if threshold_percentile > 0 and n_nodes > 20:  # Only filter for larger networks
         non_zero_flows = flow_matrix[flow_matrix > 0]
         if len(non_zero_flows) > 0:
-            # Much lower percentile to show more flows
-            # For example, if threshold_percentile is 75, we now use 10th percentile instead of 75th
-            actual_percentile = max(5, threshold_percentile / 10)  # Much lower threshold
-            threshold = np.percentile(non_zero_flows, actual_percentile)
-            # Also set a minimum threshold to avoid excluding very small but meaningful flows
-            min_flow = np.min(non_zero_flows) if len(non_zero_flows) > 0 else 0
-            threshold = max(min_flow * 0.5, threshold)  # At least show flows > 50% of minimum
+            # Very low threshold to show most flows
+            # Convert threshold_percentile: 100 = show all, 50 = show top 50%
+            actual_percentile = 100 - threshold_percentile
+            if actual_percentile > 0:
+                threshold = np.percentile(non_zero_flows, actual_percentile)
+                # Ensure we show at least small flows
+                min_flow = np.min(non_zero_flows) if len(non_zero_flows) > 0 else 0
+                threshold = max(min_flow * 0.01, threshold)  # Show flows > 1% of minimum
+            else:
+                threshold = 0  # Show all flows when threshold_percentile = 100
         else:
             threshold = 0
     else:
@@ -2817,7 +2820,7 @@ def create_sankey_diagram(flow_matrix, node_names, max_nodes=50, threshold_perce
         if np.sum(flow_matrix > 0) == 0:
             st.warning("No flows found in the network")
         else:
-            st.info(f"📊 All {np.sum(flow_matrix > 0)} flows are below the current threshold. Try adjusting the 'Show top % of flows' slider to see more connections.")
+            st.info(f"📊 All {np.sum(flow_matrix > 0)} flows are below the current threshold. Adjusting the 'Show top % of flows' slider to 100% to display all connections.")
         return None
     
     # Create node colors based on total throughput (darker, more visible)
