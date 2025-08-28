@@ -396,9 +396,16 @@ class SustainabilityVisualizer:
         # Calculate robustness for each efficiency value
         development_capacity = self.extended_metrics['development_capacity']
         
+        # Use symmetric robustness formula: R = -α·log(α)
+        # Maximum at α = 1/e ≈ 0.368
+        
         for eff in efficiency_range:
-            # R = (A/C) * (1 - A/C) * log(C)
-            robustness = eff * (1 - eff) * np.log(development_capacity) if development_capacity > 0 else 0
+            # Symmetric robustness formula: R = -α·log(α) where α = A/C (efficiency)
+            # Scaled by log(C) to maintain absolute values relative to system capacity
+            if 0 < eff < 1 and development_capacity > 0:
+                robustness = -eff * np.log(eff) * np.log(development_capacity)
+            else:
+                robustness = 0
             robustness_values.append(max(0, robustness))
         
         # Create the plot
@@ -425,16 +432,35 @@ class SustainabilityVisualizer:
             name='Current Position'
         ))
         
-        # Add optimal point
-        optimal_efficiency = 0.37  # Theoretical optimum
-        optimal_robustness = optimal_efficiency * (1 - optimal_efficiency) * np.log(development_capacity)
+        # Add two key reference points
+        # 1. Empirical optimum (where real ecosystems cluster)
+        empirical_optimal = 0.37
+        if development_capacity > 0:
+            empirical_robustness = -empirical_optimal * np.log(empirical_optimal) * np.log(development_capacity)
+        else:
+            empirical_robustness = 0
         
         fig.add_trace(go.Scatter(
-            x=[optimal_efficiency],
-            y=[optimal_robustness],
+            x=[empirical_optimal],
+            y=[empirical_robustness],
             mode='markers',
             marker=dict(size=12, color='green', symbol='star'),
-            name='Optimal Point'
+            name='Empirical Optimum (α=0.37)'
+        ))
+        
+        # 2. Geometric center of window of vitality
+        geometric_center = 0.4596
+        if development_capacity > 0:
+            geometric_robustness = -geometric_center * np.log(geometric_center) * np.log(development_capacity)
+        else:
+            geometric_robustness = 0
+        
+        fig.add_trace(go.Scatter(
+            x=[geometric_center],
+            y=[geometric_robustness],
+            mode='markers',
+            marker=dict(size=12, color='blue', symbol='diamond'),
+            name='Geometric Center (α=0.4596)'
         ))
         
         # Update layout

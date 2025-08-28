@@ -224,8 +224,27 @@ class OrganizationalNetworkGenerator:
         Returns:
             Plotly figure
         """
-        # Calculate layout
-        pos = nx.spring_layout(G, seed=self.seed, k=1.5, iterations=50)
+        # Calculate layout with better spacing
+        # Always prioritize layouts that ensure good node separation
+        try:
+            # First try Kamada-Kawai which generally gives excellent results
+            pos = nx.kamada_kawai_layout(G)
+            
+            # Verify minimum distance between nodes is reasonable
+            min_dist = float('inf')
+            for i in G.nodes():
+                for j in G.nodes():
+                    if i != j:
+                        dist = np.sqrt((pos[i][0] - pos[j][0])**2 + (pos[i][1] - pos[j][1])**2)
+                        min_dist = min(min_dist, dist)
+            
+            # If nodes are too close together, use circular layout instead
+            if min_dist < 0.1:
+                pos = nx.circular_layout(G, scale=2.0)
+                
+        except:
+            # Fallback to circular if Kamada-Kawai fails
+            pos = nx.circular_layout(G, scale=2.0)
         
         # Calculate node metrics
         in_flow = {}
@@ -249,11 +268,18 @@ class OrganizationalNetworkGenerator:
             size = 40 + 60 * normalized
             node_sizes.append(size)
         
-        # Get all edge weights for normalization
+        # Get all edge weights for normalization with better scaling strategy
         all_weights = [G.edges[e].get('weight', 1) for e in G.edges()]
-        max_weight = max(all_weights) if all_weights else 1
-        min_weight = min(all_weights) if all_weights else 0
-        weight_range = max_weight - min_weight if max_weight != min_weight else 1
+        if not all_weights:
+            max_weight, min_weight, weight_range = 1, 0, 1
+        else:
+            # Use log scaling or percentile-based scaling for better distribution
+            all_weights_array = np.array(all_weights)
+            
+            # Use percentile-based scaling to avoid extreme outliers
+            min_weight = np.percentile(all_weights_array, 5)   # 5th percentile as minimum
+            max_weight = np.percentile(all_weights_array, 95)  # 95th percentile as maximum
+            weight_range = max_weight - min_weight if max_weight != min_weight else 1
         
         # Create edge traces with varying thickness and color
         edge_traces = []
@@ -264,15 +290,34 @@ class OrganizationalNetworkGenerator:
             x1, y1 = pos[edge[1]]
             weight = G.edges[edge].get('weight', 1)
             
-            # Normalize weight for visualization
-            normalized_weight = (weight - min_weight) / weight_range if weight_range > 0 else 0.5
+            # Normalize weight for visualization with clamping
+            if weight_range > 0:
+                # Clamp weight to the percentile range to avoid extreme values
+                clamped_weight = max(min_weight, min(weight, max_weight))
+                normalized_weight = (clamped_weight - min_weight) / weight_range
+            else:
+                normalized_weight = 0.5
             
-            # Edge width from 0.5 to 3 based on flow
-            edge_width = 0.5 + 2.5 * normalized_weight
+            # Edge width with better scaling: minimum 1.5, maximum 6 for good visibility range
+            MIN_EDGE_WIDTH = 1.5  # Ensure all edges are visible
+            MAX_EDGE_WIDTH = 6.0  # Reasonable maximum
+            edge_width = MIN_EDGE_WIDTH + (MAX_EDGE_WIDTH - MIN_EDGE_WIDTH) * normalized_weight
             
-            # Simple color scheme
-            gray_value = int(200 - 100 * normalized_weight)
-            edge_color = f'rgba({gray_value}, {gray_value}, {gray_value}, 0.7)'
+            # Enhanced color scheme with better contrast for different weights
+            if normalized_weight < 0.33:
+                # Light flows: lighter gray/blue
+                color_r, color_g, color_b = 100, 150, 200  # Light blue-gray
+            elif normalized_weight < 0.67:
+                # Medium flows: medium gray
+                color_r, color_g, color_b = 80, 80, 120   # Medium blue-gray  
+            else:
+                # Heavy flows: dark color
+                color_r, color_g, color_b = 50, 50, 80    # Dark blue-gray
+                
+            edge_color = f'rgba({color_r}, {color_g}, {color_b}, 0.35)'  # Very transparent edges
+            
+            # Create more transparent arrow color
+            arrow_color = f'rgba({color_r}, {color_g}, {color_b}, 0.3)'  # Lower opacity for arrows
             
             # Create edge line
             edge_trace = go.Scatter(
@@ -290,14 +335,15 @@ class OrganizationalNetworkGenerator:
             edge_traces.append(edge_trace)
             
             # Add arrow annotation using Plotly's annotation system
-            # Position arrow at 80% along the edge
-            arrow_pos = 0.8
+            # Position arrow at 70% along the edge for better visibility
+            arrow_pos = 0.7
             arrow_x = x0 + arrow_pos * (x1 - x0)
             arrow_y = y0 + arrow_pos * (y1 - y0)
             
             # Create arrow that points from current position toward end
-            arrow_end_x = arrow_x + 0.1 * (x1 - x0)
-            arrow_end_y = arrow_y + 0.1 * (y1 - y0)
+            # Increased arrow length for better visibility
+            arrow_end_x = arrow_x + 0.15 * (x1 - x0)
+            arrow_end_y = arrow_y + 0.15 * (y1 - y0)
             
             arrow_annotation = dict(
                 ax=arrow_x,
@@ -310,9 +356,9 @@ class OrganizationalNetworkGenerator:
                 ayref='y',
                 showarrow=True,
                 arrowhead=2,
-                arrowsize=1.2,
-                arrowwidth=max(1.5, edge_width * 0.8),
-                arrowcolor=edge_color,
+                arrowsize=1.2,  # Smaller arrow triangle size
+                arrowwidth=min(2.5, max(1.0, edge_width * 0.7)),  # Proportional to edge width but capped
+                arrowcolor=arrow_color,  # Use more transparent arrow color
             )
             edge_annotations.append(arrow_annotation)
         
@@ -448,7 +494,7 @@ class OrganizationalNetworkGenerator:
                            )],
                            xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
                            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-                           plot_bgcolor='#f8f9fa',  # Slightly lighter background for better contrast
+                           plot_bgcolor='#ffffff',  # White background for maximum contrast with edges
                            paper_bgcolor='white'
                        ))
         

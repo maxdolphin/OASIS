@@ -1,0 +1,84 @@
+{
+  "organization": "Graminoid Everglades",
+  "nodes": [
+    "Periphyton",
+    "Macrophytes", 
+    "Floating_Vegetation",
+    "Utricularia",
+    "Living_POC",
+    "Living_Sediment",
+    "Mesoinvertebrates",
+    "Other_Macroinvertebrates",
+    "Crayfish",
+    "Small_Fish",
+    "Large_Fish",
+    "Amphibians",
+    "Reptiles",
+    "Birds",
+    "Mammals",
+    "Sediment_Carbon",
+    "Labile_Detritus", 
+    "Refractory_Detritus"
+  ],
+  "flows": [
+    [0, 0, 0, 0, 65, 50, 110, 95, 35, 45, 0, 25, 0, 20, 0, 480, 190, 310],
+    [0, 0, 0, 0, 45, 35, 60, 50, 25, 30, 0, 18, 0, 15, 8, 620, 230, 350], 
+    [0, 0, 0, 0, 22, 16, 30, 25, 14, 16, 0, 8, 0, 10, 0, 145, 60, 100],
+    [0, 0, 0, 0, 0, 0, 14, 11, 0, 8, 0, 4, 0, 3, 0, 44, 18, 28],
+    [0, 0, 0, 0, 0, 0, 25, 19, 0, 14, 0, 0, 0, 0, 0, 145, 50, 85],
+    [0, 0, 0, 0, 29, 0, 40, 27, 0, 22, 0, 0, 0, 0, 0, 265, 92, 100],
+    [0, 0, 0, 0, 10, 8, 0, 0, 0, 25, 14, 19, 6, 10, 0, 35, 13, 21],
+    [0, 0, 0, 0, 6, 5, 0, 0, 0, 19, 11, 14, 5, 8, 0, 44, 18, 28],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 12, 15, 10, 7, 13, 5, 28, 11, 18],
+    [0, 0, 0, 0, 0, 0, 10, 8, 5, 0, 19, 15, 12, 24, 6, 49, 18, 28],
+    [0, 0, 0, 0, 0, 0, 0, 0, 6, 14, 0, 6, 10, 19, 8, 33, 13, 20],
+    [0, 0, 0, 0, 0, 0, 7, 6, 4, 10, 5, 0, 6, 5, 3, 28, 9, 15],
+    [0, 0, 0, 0, 0, 0, 0, 0, 3, 8, 6, 5, 0, 10, 6, 23, 8, 13],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 18, 6, 9],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 13, 4, 6],
+    [310, 240, 120, 44, 265, 480, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 140, 25],
+    [190, 145, 60, 18, 92, 145, 25, 19, 0, 0, 0, 0, 0, 0, 0, 58, 0, 92],
+    [310, 230, 100, 28, 85, 100, 12, 10, 0, 0, 0, 0, 0, 0, 0, 435, 58, 0]
+  ],
+  "metadata": {
+    "primary_source": "Heymans, J.J., Ulanowicz, R.E., Bondavalli, C. (2002). Network analysis of the South Florida Everglades graminoid marshes and comparison with nearby cypress ecosystems. Ecological Modelling 149:5-23",
+    "local_pdf_source": "/Users/massimomistretta/Claude_Projects/Adaptive_Organization/papers/Heymans.pdf",
+    "secondary_source": "Ulanowicz et al. (2000) Network Analysis of Trophic Dynamics in South Florida Ecosystems: The Graminoid Ecosystem",
+    "description": "Freshwater marsh ecosystem (Everglades graminoid wetlands) - 18-compartment simplified model derived from published quantitative data",
+    "data_derivation": "Flow matrix reconstructed from published dependency coefficients (Fig 2), trophic analysis (Fig 4), cycling flows (Fig 5), and total system throughput constraints from Heymans et al. (2002)",
+    "units": "gC/m²/year",
+    "ecosystem_type": "Freshwater marsh",
+    "compartments": 18,
+    "original_compartments": 66,
+    "location": "Everglades National Park, Florida, USA (approximately 214,000 ha)",
+    "study_period": "Dry season model",
+    "validation_metrics": {
+      "dry_season_published": {
+        "TST": 10978,
+        "development_capacity": 39799,
+        "ascendancy": 20896,
+        "ascendency_percent": 52.5,
+        "finn_cycling_index": 4.3,
+        "units": "gC/m²/year for throughput, gC-bits/m²/year for information metrics"
+      }
+    },
+    "key_characteristics": [
+      "Two-dimensional system with reduced diversity of primary producers",
+      "Strong dependency of higher trophic levels on periphyton (~80% dependency)",
+      "Exceptionally high detritivory:herbivory ratio (45:1)",
+      "High ascendancy (52.5%) - one of highest relative ascendancies observed",
+      "Low recycling - most carbon is shunted into detritus and deposited as peat",
+      "Very high total system throughput due to fast turnover rates"
+    ],
+    "model_structure": {
+      "primary_producers": ["periphyton", "macrophytes", "Utricularia", "floating vegetation"],
+      "detritus_compartments": ["sediment carbon", "labile detritus", "refractory detritus"],
+      "microbial": ["living POC", "living sediment"],
+      "invertebrates": ["apple snails", "freshwater prawns", "crayfish", "mesoinvertebrates", "other macroinvertebrates", "large aquatic insects", "terrestrial invertebrates", "fishing spiders"],
+      "fish": "30 species described, 16 in sawgrass marshes",
+      "herpetofauna": "56 species total, 9 functional groups",
+      "birds": "~350 species in park, 8 groups nest in graminoids",
+      "mammals": "9 compartments including endangered Florida panther"
+    }
+  }
+}
