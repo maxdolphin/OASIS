@@ -2085,8 +2085,8 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
             st.caption("η = Eeff/Emax [0-1]")
     
     with tab3:
-        # LEVEL 1: Data & Flow Statistics (moved from visualizations)
-        with st.expander("📊 **Level 1: Data & Flow Statistics**", expanded=True):
+        # Data & Flow Statistics (moved from visualizations)
+        with st.expander("📊 **Data & Flow Statistics**", expanded=True):
             st.markdown("*Foundation: Raw flow data and basic statistics*")
             
             col1, col2, col3, col4 = st.columns(4)
@@ -2117,8 +2117,8 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
                 st.metric("Coeff. of Variation", f"{flow_cv:.2f}")
                 st.caption("CV = σ/μ [dimensionless]")
         
-        # LEVEL 2: Network Structure & Topology
-        with st.expander("🌐 **Level 2: Network Structure & Topology**", expanded=True):
+        # Network Structure & Topology
+        with st.expander("🌐 **Network Structure & Topology**", expanded=True):
             st.markdown("*Network analysis: Nodes, connections, and structural patterns*")
             
             col1, col2, col3, col4 = st.columns(4)
@@ -2143,8 +2143,8 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
                 st.metric("Link Density", f"{metrics.get('link_density', 0):.3f}")
                 st.caption("LD = L/N [links/node]")
         
-        # LEVEL 3: Ulanowicz Core Metrics (computation flow)
-        with st.expander("📈 **Level 3: Ulanowicz Core Metrics**", expanded=True):
+        # Ulanowicz Core Metrics (computation flow)
+        with st.expander("📈 **Ulanowicz Core Metrics**", expanded=True):
             st.markdown("*Information-theoretic metrics following computation flow: TST → A,Φ → C → α → R*")
             
             # Step 1: TST (foundation)
@@ -2204,8 +2204,8 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
                 st.metric("Distance from Optimum", f"{dist_empirical:.3f}")
                 st.caption("|α - 0.37| [dimensionless]")
     
-        # LEVEL 4: Regenerative Economics (10 Principles)
-        with st.expander("🌱 **Level 4: Regenerative Economics**", expanded=False):
+        # Regenerative Economics (10 Principles)
+        with st.expander("🌱 **Regenerative Economics**", expanded=False):
             st.markdown("*10 Principles from Fath et al. (2019) for regenerative systems*")
             
             # Principles 1-5: Structure
@@ -2260,9 +2260,9 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
         st.metric("10. Balance", f"{metrics['robustness']:.3f}")
         st.caption("R [bits]")
     
-    # LEVEL 5: Sustainability Assessment
+    # Sustainability Assessment
     st.markdown("---")
-    st.subheader("🎯 Level 5: Sustainability Assessment")
+    st.subheader("🎯 Sustainability Assessment")
     st.markdown("*Window of Viability and system health evaluation*")
     
     # Viability status
@@ -2313,9 +2313,9 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
         else:
             st.caption("α = A/C ❌ Outside")
     
-    # LEVEL 6: Extended Network Metrics
+    # Extended Network Metrics
     st.markdown("---")
-    st.subheader("🔬 Level 6: Extended Network Metrics")
+    st.subheader("🔬 Extended Network Metrics")
     st.markdown("*Additional analytical metrics and health indicators*")
     
     # Extended flow metrics
@@ -2386,7 +2386,7 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
     
     # Network Roles & Functional Specialization
     st.markdown("---")
-    st.subheader("🎭 Level 4: Network Roles & Functional Specialization")
+    st.subheader("🎭 Network Roles & Functional Specialization")
     st.markdown("*Based on Zorach & Ulanowicz (2003) - Quantifying the complexity of flow networks*")
     
     # Core roles metrics
@@ -3153,8 +3153,8 @@ def display_network_analysis(calculator, metrics, flow_matrix, node_names):
     with st.spinner("Calculating network science metrics..."):
         network_metrics = analyzer.get_all_metrics()
     
-    # LEVEL 1: Network Topology
-    st.subheader("📐 Level 1: Network Topology")
+    # Network Topology
+    st.subheader("📐 Network Topology")
     st.markdown("*Fundamental structure and connectivity patterns*")
     
     col1, col2, col3, col4 = st.columns(4)
@@ -3180,9 +3180,9 @@ def display_network_analysis(calculator, metrics, flow_matrix, node_names):
         st.metric("Is Small World?", is_sw)
         st.caption("High CC, short paths")
     
-    # LEVEL 2: Centrality Analysis
+    # Centrality Analysis
     st.markdown("---")
-    st.subheader("⭐ Level 2: Centrality Analysis")
+    st.subheader("⭐ Centrality Analysis")
     st.markdown("*Identifying important nodes through various centrality measures*")
     
     centralities = network_metrics['centralities']
@@ -3211,9 +3211,9 @@ def display_network_analysis(calculator, metrics, flow_matrix, node_names):
         for node_id, score in get_top_nodes(centralities['pagerank'], 3):
             st.write(f"• {node_names[node_id]}: {score:.3f}")
     
-    # LEVEL 3: Community Structure
+    # Community Structure
     st.markdown("---")
-    st.subheader("👥 Level 3: Community Structure")
+    st.subheader("👥 Community Structure")
     st.markdown("*Detecting clusters and modular organization*")
     
     communities = network_metrics['communities']
@@ -3260,9 +3260,9 @@ def display_network_analysis(calculator, metrics, flow_matrix, node_names):
             for node, comm in comm_items[mid:]:
                 st.write(f"• {node}: {comm}")
     
-    # LEVEL 4: Robustness & Resilience
+    # Robustness & Resilience
     st.markdown("---")
-    st.subheader("🛡️ Level 4: Robustness & Resilience")
+    st.subheader("🛡️ Robustness & Resilience")
     st.markdown("*Network vulnerability and attack tolerance*")
     
     robustness = network_metrics['robustness']
@@ -3296,9 +3296,9 @@ def display_network_analysis(calculator, metrics, flow_matrix, node_names):
     else:
         st.success(f"✅ Network Vulnerability: {vulnerability} - Good resilience to failures")
     
-    # LEVEL 5: Flow Characteristics
+    # Flow Characteristics
     st.markdown("---")
-    st.subheader("💧 Level 5: Flow Characteristics")
+    st.subheader("💧 Flow Characteristics")
     st.markdown("*Flow distribution and efficiency patterns*")
     
     flow_metrics = network_metrics['flow']
@@ -3318,9 +3318,9 @@ def display_network_analysis(calculator, metrics, flow_matrix, node_names):
         st.metric("Reciprocity", f"{flow_metrics['flow_reciprocity']:.3f}")
         st.caption("Bidirectional [0-1]")
     
-    # LEVEL 6: Node Rankings
+    # Node Rankings
     st.markdown("---")
-    st.subheader("📊 Level 6: Node Rankings & Analysis")
+    st.subheader("📊 Node Rankings & Analysis")
     st.markdown("*Comprehensive node importance across multiple metrics*")
     
     # Create node ranking dataframe
