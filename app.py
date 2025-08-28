@@ -2037,10 +2037,16 @@ def display_visualizations_enhanced(G, flow_matrix, node_names, metrics, org_nam
     except Exception as e:
         st.error(f"Error creating Sankey diagram: {str(e)}")
     
-    # Window of Viability last
+    # Window of Viability
     st.subheader("🎯 Window of Viability")
     robustness_fig = create_robustness_curve(metrics)
     st.plotly_chart(robustness_fig, use_container_width=True)
+    
+    # Multi-Metric Comparison (moved from visual summary cards)
+    st.subheader("📊 Multi-Metric Comparison")
+    st.markdown("*Radar chart comparing all key metrics against optimal ranges*")
+    radar_fig = create_radar_chart(metrics)
+    st.plotly_chart(radar_fig, use_container_width=True)
     
     # Note: Flow Statistics have been moved to Core Metrics Level 1
 
@@ -2077,66 +2083,65 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
         with col4:
             st.metric("Network Efficiency", f"{metrics['network_efficiency']:.3f}")
             st.caption("η = Eeff/Emax [0-1]")
-        
-        st.markdown("---")
-        
+    
+    with tab3:
         # LEVEL 1: Data & Flow Statistics (moved from visualizations)
         with st.expander("📊 **Level 1: Data & Flow Statistics**", expanded=True):
             st.markdown("*Foundation: Raw flow data and basic statistics*")
             
             col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Total Flow", f"{np.sum(flow_matrix):.1f}")
-        st.caption("ΣTij [flow units]")
-        st.metric("Active Connections", np.count_nonzero(flow_matrix))
-        st.caption("N_links [count]")
-    with col2:
-        avg_flow = np.mean(flow_matrix[flow_matrix > 0]) if np.any(flow_matrix > 0) else 0
-        median_flow = np.median(flow_matrix[flow_matrix > 0]) if np.any(flow_matrix > 0) else 0
-        st.metric("Avg Flow", f"{avg_flow:.2f}")
-        st.caption("μ(Tij>0) [flow units]")
-        st.metric("Median Flow", f"{median_flow:.2f}")
-        st.caption("Med(Tij>0) [flow units]")
-    with col3:
-        max_flow = np.max(flow_matrix) if flow_matrix.size > 0 else 0
-        min_flow = np.min(flow_matrix[flow_matrix > 0]) if np.any(flow_matrix > 0) else 0
-        st.metric("Max Flow", f"{max_flow:.1f}")
-        st.caption("Max(Tij) [flow units]")
-        st.metric("Min Flow (>0)", f"{min_flow:.2f}")
-        st.caption("Min(Tij>0) [flow units]")
-    with col4:
-        flow_std = np.std(flow_matrix[flow_matrix > 0]) if np.any(flow_matrix > 0) else 0
-        flow_cv = flow_std / avg_flow if avg_flow > 0 else 0
-        st.metric("Flow Std Dev", f"{flow_std:.2f}")
-        st.caption("σ(Tij) [flow units]")
-        st.metric("Coeff. of Variation", f"{flow_cv:.2f}")
-        st.caption("CV = σ/μ [dimensionless]")
+            with col1:
+                st.metric("Total Flow", f"{np.sum(flow_matrix):.1f}")
+                st.caption("ΣTij [flow units]")
+                st.metric("Active Connections", np.count_nonzero(flow_matrix))
+                st.caption("N_links [count]")
+            with col2:
+                avg_flow = np.mean(flow_matrix[flow_matrix > 0]) if np.any(flow_matrix > 0) else 0
+                median_flow = np.median(flow_matrix[flow_matrix > 0]) if np.any(flow_matrix > 0) else 0
+                st.metric("Avg Flow", f"{avg_flow:.2f}")
+                st.caption("μ(Tij>0) [flow units]")
+                st.metric("Median Flow", f"{median_flow:.2f}")
+                st.caption("Med(Tij>0) [flow units]")
+            with col3:
+                max_flow = np.max(flow_matrix) if flow_matrix.size > 0 else 0
+                min_flow = np.min(flow_matrix[flow_matrix > 0]) if np.any(flow_matrix > 0) else 0
+                st.metric("Max Flow", f"{max_flow:.1f}")
+                st.caption("Max(Tij) [flow units]")
+                st.metric("Min Flow (>0)", f"{min_flow:.2f}")
+                st.caption("Min(Tij>0) [flow units]")
+            with col4:
+                flow_std = np.std(flow_matrix[flow_matrix > 0]) if np.any(flow_matrix > 0) else 0
+                flow_cv = flow_std / avg_flow if avg_flow > 0 else 0
+                st.metric("Flow Std Dev", f"{flow_std:.2f}")
+                st.caption("σ(Tij) [flow units]")
+                st.metric("Coeff. of Variation", f"{flow_cv:.2f}")
+                st.caption("CV = σ/μ [dimensionless]")
         
         # LEVEL 2: Network Structure & Topology
         with st.expander("🌐 **Level 2: Network Structure & Topology**", expanded=True):
             st.markdown("*Network analysis: Nodes, connections, and structural patterns*")
             
             col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Nodes", len(node_names))
-        st.caption("N [count]")
-        st.metric("Edges", metrics.get('num_edges', 0))
-        st.caption("L [count]")
-    with col2:
-        st.metric("Network Density", f"{metrics.get('network_density', 0):.3f}")
-        st.caption("ρ = L/N² [0-1]")
-        st.metric("Connectance", f"{metrics.get('connectance', 0):.3f}")
-        st.caption("C = L/(N*(N-1)) [0-1]")
-    with col3:
-        st.metric("Avg Path Length", f"{metrics.get('average_path_length', 0):.2f}")
-        st.caption("⟨l⟩ [steps]")
-        st.metric("Clustering Coeff.", f"{metrics.get('clustering_coefficient', 0):.3f}")
-        st.caption("CC [0-1]")
-    with col4:
-        st.metric("Centralization", f"{metrics.get('degree_centralization', 0):.3f}")
-        st.caption("C_deg [0-1]")
-        st.metric("Link Density", f"{metrics.get('link_density', 0):.3f}")
-        st.caption("LD = L/N [links/node]")
+            with col1:
+                st.metric("Nodes", len(node_names))
+                st.caption("N [count]")
+                st.metric("Edges", metrics.get('num_edges', 0))
+                st.caption("L [count]")
+            with col2:
+                st.metric("Network Density", f"{metrics.get('network_density', 0):.3f}")
+                st.caption("ρ = L/N² [0-1]")
+                st.metric("Connectance", f"{metrics.get('connectance', 0):.3f}")
+                st.caption("C = L/(N*(N-1)) [0-1]")
+            with col3:
+                st.metric("Avg Path Length", f"{metrics.get('average_path_length', 0):.2f}")
+                st.caption("⟨l⟩ [steps]")
+                st.metric("Clustering Coeff.", f"{metrics.get('clustering_coefficient', 0):.3f}")
+                st.caption("CC [0-1]")
+            with col4:
+                st.metric("Centralization", f"{metrics.get('degree_centralization', 0):.3f}")
+                st.caption("C_deg [0-1]")
+                st.metric("Link Density", f"{metrics.get('link_density', 0):.3f}")
+                st.caption("LD = L/N [links/node]")
         
         # LEVEL 3: Ulanowicz Core Metrics (computation flow)
         with st.expander("📈 **Level 3: Ulanowicz Core Metrics**", expanded=True):
@@ -2167,46 +2172,45 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
             # Step 3: Ascendency and Capacity
             st.markdown("#### Step 3: Ascendency & Development Capacity")
             col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Ascendency", f"{metrics['ascendency']:.1f}")
-        st.caption("A = TST * I [flow·bits]")
-    with col2:
-        st.metric("Overhead", f"{metrics['overhead']:.1f}")
-        st.caption("Φ = TST * Hc [flow·bits]")
-    with col3:
-        st.metric("Capacity", f"{metrics['development_capacity']:.1f}")
-        st.caption("C = TST * H [flow·bits]")
-    with col4:
-        st.metric("Realized Capacity", f"{metrics.get('realized_capacity', metrics['ascendency']/metrics['development_capacity']*100):.1f}%")
-        st.caption("A/C * 100 [%]")
+            with col1:
+                st.metric("Ascendency", f"{metrics['ascendency']:.1f}")
+                st.caption("A = TST * I [flow·bits]")
+            with col2:
+                st.metric("Overhead", f"{metrics['overhead']:.1f}")
+                st.caption("Φ = TST * Hc [flow·bits]")
+            with col3:
+                st.metric("Capacity", f"{metrics['development_capacity']:.1f}")
+                st.caption("C = TST * H [flow·bits]")
+            with col4:
+                st.metric("Realized Capacity", f"{metrics.get('realized_capacity', metrics['ascendency']/metrics['development_capacity']*100):.1f}%")
+                st.caption("A/C * 100 [%]")
+            
+            # Step 4: Relative metrics
+            st.markdown("#### Step 4: Relative Metrics & Robustness")
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Rel. Ascendency", f"{metrics['relative_ascendency']:.3f}")
+                st.caption("α = A/C [0-1]")
+            with col2:
+                st.metric("Rel. Overhead", f"{metrics['overhead_ratio']:.3f}")
+                st.caption("Φ/C [0-1]")
+            with col3:
+                st.metric("Robustness", f"{metrics['robustness']:.3f}")
+                st.caption("R = -α·log(α) [bits]")
+            with col4:
+                # Calculate distance from optima
+                alpha = metrics['relative_ascendency']
+                dist_empirical = abs(alpha - 0.37)
+                st.metric("Distance from Optimum", f"{dist_empirical:.3f}")
+                st.caption("|α - 0.37| [dimensionless]")
     
-    # Step 4: Relative metrics
-    st.markdown("#### Step 4: Relative Metrics & Robustness")
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Rel. Ascendency", f"{metrics['relative_ascendency']:.3f}")
-        st.caption("α = A/C [0-1]")
-    with col2:
-        st.metric("Rel. Overhead", f"{metrics['overhead_ratio']:.3f}")
-        st.caption("Φ/C [0-1]")
-    with col3:
-        st.metric("Robustness", f"{metrics['robustness']:.3f}")
-        st.caption("R = -α·log(α) [bits]")
-    with col4:
-        # Calculate distance from optima
-        alpha = metrics['relative_ascendency']
-        dist_empirical = abs(alpha - 0.37)
-        st.metric("Distance from Optimum", f"{dist_empirical:.3f}")
-        st.caption("|α - 0.37| [dimensionless]")
-    
-    # LEVEL 4: Regenerative Economics (10 Principles)
-    st.markdown("---")
-    st.subheader("🌱 Level 4: Regenerative Economics")
-    st.markdown("*10 Principles from Fath et al. (2019) for regenerative systems*")
-    
-    # Principles 1-5: Structure
-    st.markdown("#### Structural Principles")
-    col1, col2, col3, col4, col5 = st.columns(5)
+        # LEVEL 4: Regenerative Economics (10 Principles)
+        with st.expander("🌱 **Level 4: Regenerative Economics**", expanded=False):
+            st.markdown("*10 Principles from Fath et al. (2019) for regenerative systems*")
+            
+            # Principles 1-5: Structure
+            st.markdown("#### Structural Principles")
+            col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
         in_out = metrics.get('in_out_balance', None)
         if in_out is not None and in_out > 0:
@@ -3558,12 +3562,6 @@ def display_visual_summary_cards(metrics, assessments):
         viability_pct = metrics.get('viability_window_position', 0)
         st.progress(viability_pct)
         st.caption(f"{viability_pct:.1%} - {'In window' if viable else 'Outside window'}")
-    
-    # Add radar chart
-    st.markdown("---")
-    st.subheader("📊 Multi-Metric Comparison")
-    radar_fig = create_radar_chart(metrics)
-    st.plotly_chart(radar_fig, use_container_width=True)
 
 def display_detailed_report(calculator, metrics, assessments, org_name):
     """Display scientific analysis report with embedded visualizations."""
