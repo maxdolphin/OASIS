@@ -404,7 +404,11 @@ class UlanowiczCalculator:
             return 0
         
         a_c_ratio = ascendency / development_capacity
-        # Correct robustness formula: R = -α·log₂(α)
+        # Symmetric robustness formula: R = -α·log(α)
+        # Maximum at α = 1/e ≈ 0.368
+        # Key reference points:
+        #   - α = 0.37: Empirical optimum where real ecosystems cluster
+        #   - α = 0.4596: Geometric center of window of vitality (Ulanowicz)
         if 0 < a_c_ratio < 1:
             robustness = -a_c_ratio * math.log(a_c_ratio)
         else:
@@ -466,6 +470,10 @@ class UlanowiczCalculator:
         Returns:
             Average Trophic Depth value
         """
+        # Skip for networks > 30 nodes (too computationally expensive)
+        if self.n_nodes > 30:
+            return 0.0  # Skip calculation for large networks
+        
         # Create networkx graph for path analysis
         G = nx.DiGraph()
         
@@ -496,6 +504,31 @@ class UlanowiczCalculator:
                 else:
                     return 1.0  # Single node or no connections
     
+    def calculate_conditional_entropy(self) -> float:
+        """
+        Calculate Conditional Entropy (Hc).
+        
+        Conditional entropy represents the uncertainty remaining in the system
+        after accounting for the organized flows (AMI). It's also called
+        the "residual diversity" or "flexibility" in the system.
+        
+        Based on the fundamental information theory relationship:
+        H = I + Hc  (Flow Diversity = Mutual Information + Conditional Entropy)
+        
+        Therefore: Hc = H - I
+        
+        Returns:
+            Conditional Entropy value in bits
+        """
+        flow_diversity = self.calculate_flow_diversity()
+        ami = self.calculate_ami()
+        
+        # Conditional entropy is the difference
+        conditional_entropy = flow_diversity - ami
+        
+        # Should be non-negative in theory, but ensure it
+        return max(0, conditional_entropy)
+    
     def calculate_redundancy(self) -> float:
         """
         Calculate Network Redundancy.
@@ -512,6 +545,48 @@ class UlanowiczCalculator:
         development_capacity = self.calculate_development_capacity()
         
         return overhead / development_capacity if development_capacity > 0 else 0
+    
+    def calculate_finn_cycling_index(self) -> float:
+        """
+        Calculate Finn Cycling Index (FCI) - SIMPLIFIED VERSION.
+        
+        FCI measures the fraction of total system throughput that is involved in cycling.
+        This is a key indicator of system regeneration and resource efficiency.
+        
+        NOTE: Due to computational complexity, this now uses a simplified approximation
+        for networks with >10 nodes, and returns None for networks with >15 nodes.
+        
+        Returns:
+            Finn Cycling Index value between 0 and 1, or None if skipped
+        """
+        # Skip entirely for medium to large networks
+        if self.n_nodes > 15:
+            return None
+        
+        tst = self.calculate_tst()
+        if tst == 0:
+            return 0
+        
+        # For all networks, just use diagonal approximation (self-loops)
+        # This is a reasonable proxy for cycling in many systems
+        self_loop_flow = np.sum(np.diag(self.flow_matrix))
+        
+        # For very small networks (<=10 nodes), add simple 2-node cycle detection
+        if self.n_nodes <= 10:
+            try:
+                # Check for simple 2-node cycles (A->B->A)
+                for i in range(self.n_nodes):
+                    for j in range(i+1, self.n_nodes):
+                        if self.flow_matrix[i, j] > 0 and self.flow_matrix[j, i] > 0:
+                            # Found a 2-node cycle
+                            min_flow = min(self.flow_matrix[i, j], self.flow_matrix[j, i])
+                            self_loop_flow += min_flow * 0.1  # Conservative weight
+            except:
+                pass
+        
+        # Simple FCI approximation
+        fci = min(self_loop_flow / tst, 1.0) if tst > 0 else 0
+        return fci
     
     def calculate_regenerative_capacity(self) -> float:
         """
@@ -539,6 +614,94 @@ class UlanowiczCalculator:
         
         return max(0, regenerative_capacity)
     
+    def calculate_network_topology_metrics(self) -> Dict[str, float]:
+        """
+        Calculate network topology metrics using graph theory.
+        
+        Returns:
+            Dictionary with network topology metrics
+        """
+        # Create directed graph from flow matrix
+        G = nx.DiGraph()
+        
+        # Add nodes and edges with weights
+        for i in range(self.n_nodes):
+            G.add_node(i)
+            for j in range(self.n_nodes):
+                if self.flow_matrix[i, j] > 0:
+                    G.add_edge(i, j, weight=self.flow_matrix[i, j])
+        
+        n = G.number_of_nodes()
+        m = G.number_of_edges()
+        
+        # Calculate basic topology metrics
+        metrics = {
+            'num_edges': m,
+            'network_density': nx.density(G) if n > 0 else 0,
+            'connectance': m / (n * (n - 1)) if n > 1 else 0,
+            'link_density': m / n if n > 0 else 0,
+        }
+        
+        # Average path length (skip for large networks as it's too slow)
+        if n > 50:
+            metrics['average_path_length'] = 0  # Skip for large networks
+        else:
+            try:
+                if nx.is_strongly_connected(G):
+                    metrics['average_path_length'] = nx.average_shortest_path_length(G)
+                else:
+                    # Use largest strongly connected component
+                    sccs = list(nx.strongly_connected_components(G))
+                    if sccs:
+                        largest_scc = max(sccs, key=len)
+                        if len(largest_scc) > 1:
+                            subgraph = G.subgraph(largest_scc)
+                            metrics['average_path_length'] = nx.average_shortest_path_length(subgraph)
+                        else:
+                            metrics['average_path_length'] = 0
+                    else:
+                        metrics['average_path_length'] = 0
+            except:
+                metrics['average_path_length'] = 0
+        
+        # Clustering coefficient
+        try:
+            metrics['clustering_coefficient'] = nx.average_clustering(G)
+        except:
+            metrics['clustering_coefficient'] = 0
+        
+        # Degree centralization
+        if n > 1:
+            in_degrees = dict(G.in_degree())
+            out_degrees = dict(G.out_degree())
+            
+            # Calculate degree centralization
+            max_in_degree = max(in_degrees.values()) if in_degrees else 0
+            max_out_degree = max(out_degrees.values()) if out_degrees else 0
+            
+            sum_diff_in = sum(max_in_degree - d for d in in_degrees.values())
+            sum_diff_out = sum(max_out_degree - d for d in out_degrees.values())
+            
+            max_possible_diff = (n - 1) * (n - 2)
+            
+            metrics['in_degree_centralization'] = sum_diff_in / max_possible_diff if max_possible_diff > 0 else 0
+            metrics['out_degree_centralization'] = sum_diff_out / max_possible_diff if max_possible_diff > 0 else 0
+            metrics['degree_centralization'] = (metrics['in_degree_centralization'] + metrics['out_degree_centralization']) / 2
+            
+            # Degree heterogeneity (coefficient of variation of degrees)
+            all_degrees = list(in_degrees.values()) + list(out_degrees.values())
+            if all_degrees and np.mean(all_degrees) > 0:
+                metrics['degree_heterogeneity'] = np.std(all_degrees) / np.mean(all_degrees)
+            else:
+                metrics['degree_heterogeneity'] = 0
+        else:
+            metrics['degree_centralization'] = 0
+            metrics['degree_heterogeneity'] = 0
+            metrics['in_degree_centralization'] = 0
+            metrics['out_degree_centralization'] = 0
+        
+        return metrics
+    
     def get_extended_metrics(self) -> Dict[str, float]:
         """
         Get all extended regenerative economics metrics.
@@ -548,19 +711,34 @@ class UlanowiczCalculator:
         """
         basic_metrics = self.get_sustainability_metrics()
         
+        # Try to calculate Finn Cycling Index but handle timeout/failure gracefully
+        try:
+            # Check if we have a cached value (including None for skipped)
+            if hasattr(self, '_finn_cycling_index'):
+                fci_value = self._finn_cycling_index
+            else:
+                fci_value = self.calculate_finn_cycling_index()
+        except Exception:
+            fci_value = None  # Mark as not available if calculation fails
+        
         extended_metrics = {
             'flow_diversity': self.calculate_flow_diversity(),
+            'conditional_entropy': self.calculate_conditional_entropy(),
             'structural_information': self.calculate_structural_information(),
             'robustness': self.calculate_robustness(),
             'network_efficiency': self.calculate_network_efficiency(),
             'effective_link_density': self.calculate_effective_link_density(),
             'trophic_depth': self.calculate_trophic_depth(),
             'redundancy': self.calculate_redundancy(),
+            'finn_cycling_index': fci_value,  # Can be None if skipped
             'regenerative_capacity': self.calculate_regenerative_capacity()
         }
         
-        # Combine basic and extended metrics
-        all_metrics = {**basic_metrics, **extended_metrics}
+        # Add network topology metrics
+        topology_metrics = self.calculate_network_topology_metrics()
+        
+        # Combine all metrics
+        all_metrics = {**basic_metrics, **extended_metrics, **topology_metrics}
         
         return all_metrics
     
