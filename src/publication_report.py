@@ -521,10 +521,118 @@ Table A3. Assessment Categories
             appendix += f"{category.replace('_', ' ').title():<30} {assessment}\n"
         
         return appendix
-    
+
+    def generate_oasis_section(self) -> str:
+        """
+        Generate OASIS Organizational Health Assessment section.
+
+        Based on Fath et al. (2019) "Measuring regenerative economics:
+        10 principles and measures undergirding systemic economic health."
+
+        Returns:
+            Formatted OASIS assessment section
+        """
+        try:
+            from oasis_calculator import OASISCalculator
+            oasis = OASISCalculator(self.calculator)
+            profile = oasis.get_oasis_profile()
+            interpretations = oasis.get_oasis_interpretation()
+            recommendations = oasis.get_recommendations()
+        except Exception as e:
+            return f"""
+6. OASIS ORGANIZATIONAL HEALTH ASSESSMENT
+==========================================
+
+OASIS assessment could not be completed: {str(e)}
+
+The OASIS (Open, Autonomous, Symbiotic, Intelligent, Sustainable) framework
+requires additional network metrics that may not be available for this analysis.
+"""
+
+        scores = profile['dimension_scores']
+        overall = profile['overall_score']
+        overall_status = profile['overall_status']
+        dim_status = profile['dimension_status']
+
+        def status_symbol(status):
+            return {'HEALTHY': '[OK]', 'WARNING': '[!]', 'CRITICAL': '[X]'}.get(status, '[?]')
+
+        section = f"""
+6. OASIS ORGANIZATIONAL HEALTH ASSESSMENT
+==========================================
+
+The OASIS framework integrates Ulanowicz's ecosystem theory with Fath et al.'s (2019)
+10 Principles of Regenerative Economics to assess organizational health across five
+dimensions: Open, Autonomous, Symbiotic, Intelligent, and Sustainable.
+
+6.1 Overall Assessment
+-----------------------
+OASIS Health Score: {overall:.0f}/100 - {overall_status}
+
+This score reflects the organization's overall health based on a weighted combination
+of the five OASIS dimensions.
+
+6.2 Dimension Scores
+---------------------
+Table 6. OASIS Dimension Assessment
+------------------------------------
+Dimension        Score   Status      Key Insight
+OPEN             {scores['open']:<7.0f} {dim_status['open']:<11} Interconnectivity & exchange
+AUTONOMOUS       {scores['autonomous']:<7.0f} {dim_status['autonomous']:<11} Learning & routine encoding
+SYMBIOTIC        {scores['symbiotic']:<7.0f} {dim_status['symbiotic']:<11} Integration & balance
+INTELLIGENT      {scores['intelligent']:<7.0f} {dim_status['intelligent']:<11} Functional diversity
+SUSTAINABLE      {scores['sustainable']:<7.0f} {dim_status['sustainable']:<11} Order-freedom balance
+
+6.3 Dimension Interpretations
+------------------------------
+
+OPEN (Fath Principles 1, 3, 4):
+{interpretations['open']}
+
+AUTONOMOUS (Fath Principles 2, 9):
+{interpretations['autonomous']}
+
+SYMBIOTIC (Fath Principles 5, 8):
+{interpretations['symbiotic']}
+
+INTELLIGENT (Fath Principles 7, 10):
+{interpretations['intelligent']}
+
+SUSTAINABLE (Fath Principle 6):
+{interpretations['sustainable']}
+
+6.4 OASIS-Based Recommendations
+--------------------------------
+"""
+        if recommendations:
+            for i, rec in enumerate(recommendations, 1):
+                section += f"""
+Recommendation {i} ({rec['priority']} priority):
+- Dimension: {rec['dimension']}
+- Issue: {rec['issue']}
+- Action: {rec['action']}
+- Metrics to improve: {', '.join(rec.get('metrics_to_improve', ['N/A']))}
+"""
+        else:
+            section += """
+No critical recommendations - the organization shows healthy patterns across
+all OASIS dimensions. Continue monitoring and maintaining current practices.
+"""
+
+        section += """
+6.5 OASIS Framework Reference
+------------------------------
+The OASIS assessment is based on:
+
+Fath, B.D., Fiscus, D.A., Goerner, S.J., Berea, A., & Ulanowicz, R.E. (2019).
+Measuring regenerative economics: 10 principles and measures undergirding
+systemic economic health. Global Transitions, 1, 15-27.
+"""
+        return section
+
     def generate_full_report(self) -> str:
         """Generate complete publication-quality report."""
-        
+
         report = f"""
 ================================================================================
 NETWORK ANALYSIS OF {self.org_name.upper()}:
@@ -537,11 +645,12 @@ Version: 1.0
 
 --------------------------------------------------------------------------------
 """
-        
+
         report += self.generate_abstract()
         report += self.generate_introduction()
         report += self.generate_methodology()
         report += self.generate_results()
+        report += self.generate_oasis_section()  # NEW: OASIS section
         report += self.generate_discussion()
         report += self.generate_conclusions()
         report += self.generate_references()

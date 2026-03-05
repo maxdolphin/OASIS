@@ -26,6 +26,17 @@ from network_generator import OrganizationalNetworkGenerator, NETWORK_TYPES
 from publication_report import PublicationReportGenerator
 from latex_report_generator import LaTeXReportGenerator
 from huggingface_flow_extractor import HuggingFaceFlowExtractor
+from oasis_calculator import OASISCalculator
+from oasis_visualizer import (
+    create_oasis_radar_chart,
+    create_dimension_gauge,
+    create_all_dimension_gauges,
+    create_contribution_chart,
+    create_overall_score_indicator,
+    create_dimension_comparison_bar,
+    create_sustainability_detail_chart,
+    create_recommendations_chart
+)
 
 # Configure page
 st.set_page_config(
@@ -257,7 +268,7 @@ def create_flow_distribution_chart(flow_matrix, node_names):
     return fig
 
 def create_network_mini_view(flow_matrix, node_names, max_nodes=10):
-    """Create a simplified network diagram for the report."""
+    """Create a simplified network diagram for the report with V1-style visualization."""
     import plotly.graph_objects as go
     import networkx as nx
     import numpy as np
@@ -287,20 +298,77 @@ def create_network_mini_view(flow_matrix, node_names, max_nodes=10):
     # Get layout
     pos = nx.spring_layout(G, seed=42, k=1.5)
     
-    # Create edge trace
-    edge_trace = []
+    # Calculate node sizes based on throughput (V1 style)
+    total_flow = {}
+    for node in G.nodes():
+        inflow = sum([display_matrix[i][node] for i in range(len(display_matrix))])
+        outflow = sum([display_matrix[node][j] for j in range(len(display_matrix))])
+        total_flow[node] = inflow + outflow
+    
+    # Normalize node sizes
+    max_flow = max(total_flow.values()) if total_flow else 1
+    min_flow = min(total_flow.values()) if total_flow else 0
+    flow_range = max_flow - min_flow if max_flow != min_flow else 1
+    
+    node_sizes = []
+    for node in G.nodes():
+        # Size from 40 to 100 based on total flow (V1 style)
+        normalized = (total_flow[node] - min_flow) / flow_range if flow_range > 0 else 0.5
+        size = 40 + 60 * normalized
+        node_sizes.append(size)
+    
+    # Get edge weights for normalization
+    all_weights = [G.edges[e].get('weight', 1) for e in G.edges()]
+    if all_weights:
+        # Use percentile-based scaling (V1 style)
+        all_weights_array = np.array(all_weights)
+        min_weight = np.percentile(all_weights_array, 5)
+        max_weight = np.percentile(all_weights_array, 95)
+        weight_range = max_weight - min_weight if max_weight != min_weight else 1
+    else:
+        min_weight, max_weight, weight_range = 0, 1, 1
+    
+    # Create edge traces with varying thickness and color (V1 style)
+    edge_traces = []
     for edge in G.edges():
         x0, y0 = pos[edge[0]]
         x1, y1 = pos[edge[1]]
-        edge_trace.append(go.Scatter(
+        weight = G.edges[edge].get('weight', 1)
+        
+        # Normalize weight for visualization
+        if weight_range > 0:
+            clamped_weight = max(min_weight, min(weight, max_weight))
+            normalized_weight = (clamped_weight - min_weight) / weight_range
+        else:
+            normalized_weight = 0.5
+        
+        # Edge width with better scaling (V1 style)
+        MIN_EDGE_WIDTH = 1.5
+        MAX_EDGE_WIDTH = 6.0
+        edge_width = MIN_EDGE_WIDTH + (MAX_EDGE_WIDTH - MIN_EDGE_WIDTH) * normalized_weight
+        
+        # Enhanced color scheme (V1 style)
+        if normalized_weight < 0.33:
+            color_r, color_g, color_b = 100, 150, 200  # Light blue-gray
+        elif normalized_weight < 0.67:
+            color_r, color_g, color_b = 80, 80, 120    # Medium blue-gray
+        else:
+            color_r, color_g, color_b = 50, 50, 80     # Dark blue-gray
+        
+        edge_color = f'rgba({color_r}, {color_g}, {color_b}, 0.35)'
+        
+        edge_trace = go.Scatter(
             x=[x0, x1, None],
             y=[y0, y1, None],
             mode='lines',
-            line=dict(width=0.5, color='rgba(125,125,125,0.5)'),
-            hoverinfo='none'
-        ))
+            line=dict(width=edge_width, color=edge_color),
+            hoverinfo='text',
+            hovertext=f'Flow: {weight:.1f}',
+            showlegend=False
+        )
+        edge_traces.append(edge_trace)
     
-    # Create node trace
+    # Create node trace with varying sizes
     node_trace = go.Scatter(
         x=[pos[node][0] for node in G.nodes()],
         y=[pos[node][1] for node in G.nodes()],
@@ -308,24 +376,29 @@ def create_network_mini_view(flow_matrix, node_names, max_nodes=10):
         text=display_names,
         textposition="top center",
         marker=dict(
-            size=10,
-            color='lightblue',
-            line=dict(color='darkblue', width=2)
+            size=node_sizes,  # Use calculated sizes
+            color=[total_flow[node] for node in G.nodes()],  # Color by flow
+            colorscale='Viridis',
+            showscale=True,
+            colorbar=dict(title="Total Flow", thickness=15, len=0.7),
+            line=dict(color='white', width=2)
         ),
         hoverinfo='text',
-        hovertext=display_names
+        hovertext=[f'{display_names[i]}<br>Total Flow: {total_flow[i]:.1f}' for i in G.nodes()]
     )
     
     # Create figure
-    fig = go.Figure(data=edge_trace + [node_trace])
+    fig = go.Figure(data=edge_traces + [node_trace])
     
     fig.update_layout(
         title=f"Network Structure ({len(display_names)} {'of ' + str(n_nodes) if n_nodes > max_nodes else ''} nodes)",
         showlegend=False,
-        height=400,
+        height=500,  # Slightly taller for better visibility
         xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
         yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-        margin=dict(l=0, r=0, t=40, b=0)
+        margin=dict(l=0, r=0, t=40, b=0),
+        plot_bgcolor='white',
+        paper_bgcolor='white'
     )
     
     return fig
@@ -1328,10 +1401,11 @@ def show_analysis_page():
         st.session_state.current_analysis_section = "🎯 Core Metrics"
     
     # Radio button for section selection
+    section_options = ["🎯 Core Metrics", "🔄 Network Analysis", "📊 Visualizations", "🌿 OASIS Health", "📋 Detailed Report"]
     new_section = st.sidebar.radio(
         "Choose Analysis View:",
-        ["🎯 Core Metrics", "🔄 Network Analysis", "📊 Visualizations", "📋 Detailed Report"],
-        index=["🎯 Core Metrics", "🔄 Network Analysis", "📊 Visualizations", "📋 Detailed Report"].index(st.session_state.current_analysis_section)
+        section_options,
+        index=section_options.index(st.session_state.current_analysis_section) if st.session_state.current_analysis_section in section_options else 0
     )
     
     # Check if section changed
@@ -1349,6 +1423,8 @@ def show_analysis_page():
         display_network_analysis(calculator, extended_metrics, flow_matrix, node_names)
     elif analysis_section == "📊 Visualizations":
         display_visualizations_enhanced(G, flow_matrix, node_names, extended_metrics, org_name)
+    elif analysis_section == "🌿 OASIS Health":
+        display_oasis_health(calculator, extended_metrics, flow_matrix, node_names, org_name)
     elif analysis_section == "📋 Detailed Report":
         display_detailed_report(calculator, extended_metrics, assessments, org_name)
 
@@ -3569,6 +3645,404 @@ def display_visual_summary_cards(metrics, assessments):
         viability_pct = metrics.get('viability_window_position', 0)
         st.progress(viability_pct)
         st.caption(f"{viability_pct:.1%} - {'In window' if viable else 'Outside window'}")
+
+
+def display_oasis_health(calculator, metrics, flow_matrix, node_names, org_name):
+    """
+    Display OASIS Organizational Health Assessment.
+
+    OASIS = Open, Autonomous, Symbiotic, Intelligent, Sustainable
+
+    Based on Fath et al. (2019) "Measuring regenerative economics: 10 principles
+    and measures undergirding systemic economic health" (Global Transitions 1, 15-27).
+    """
+
+    st.header("🌿 OASIS Organizational Health Assessment")
+    st.markdown("""
+    *Evaluating organizational sustainability across 5 dimensions based on
+    [Fath et al. (2019)](https://doi.org/10.1016/j.glt.2019.06.002)
+    regenerative economics principles*
+    """)
+
+    # Initialize OASIS calculator
+    try:
+        oasis = OASISCalculator(calculator)
+        profile = oasis.get_oasis_profile()
+        interpretations = oasis.get_oasis_interpretation()
+        recommendations = oasis.get_recommendations()
+    except Exception as e:
+        st.error(f"Error computing OASIS metrics: {str(e)}")
+        return
+
+    # Get scores and status
+    scores = profile['dimension_scores']
+    overall = profile['overall_score']
+    overall_status = profile['overall_status']
+    dimension_status = profile['dimension_status']
+
+    # ===== TOP SECTION: Overall Score and Radar Chart =====
+    col1, col2 = st.columns([1, 2])
+
+    with col1:
+        # Overall score indicator
+        st.markdown("### Overall Score")
+
+        # Color based on status
+        status_colors = {'HEALTHY': '#27ae60', 'WARNING': '#f39c12', 'CRITICAL': '#e74c3c'}
+        status_icons = {'HEALTHY': '✅', 'WARNING': '⚠️', 'CRITICAL': '❌'}
+        color = status_colors.get(overall_status, '#3498db')
+        icon = status_icons.get(overall_status, '📊')
+
+        st.markdown(f"""
+        <div style="background: linear-gradient(135deg, {color}22, {color}11);
+                    padding: 30px; border-radius: 15px; text-align: center;
+                    border: 2px solid {color};">
+            <h1 style="font-size: 3.5em; margin: 0; color: {color};">{overall:.0f}</h1>
+            <p style="font-size: 1.2em; margin: 10px 0 5px 0; opacity: 0.8;">/100</p>
+            <h3 style="margin: 10px 0; color: {color};">{icon} {overall_status}</h3>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # Quick dimension summary
+        st.markdown("### Dimension Status")
+        dim_names = {
+            'open': ('🌐', 'OPEN'),
+            'autonomous': ('🧠', 'AUTONOMOUS'),
+            'symbiotic': ('🤝', 'SYMBIOTIC'),
+            'intelligent': ('💡', 'INTELLIGENT'),
+            'sustainable': ('🌱', 'SUSTAINABLE')
+        }
+
+        for dim, (emoji, name) in dim_names.items():
+            score = scores[dim]
+            status = dimension_status[dim]
+            status_color = status_colors.get(status, '#888')
+
+            st.markdown(f"""
+            <div style="display: flex; align-items: center; padding: 8px;
+                        margin: 4px 0; background: {status_color}15; border-radius: 8px;
+                        border-left: 4px solid {status_color};">
+                <span style="font-size: 1.3em; margin-right: 10px;">{emoji}</span>
+                <span style="flex-grow: 1; font-weight: 500;">{name}</span>
+                <span style="font-weight: bold; color: {status_color};">{score:.0f}</span>
+            </div>
+            """, unsafe_allow_html=True)
+
+    with col2:
+        # Radar chart
+        fig = create_oasis_radar_chart(scores, show_thresholds=True,
+                                        title="OASIS Health Profile")
+        st.plotly_chart(fig, use_container_width=True)
+
+    # ===== WEIGHT CONFIGURATION =====
+    st.markdown("---")
+    with st.expander("⚙️ **Customize Dimension Weights**", expanded=False):
+        st.markdown("""
+        Adjust weights based on your organization's priorities.
+        All weights must sum to 100%.
+        """)
+
+        # Initialize session state for weights if not exists
+        if 'oasis_weights' not in st.session_state:
+            st.session_state.oasis_weights = {k: v * 100 for k, v in oasis.DEFAULT_WEIGHTS.items()}
+
+        col1, col2, col3, col4, col5 = st.columns(5)
+
+        with col1:
+            new_open = st.slider("🌐 Open", 0, 50, int(st.session_state.oasis_weights['open']), key='w_open')
+        with col2:
+            new_auto = st.slider("🧠 Autonomous", 0, 50, int(st.session_state.oasis_weights['autonomous']), key='w_auto')
+        with col3:
+            new_symb = st.slider("🤝 Symbiotic", 0, 50, int(st.session_state.oasis_weights['symbiotic']), key='w_symb')
+        with col4:
+            new_intel = st.slider("💡 Intelligent", 0, 50, int(st.session_state.oasis_weights['intelligent']), key='w_intel')
+        with col5:
+            new_sust = st.slider("🌱 Sustainable", 0, 50, int(st.session_state.oasis_weights['sustainable']), key='w_sust')
+
+        total = new_open + new_auto + new_symb + new_intel + new_sust
+
+        if total != 100:
+            st.warning(f"⚠️ Weights sum to {total}%. They should sum to 100%.")
+        else:
+            st.success("✅ Weights sum to 100%")
+
+            if st.button("Apply Weights"):
+                # Update weights and recalculate
+                new_weights = {
+                    'open': new_open / 100,
+                    'autonomous': new_auto / 100,
+                    'symbiotic': new_symb / 100,
+                    'intelligent': new_intel / 100,
+                    'sustainable': new_sust / 100
+                }
+                oasis.set_dimension_weights(new_weights)
+                st.session_state.oasis_weights = {k: v * 100 for k, v in new_weights.items()}
+                st.rerun()
+
+    # ===== DIMENSION DETAILS =====
+    st.markdown("---")
+    st.markdown("### 📊 Dimension Details")
+    st.markdown("*Click each dimension to see detailed metrics and recommendations*")
+
+    details = profile['dimension_details']
+
+    # OPEN Dimension
+    with st.expander(f"🌐 **OPEN** - Ability to Interconnect ({scores['open']:.0f}/100) - {dimension_status['open']}",
+                     expanded=scores['open'] < 50):
+        st.markdown(f"**{interpretations['open']}**")
+
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            open_metrics = details['open']['metrics']
+            st.markdown("#### Key Metrics")
+
+            metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
+            with metric_col1:
+                st.metric("Connectance", f"{open_metrics.get('connectance', 0):.3f}")
+                st.caption("Network connectivity [0-1]")
+            with metric_col2:
+                st.metric("Flow Diversity", f"{open_metrics.get('flow_diversity', 0):.3f}")
+                st.caption("H [bits]")
+            with metric_col3:
+                st.metric("Clustering", f"{open_metrics.get('clustering_coefficient', 0):.3f}")
+                st.caption("Local connectivity [0-1]")
+            with metric_col4:
+                st.metric("Betweenness", f"{open_metrics.get('avg_betweenness', 0):.3f}")
+                st.caption("Bridge/broker role [0-1]")
+
+            st.markdown("#### Fath et al. Principles")
+            st.info("**P1: Cross-scale Circulation** - Resources flow across organizational levels")
+            st.info("**P3: Reliable Inputs** - Sustainable external resource flows")
+            st.info("**P4: Healthy Outputs** - Beneficial contributions to environment")
+
+        with col2:
+            fig = create_contribution_chart('open', open_metrics, details['open']['weights'])
+            st.plotly_chart(fig, use_container_width=True)
+
+    # AUTONOMOUS Dimension
+    with st.expander(f"🧠 **AUTONOMOUS** - Ability to Learn & Encode ({scores['autonomous']:.0f}/100) - {dimension_status['autonomous']}",
+                     expanded=scores['autonomous'] < 40):
+        st.markdown(f"**{interpretations['autonomous']}**")
+
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            auto_metrics = details['autonomous']['metrics']
+            st.markdown("#### Key Metrics")
+
+            metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
+            with metric_col1:
+                fci = auto_metrics.get('finn_cycling_index', 0)
+                if fci is None:
+                    st.metric("Finn Cycling Index", "N/A")
+                else:
+                    st.metric("Finn Cycling Index", f"{fci:.3f}")
+                st.caption("Resource cycling [0-1]")
+            with metric_col2:
+                st.metric("Reciprocity", f"{auto_metrics.get('flow_reciprocity', 0):.3f}")
+                st.caption("Bidirectional flows [0-1]")
+            with metric_col3:
+                st.metric("AMI", f"{auto_metrics.get('ami', 0):.3f}")
+                st.caption("Information organization [bits]")
+            with metric_col4:
+                st.metric("Autocatalytic", f"{auto_metrics.get('autocatalytic_index', 0):.3f}")
+                st.caption("Self-reinforcing cycles [0-1]")
+
+            st.markdown("#### Fath et al. Principles")
+            st.info("**P2: Regenerative Re-investment** - Resources cycle back to maintain system")
+            st.info("**P9: Constructive vs Extractive** - Positive feedback loops dominate")
+
+        with col2:
+            fig = create_contribution_chart('autonomous', auto_metrics, details['autonomous']['weights'])
+            st.plotly_chart(fig, use_container_width=True)
+
+    # SYMBIOTIC Dimension
+    with st.expander(f"🤝 **SYMBIOTIC** - Integration & Balance ({scores['symbiotic']:.0f}/100) - {dimension_status['symbiotic']}",
+                     expanded=scores['symbiotic'] < 55):
+        st.markdown(f"**{interpretations['symbiotic']}**")
+
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            symb_metrics = details['symbiotic']['metrics']
+            st.markdown("#### Key Metrics")
+
+            metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
+            with metric_col1:
+                st.metric("Flow Equality", f"{symb_metrics.get('equality', 0):.3f}")
+                st.caption("1 - Gini [0-1]")
+            with metric_col2:
+                st.metric("Modularity", f"{symb_metrics.get('modularity', 0):.3f}")
+                st.caption("Community structure [0-1]")
+            with metric_col3:
+                st.metric("Node Utilization", f"{symb_metrics.get('node_utilization', 0):.2%}")
+                st.caption("Effective/Actual nodes")
+            with metric_col4:
+                st.metric("Mutualism", f"{symb_metrics.get('mutualism_ratio', 0):.3f}")
+                st.caption("Reciprocal relationships [0-1]")
+
+            st.markdown("#### Fath et al. Principles")
+            st.info("**P5: Balance of Sizes** - Healthy distribution of entity sizes")
+            st.info("**P8: Mutualism** - Mutually beneficial relationships prevail")
+
+        with col2:
+            fig = create_contribution_chart('symbiotic', symb_metrics, details['symbiotic']['weights'])
+            st.plotly_chart(fig, use_container_width=True)
+
+    # INTELLIGENT Dimension
+    with st.expander(f"💡 **INTELLIGENT** - Leverage Diverse Intelligence ({scores['intelligent']:.0f}/100) - {dimension_status['intelligent']}",
+                     expanded=scores['intelligent'] < 45):
+        st.markdown(f"**{interpretations['intelligent']}**")
+
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            intel_metrics = details['intelligent']['metrics']
+            st.markdown("#### Key Metrics")
+
+            metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
+            with metric_col1:
+                st.metric("Number of Roles", f"{intel_metrics.get('number_of_roles', 0):.2f}")
+                st.caption("Functional differentiation")
+            with metric_col2:
+                st.metric("Functional Diversity", f"{intel_metrics.get('functional_diversity', 0):.3f}")
+                st.caption("log(R) [bits]")
+            with metric_col3:
+                st.metric("Roles per Node", f"{intel_metrics.get('roles_per_node', 0):.3f}")
+                st.caption("Specialization spread")
+            with metric_col4:
+                st.metric("Cond. Entropy", f"{intel_metrics.get('conditional_entropy', 0):.3f}")
+                st.caption("System flexibility [bits]")
+
+            st.markdown("#### Fath et al. Principles")
+            st.info("**P7: Sufficient Diversity** - Enough variety of functional roles")
+            st.info("**P10: Adaptive Learning** - Capacity for collective learning")
+
+        with col2:
+            fig = create_contribution_chart('intelligent', intel_metrics, details['intelligent']['weights'])
+            st.plotly_chart(fig, use_container_width=True)
+
+    # SUSTAINABLE Dimension (Primary - Window of Vitality)
+    with st.expander(f"🌱 **SUSTAINABLE** - Balance Order & Freedom ({scores['sustainable']:.0f}/100) - {dimension_status['sustainable']}",
+                     expanded=True):
+        st.markdown(f"**{interpretations['sustainable']}**")
+
+        sust_metrics = details['sustainable']['metrics']
+
+        # Main visualization - Window of Vitality
+        st.markdown("#### Window of Vitality Position")
+        fig = create_sustainability_detail_chart(sust_metrics)
+        st.plotly_chart(fig, use_container_width=True)
+
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("#### Key Metrics")
+
+            metric_col1, metric_col2, metric_col3 = st.columns(3)
+            with metric_col1:
+                alpha = sust_metrics.get('relative_ascendency', 0)
+                st.metric("Relative Ascendency (α)", f"{alpha:.3f}")
+                st.caption("Optimal: 0.37")
+            with metric_col2:
+                st.metric("Robustness (R)", f"{sust_metrics.get('robustness', 0):.3f}")
+                st.caption("Max: 0.368")
+            with metric_col3:
+                is_viable = sust_metrics.get('is_viable', False)
+                viable_text = "✅ In Window" if is_viable else "❌ Outside"
+                st.metric("Window Status", viable_text)
+                st.caption("Range: 0.2-0.6")
+
+            metric_col4, metric_col5, metric_col6 = st.columns(3)
+            with metric_col4:
+                st.metric("Regenerative Cap.", f"{sust_metrics.get('regenerative_capacity', 0):.3f}")
+                st.caption("Self-renewal ability")
+            with metric_col5:
+                st.metric("α Optimality", f"{sust_metrics.get('alpha_optimality', 0):.3f}")
+                st.caption("Distance from 0.37")
+            with metric_col6:
+                st.metric("Fitness", f"{sust_metrics.get('fitness_for_evolution', 0):.3f}")
+                st.caption("Evolutionary fitness")
+
+        with col2:
+            st.markdown("#### Fath et al. Principle")
+            st.info("""
+            **P6: Resilience-Efficiency Balance**
+
+            Systems must balance efficiency (organization, α) with resilience (redundancy, 1-α).
+
+            - **Too low α (<0.2)**: Chaotic, insufficient structure
+            - **Optimal α (0.35-0.40)**: Maximum robustness
+            - **Too high α (>0.6)**: Brittle, over-optimized
+
+            The Window of Vitality (0.2 < α < 0.6) defines where sustainable systems operate.
+            """)
+
+    # ===== RECOMMENDATIONS =====
+    st.markdown("---")
+    st.markdown("### 📋 Recommendations")
+
+    if not recommendations:
+        st.success("🎉 **No critical issues identified!** The organization shows healthy patterns across all OASIS dimensions.")
+    else:
+        priority_colors = {
+            'CRITICAL': ('🔴', '#e74c3c'),
+            'HIGH': ('🟠', '#e67e22'),
+            'MEDIUM': ('🟡', '#f39c12'),
+            'LOW': ('🔵', '#3498db')
+        }
+
+        for rec in recommendations:
+            priority = rec['priority']
+            emoji, color = priority_colors.get(priority, ('⚪', '#888'))
+
+            st.markdown(f"""
+            <div style="background: {color}15; padding: 15px; border-radius: 10px;
+                        margin: 10px 0; border-left: 4px solid {color};">
+                <div style="display: flex; align-items: center; margin-bottom: 8px;">
+                    <span style="font-size: 1.2em; margin-right: 10px;">{emoji}</span>
+                    <strong style="color: {color};">{priority}</strong>
+                    <span style="margin-left: auto; font-weight: 500;">{rec['dimension']}</span>
+                </div>
+                <p style="margin: 5px 0;"><strong>Issue:</strong> {rec['issue']}</p>
+                <p style="margin: 5px 0;"><strong>Action:</strong> {rec['action']}</p>
+                <p style="margin: 5px 0; font-size: 0.9em; opacity: 0.8;">
+                    <strong>Metrics to improve:</strong> {', '.join(rec.get('metrics_to_improve', []))}
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
+
+    # ===== SCIENTIFIC REFERENCES =====
+    st.markdown("---")
+    with st.expander("📚 **Scientific References**"):
+        st.markdown("""
+        ### OASIS Model Scientific Foundation
+
+        The OASIS model integrates Ulanowicz's ecosystem theory with Fath et al.'s
+        10 Principles of Regenerative Economics:
+
+        **Primary Reference:**
+        > Fath, B.D., Fiscus, D.A., Goerner, S.J., Berea, A., & Ulanowicz, R.E. (2019).
+        > *Measuring regenerative economics: 10 principles and measures undergirding
+        > systemic economic health.* Global Transitions, 1, 15-27.
+        > https://doi.org/10.1016/j.glt.2019.06.002
+
+        **Supporting References:**
+        > Ulanowicz, R.E., Goerner, S.J., Lietaer, B., & Gomez, R. (2009).
+        > *Quantifying sustainability: Resilience, efficiency and the return of
+        > information theory.* Ecological Complexity, 6(1), 27-36.
+
+        > Zorach, A.C., & Ulanowicz, R.E. (2003).
+        > *Quantifying the complexity of flow networks: How many roles are there?*
+        > Complexity, 8(3), 68-76.
+
+        ### OASIS Dimensions ↔ Fath Principles Mapping
+
+        | Dimension | Fath Principles | Core Question |
+        |-----------|-----------------|---------------|
+        | **OPEN** | P1, P3, P4 | How interconnected is the organization? |
+        | **AUTONOMOUS** | P2, P9 | How well does it encode routines? |
+        | **SYMBIOTIC** | P5, P8 | How integrated are roles? |
+        | **INTELLIGENT** | P7, P10 | How diverse are functional roles? |
+        | **SUSTAINABLE** | P6 | Is order and freedom balanced? |
+        """)
+
 
 def display_detailed_report(calculator, metrics, assessments, org_name):
     """Display scientific analysis report with embedded visualizations."""

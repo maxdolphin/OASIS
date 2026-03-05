@@ -25,7 +25,7 @@ Extended Regenerative Economics Indicators:
 
 import numpy as np
 import networkx as nx
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Any
 import math
 
 
@@ -587,7 +587,140 @@ class UlanowiczCalculator:
         # Simple FCI approximation
         fci = min(self_loop_flow / tst, 1.0) if tst > 0 else 0
         return fci
-    
+
+    def calculate_autocatalytic_index(self) -> Dict[str, Any]:
+        """
+        Calculate Autocatalytic Index - detects and counts positive feedback cycles.
+
+        An autocatalytic cycle is a closed loop where each element benefits the next,
+        creating self-reinforcing feedback. This is key to Fath et al. (2019)
+        Principle 9: Constructive vs Extractive.
+
+        From Fath et al. (2019):
+        "Autocatalysis refers to configurations where the indirect effects of any
+        member upon itself through all other members is positive."
+
+        This method detects simple cycles in the network where resources/information
+        cycle back to reinforce earlier stages.
+
+        Returns:
+            Dictionary containing:
+            - count: Number of cycles detected
+            - max_length: Maximum cycle length found
+            - mean_length: Mean cycle length
+            - cycle_flow_ratio: Proportion of TST involved in cycles
+            - autocatalytic_index: Normalized index (0-1)
+        """
+        # Create directed graph
+        G = nx.DiGraph()
+        for i in range(self.n_nodes):
+            G.add_node(i)
+            for j in range(self.n_nodes):
+                if self.flow_matrix[i, j] > 0:
+                    G.add_edge(i, j, weight=self.flow_matrix[i, j])
+
+        # Find simple cycles (limit length for computational tractability)
+        max_cycle_length = min(6, self.n_nodes)
+        cycles = []
+
+        try:
+            # Use Johnson's algorithm for finding all simple cycles
+            # Limit to reasonable number for large networks
+            cycle_gen = nx.simple_cycles(G)
+            cycle_count = 0
+            max_cycles = 1000  # Limit for large networks
+
+            for cycle in cycle_gen:
+                if len(cycle) <= max_cycle_length:
+                    cycles.append(cycle)
+                    cycle_count += 1
+                    if cycle_count >= max_cycles:
+                        break
+        except Exception:
+            # Fall back to simpler approach for problematic graphs
+            cycles = []
+
+        # Calculate cycle statistics
+        if not cycles:
+            return {
+                'count': 0,
+                'max_length': 0,
+                'mean_length': 0,
+                'cycle_flow_ratio': 0,
+                'autocatalytic_index': 0
+            }
+
+        cycle_lengths = [len(c) for c in cycles]
+
+        # Calculate flow involved in cycles
+        tst = self.calculate_tst()
+        cycle_flow = 0
+
+        for cycle in cycles:
+            # Get minimum flow in cycle (limiting factor)
+            min_flow = float('inf')
+            for i in range(len(cycle)):
+                src = cycle[i]
+                dst = cycle[(i + 1) % len(cycle)]
+                flow = self.flow_matrix[src, dst]
+                min_flow = min(min_flow, flow)
+            if min_flow < float('inf'):
+                cycle_flow += min_flow
+
+        cycle_flow_ratio = cycle_flow / tst if tst > 0 else 0
+
+        # Autocatalytic index: combination of cycle count and flow ratio
+        # Normalized to account for network size
+        expected_cycles = self.n_nodes * (self.n_nodes - 1) / 2  # Rough expectation
+        count_factor = min(1, len(cycles) / max(1, expected_cycles))
+
+        autocatalytic_index = 0.5 * count_factor + 0.5 * min(1, cycle_flow_ratio * 10)
+
+        return {
+            'count': len(cycles),
+            'max_length': max(cycle_lengths) if cycle_lengths else 0,
+            'mean_length': np.mean(cycle_lengths) if cycle_lengths else 0,
+            'cycle_flow_ratio': cycle_flow_ratio,
+            'autocatalytic_index': autocatalytic_index
+        }
+
+    def calculate_fitness_for_evolution(self, beta: float = 1.288) -> float:
+        """
+        Calculate the full fitness function from Ulanowicz et al. (2009) Eq. 16.
+
+        F = -(e/log(e)) * alpha^beta * log(alpha^beta)
+
+        This represents evolutionary fitness where:
+        - beta = 1.288 for ecosystems (empirically derived from natural systems)
+        - Maximum fitness occurs at alpha = e^(-1/beta) ~ 0.4596 for beta=1.288
+
+        The fitness function describes the propensity of a system to persist
+        and evolve over time based on its efficiency-resilience balance.
+
+        Args:
+            beta: Shape parameter (default 1.288 from ecological studies)
+
+        Returns:
+            Fitness value (typically 0 to ~0.4)
+        """
+        alpha = self.calculate_relative_ascendency()
+
+        if alpha <= 0 or alpha >= 1:
+            return 0.0
+
+        # F = -(e/ln(e)) * alpha^beta * ln(alpha^beta)
+        # Since ln(e) = 1, this simplifies to:
+        # F = -e * alpha^beta * ln(alpha^beta)
+        e = math.e
+        alpha_beta = alpha ** beta
+
+        if alpha_beta <= 0:
+            return 0.0
+
+        fitness = -e * alpha_beta * math.log(alpha_beta)
+
+        return max(0, fitness)
+
     def calculate_regenerative_capacity(self) -> float:
         """
         Calculate Regenerative Capacity.

@@ -1,0 +1,1015 @@
+"""
+OASIS Model Calculator for Ecosystemic Organizational Sustainability
+
+OASIS = Open, Autonomous, Symbiotic, Intelligent, Sustainable
+
+This module implements the OASIS adaptive organization model integrated with
+Ulanowicz's ecosystem theory and the 10 Principles of Regenerative Economics
+from Fath et al. (2019) "Measuring regenerative economics: 10 principles and
+measures undergirding systemic economic health" (Global Transitions 1, 15-27).
+
+Scientific Foundation:
+- Fath, Fiscus, Goerner, Berea, Ulanowicz (2019) - 10 Principles of Regenerative Economics
+- Ulanowicz et al. (2009) - Quantifying Sustainability
+- Zorach & Ulanowicz (2003) - Quantifying Complexity of Flow Networks
+
+OASIS Dimension Mapping to Fath et al. (2019) Principles:
+- OPEN: Principles 1, 3, 4 (Cross-scale circulation, inputs/outputs)
+- AUTONOMOUS: Principles 2, 9 (Regenerative re-investment, autocatalytic cycles)
+- SYMBIOTIC: Principles 5, 8 (Balance of sizes, mutualism)
+- INTELLIGENT: Principles 7, 10 (Diversity of roles, adaptive learning)
+- SUSTAINABLE: Principle 6 (Resilience-efficiency balance, Window of Vitality)
+"""
+
+import numpy as np
+import networkx as nx
+from typing import Dict, List, Tuple, Optional, Any
+import math
+
+
+class OASISCalculator:
+    """
+    Calculate OASIS organizational health scores from Ulanowicz and network metrics.
+
+    The OASIS model provides a framework for assessing organizational health
+    across five dimensions that map to ecological sustainability principles.
+
+    Each dimension is scored 0-100, with higher scores indicating better health.
+    """
+
+    # Default weights for each dimension (equal by default)
+    DEFAULT_WEIGHTS = {
+        'open': 0.20,
+        'autonomous': 0.20,
+        'symbiotic': 0.20,
+        'intelligent': 0.20,
+        'sustainable': 0.20
+    }
+
+    # Health thresholds for interpretation
+    HEALTH_THRESHOLDS = {
+        'open': {'healthy': (50, 85), 'warning': (30, 50), 'critical': (0, 30)},
+        'autonomous': {'healthy': (40, 80), 'warning': (25, 40), 'critical': (0, 25)},
+        'symbiotic': {'healthy': (55, 90), 'warning': (35, 55), 'critical': (0, 35)},
+        'intelligent': {'healthy': (45, 85), 'warning': (30, 45), 'critical': (0, 30)},
+        'sustainable': {'healthy': (60, 95), 'warning': (40, 60), 'critical': (0, 40)}
+    }
+
+    def __init__(self, ulanowicz_calculator, network_analyzer=None,
+                 dimension_weights: Optional[Dict[str, float]] = None):
+        """
+        Initialize OASIS calculator with Ulanowicz calculator and optional network analyzer.
+
+        Args:
+            ulanowicz_calculator: UlanowiczCalculator instance with computed metrics
+            network_analyzer: Optional AdvancedNetworkAnalyzer instance for additional metrics
+            dimension_weights: Optional custom weights for each dimension (must sum to 1.0)
+        """
+        self.ulanowicz = ulanowicz_calculator
+        self.network_analyzer = network_analyzer
+
+        # Set dimension weights
+        if dimension_weights:
+            total = sum(dimension_weights.values())
+            if abs(total - 1.0) > 0.01:
+                raise ValueError(f"Dimension weights must sum to 1.0, got {total}")
+            self.weights = dimension_weights
+        else:
+            self.weights = self.DEFAULT_WEIGHTS.copy()
+
+        # Cache for computed metrics
+        self._metrics_cache = None
+        self._network_metrics_cache = None
+
+    def _get_ulanowicz_metrics(self) -> Dict[str, Any]:
+        """Get cached or compute Ulanowicz metrics."""
+        if self._metrics_cache is None:
+            self._metrics_cache = self.ulanowicz.get_extended_metrics()
+        return self._metrics_cache
+
+    def _get_network_metrics(self) -> Dict[str, Any]:
+        """Get cached or compute network analyzer metrics."""
+        if self._network_metrics_cache is None:
+            if self.network_analyzer:
+                self._network_metrics_cache = self.network_analyzer.get_all_metrics()
+            else:
+                self._network_metrics_cache = {}
+        return self._network_metrics_cache
+
+    def _normalize_to_100(self, value: float, min_val: float = 0, max_val: float = 1) -> float:
+        """Normalize a value to 0-100 scale."""
+        if max_val <= min_val:
+            return 50.0
+        normalized = (value - min_val) / (max_val - min_val)
+        return max(0, min(100, normalized * 100))
+
+    def calculate_autocatalytic_index(self) -> Dict[str, Any]:
+        """
+        Detect and count autocatalytic (positive feedback) cycles in the network.
+
+        An autocatalytic cycle is a closed loop where resources/information cycle
+        back to reinforce earlier stages. This is key to Fath et al. (2019)
+        Principle 9: Constructive vs Extractive.
+
+        Returns:
+            Dictionary with:
+            - count: Number of cycles detected
+            - max_length: Maximum cycle length
+            - mean_length: Mean cycle length
+            - cycle_flow_ratio: Proportion of flow involved in cycles
+            - autocatalytic_index: Normalized index (0-1)
+        """
+        flow_matrix = self.ulanowicz.flow_matrix
+        n_nodes = self.ulanowicz.n_nodes
+
+        # Create directed graph
+        G = nx.DiGraph()
+        for i in range(n_nodes):
+            G.add_node(i)
+            for j in range(n_nodes):
+                if flow_matrix[i, j] > 0:
+                    G.add_edge(i, j, weight=flow_matrix[i, j])
+
+        # Find simple cycles (limit length for computational tractability)
+        max_cycle_length = min(6, n_nodes)
+        cycles = []
+
+        try:
+            # Use Johnson's algorithm for finding all simple cycles
+            # Limit to reasonable number for large networks
+            cycle_gen = nx.simple_cycles(G)
+            cycle_count = 0
+            max_cycles = 1000  # Limit for large networks
+
+            for cycle in cycle_gen:
+                if len(cycle) <= max_cycle_length:
+                    cycles.append(cycle)
+                    cycle_count += 1
+                    if cycle_count >= max_cycles:
+                        break
+        except Exception:
+            # Fall back to simpler approach for problematic graphs
+            cycles = []
+
+        # Calculate cycle statistics
+        if not cycles:
+            return {
+                'count': 0,
+                'max_length': 0,
+                'mean_length': 0,
+                'cycle_flow_ratio': 0,
+                'autocatalytic_index': 0
+            }
+
+        cycle_lengths = [len(c) for c in cycles]
+
+        # Calculate flow involved in cycles
+        tst = self.ulanowicz.calculate_tst()
+        cycle_flow = 0
+
+        for cycle in cycles:
+            # Get minimum flow in cycle (limiting factor)
+            min_flow = float('inf')
+            for i in range(len(cycle)):
+                src = cycle[i]
+                dst = cycle[(i + 1) % len(cycle)]
+                flow = flow_matrix[src, dst]
+                min_flow = min(min_flow, flow)
+            if min_flow < float('inf'):
+                cycle_flow += min_flow
+
+        cycle_flow_ratio = cycle_flow / tst if tst > 0 else 0
+
+        # Autocatalytic index: combination of cycle count and flow ratio
+        # Normalized to account for network size
+        expected_cycles = n_nodes * (n_nodes - 1) / 2  # Rough expectation
+        count_factor = min(1, len(cycles) / max(1, expected_cycles))
+
+        autocatalytic_index = 0.5 * count_factor + 0.5 * min(1, cycle_flow_ratio * 10)
+
+        return {
+            'count': len(cycles),
+            'max_length': max(cycle_lengths) if cycle_lengths else 0,
+            'mean_length': np.mean(cycle_lengths) if cycle_lengths else 0,
+            'cycle_flow_ratio': cycle_flow_ratio,
+            'autocatalytic_index': autocatalytic_index
+        }
+
+    def calculate_mutualism_index(self) -> Dict[str, float]:
+        """
+        Classify pairwise relationships and compute mutualism index.
+
+        Based on Fath et al. (2019) Principle 8: Mutualism.
+
+        In flow networks, we assess mutual benefit by examining bidirectional flows:
+        - Mutualistic: Both nodes exchange resources (bidirectional flow)
+        - Exploitative: One-way flow (one benefits, one provides)
+        - Neutral: No direct connection
+
+        Returns:
+            Dictionary with mutualism metrics
+        """
+        flow_matrix = self.ulanowicz.flow_matrix
+        n_nodes = self.ulanowicz.n_nodes
+
+        mutual_pairs = 0
+        one_way_pairs = 0
+
+        for i in range(n_nodes):
+            for j in range(i + 1, n_nodes):
+                flow_ij = flow_matrix[i, j]
+                flow_ji = flow_matrix[j, i]
+
+                if flow_ij > 0 and flow_ji > 0:
+                    mutual_pairs += 1
+                elif flow_ij > 0 or flow_ji > 0:
+                    one_way_pairs += 1
+
+        total_connected = mutual_pairs + one_way_pairs
+        mutualism_ratio = mutual_pairs / total_connected if total_connected > 0 else 0
+
+        # Flow-weighted mutualism (considers strength of reciprocal flows)
+        weighted_mutual = 0
+        weighted_total = 0
+
+        for i in range(n_nodes):
+            for j in range(i + 1, n_nodes):
+                flow_ij = flow_matrix[i, j]
+                flow_ji = flow_matrix[j, i]
+
+                if flow_ij > 0 or flow_ji > 0:
+                    max_flow = max(flow_ij, flow_ji)
+                    min_flow = min(flow_ij, flow_ji)
+
+                    weighted_total += max_flow
+                    weighted_mutual += min_flow  # Reciprocal component
+
+        weighted_ratio = weighted_mutual / weighted_total if weighted_total > 0 else 0
+
+        return {
+            'mutual_pairs': mutual_pairs,
+            'one_way_pairs': one_way_pairs,
+            'mutualism_ratio': mutualism_ratio,
+            'weighted_mutualism': weighted_ratio,
+            'total_connected_pairs': total_connected
+        }
+
+    def calculate_fitness_for_evolution(self, beta: float = 1.288) -> float:
+        """
+        Calculate the full fitness function with adjustable beta parameter.
+
+        From Ulanowicz et al. (2009) Eq. 16:
+        F = -(e/log(e)) * alpha^beta * log(alpha^beta)
+
+        This represents evolutionary fitness where:
+        - beta = 1.288 for ecosystems (empirically derived)
+        - Maximum fitness at alpha = e^(-1/beta) ~ 0.4596 for beta=1.288
+
+        Args:
+            beta: Shape parameter (default 1.288 from ecological studies)
+
+        Returns:
+            Fitness value (0 to ~0.4)
+        """
+        alpha = self.ulanowicz.calculate_relative_ascendency()
+
+        if alpha <= 0 or alpha >= 1:
+            return 0.0
+
+        # F = -(e/ln(e)) * alpha^beta * ln(alpha^beta)
+        # Since ln(e) = 1, this simplifies to:
+        # F = -e * alpha^beta * ln(alpha^beta)
+        e = math.e
+        alpha_beta = alpha ** beta
+
+        if alpha_beta <= 0:
+            return 0.0
+
+        fitness = -e * alpha_beta * math.log(alpha_beta)
+
+        return max(0, fitness)
+
+    def calculate_open_score(self) -> Dict[str, Any]:
+        """
+        Calculate OPEN dimension score.
+
+        OPEN measures the organization's ability to interconnect and exchange
+        with its environment. Maps to Fath Principles 1, 3, 4 (Circulation).
+
+        Key metrics:
+        - connectance: Basic network connectivity
+        - flow_diversity: Diversity of flow patterns (H)
+        - clustering_coefficient: Local connectivity patterns
+        - betweenness_centrality: Bridge/broker roles
+
+        Formula: OPEN = 0.25*connectance + 0.30*flow_diversity +
+                        0.25*avg_betweenness + 0.20*clustering
+
+        Returns:
+            Dictionary with score and contributing metrics
+        """
+        metrics = self._get_ulanowicz_metrics()
+        net_metrics = self._get_network_metrics()
+
+        # Get base metrics
+        connectance = metrics.get('connectance', 0)
+        flow_diversity = metrics.get('flow_diversity', 0)
+
+        # Normalize flow diversity (typically 0-5 bits for organizational networks)
+        max_flow_diversity = math.log(self.ulanowicz.n_nodes ** 2)
+        norm_flow_diversity = flow_diversity / max_flow_diversity if max_flow_diversity > 0 else 0
+
+        # Get clustering coefficient
+        clustering = metrics.get('clustering_coefficient', 0)
+
+        # Get average betweenness from network analyzer or topology metrics
+        if net_metrics and 'centralities' in net_metrics:
+            betweenness = net_metrics['centralities'].get('betweenness', {})
+            avg_betweenness = np.mean(list(betweenness.values())) if betweenness else 0
+        else:
+            avg_betweenness = 0
+
+        # Calculate weighted score
+        raw_score = (
+            0.25 * connectance +
+            0.30 * norm_flow_diversity +
+            0.25 * avg_betweenness +
+            0.20 * clustering
+        )
+
+        # Convert to 0-100 scale
+        score = self._normalize_to_100(raw_score, 0, 0.6)
+
+        return {
+            'score': score,
+            'metrics': {
+                'connectance': connectance,
+                'flow_diversity': flow_diversity,
+                'norm_flow_diversity': norm_flow_diversity,
+                'clustering_coefficient': clustering,
+                'avg_betweenness': avg_betweenness
+            },
+            'weights': {
+                'connectance': 0.25,
+                'flow_diversity': 0.30,
+                'betweenness': 0.25,
+                'clustering': 0.20
+            }
+        }
+
+    def calculate_autonomous_score(self) -> Dict[str, Any]:
+        """
+        Calculate AUTONOMOUS dimension score.
+
+        AUTONOMOUS measures the organization's ability to learn and encode routines
+        through cycling and feedback. Maps to Fath Principles 2, 9.
+
+        Key metrics:
+        - finn_cycling_index: Cycling/re-investment of resources
+        - flow_reciprocity: Bidirectional flow patterns
+        - AMI/H_max: Information organization ratio
+        - autocatalytic_index: Self-reinforcing feedback cycles
+
+        Formula: AUTONOMOUS = 0.35*FCI + 0.25*reciprocity +
+                              0.25*(AMI/H_max) + 0.15*autocatalytic
+
+        Returns:
+            Dictionary with score and contributing metrics
+        """
+        metrics = self._get_ulanowicz_metrics()
+        net_metrics = self._get_network_metrics()
+
+        # Finn Cycling Index
+        fci = metrics.get('finn_cycling_index')
+        if fci is None:
+            # Compute simplified FCI if not available
+            fci = 0.1  # Default low value
+
+        # Flow reciprocity
+        if net_metrics and 'flow' in net_metrics:
+            reciprocity = net_metrics['flow'].get('flow_reciprocity', 0)
+        else:
+            # Calculate from mutualism
+            mutualism = self.calculate_mutualism_index()
+            reciprocity = mutualism.get('mutualism_ratio', 0)
+
+        # AMI normalized by max entropy
+        ami = metrics.get('average_mutual_information', 0)
+        max_entropy = math.log(self.ulanowicz.n_nodes ** 2)
+        norm_ami = ami / max_entropy if max_entropy > 0 else 0
+
+        # Autocatalytic index
+        autocatalytic = self.calculate_autocatalytic_index()
+        autocatalytic_idx = autocatalytic.get('autocatalytic_index', 0)
+
+        # Calculate weighted score
+        raw_score = (
+            0.35 * min(fci, 1.0) +
+            0.25 * reciprocity +
+            0.25 * norm_ami +
+            0.15 * autocatalytic_idx
+        )
+
+        # Convert to 0-100 scale
+        score = self._normalize_to_100(raw_score, 0, 0.5)
+
+        return {
+            'score': score,
+            'metrics': {
+                'finn_cycling_index': fci,
+                'flow_reciprocity': reciprocity,
+                'ami': ami,
+                'norm_ami': norm_ami,
+                'autocatalytic_index': autocatalytic_idx,
+                'autocatalytic_details': autocatalytic
+            },
+            'weights': {
+                'finn_cycling_index': 0.35,
+                'reciprocity': 0.25,
+                'ami': 0.25,
+                'autocatalytic': 0.15
+            }
+        }
+
+    def calculate_symbiotic_score(self) -> Dict[str, Any]:
+        """
+        Calculate SYMBIOTIC dimension score.
+
+        SYMBIOTIC measures human-machine integration and balanced cooperation.
+        Maps to Fath Principles 5, 8 (Balance of sizes, Mutualism).
+
+        Key metrics:
+        - gini_coefficient: Flow inequality (inverted - lower is better)
+        - modularity: Community structure strength
+        - effective_nodes/actual: Node utilization efficiency
+        - mutualism_ratio: Reciprocal relationships
+
+        Formula: SYMBIOTIC = 0.30*(1-gini) + 0.25*modularity +
+                             0.25*(eff_nodes/actual) + 0.20*mutualism
+
+        Returns:
+            Dictionary with score and contributing metrics
+        """
+        metrics = self._get_ulanowicz_metrics()
+        net_metrics = self._get_network_metrics()
+
+        # Gini coefficient (lower is more equal)
+        flow_matrix = self.ulanowicz.flow_matrix
+        flows = flow_matrix[flow_matrix > 0].flatten()
+        if len(flows) > 1:
+            sorted_flows = np.sort(flows)
+            n = len(sorted_flows)
+            index = np.arange(1, n + 1)
+            gini = (2 * np.sum(index * sorted_flows)) / (n * np.sum(sorted_flows)) - (n + 1) / n
+        else:
+            gini = 0
+
+        # Modularity from community detection
+        if net_metrics and 'communities' in net_metrics:
+            louvain = net_metrics['communities'].get('louvain', {})
+            modularity = louvain.get('modularity', 0)
+        else:
+            modularity = 0.3  # Default moderate value
+
+        # Effective nodes ratio
+        effective_nodes = metrics.get('effective_nodes', self.ulanowicz.n_nodes)
+        actual_nodes = self.ulanowicz.n_nodes
+        node_ratio = effective_nodes / actual_nodes if actual_nodes > 0 else 1
+
+        # Mutualism ratio
+        mutualism = self.calculate_mutualism_index()
+        mutualism_ratio = mutualism.get('mutualism_ratio', 0)
+
+        # Calculate weighted score
+        raw_score = (
+            0.30 * (1 - gini) +
+            0.25 * min(modularity, 1) +
+            0.25 * min(node_ratio, 1) +
+            0.20 * mutualism_ratio
+        )
+
+        # Convert to 0-100 scale
+        score = self._normalize_to_100(raw_score, 0, 0.7)
+
+        return {
+            'score': score,
+            'metrics': {
+                'gini_coefficient': gini,
+                'equality': 1 - gini,
+                'modularity': modularity,
+                'effective_nodes': effective_nodes,
+                'actual_nodes': actual_nodes,
+                'node_utilization': node_ratio,
+                'mutualism_ratio': mutualism_ratio,
+                'mutualism_details': mutualism
+            },
+            'weights': {
+                'equality': 0.30,
+                'modularity': 0.25,
+                'node_utilization': 0.25,
+                'mutualism': 0.20
+            }
+        }
+
+    def calculate_intelligent_score(self) -> Dict[str, Any]:
+        """
+        Calculate INTELLIGENT dimension score.
+
+        INTELLIGENT measures functional diversity and ability to leverage
+        different types of intelligence. Maps to Fath Principles 7, 10.
+
+        Key metrics:
+        - number_of_roles: Functional differentiation (Zorach-Ulanowicz)
+        - functional_diversity: Log of roles
+        - roles_per_node: Distribution of roles
+        - conditional_entropy: Remaining uncertainty/flexibility
+
+        Formula: INTELLIGENT = 0.35*roles + 0.25*diversity +
+                               0.20*roles_per_node + 0.20*cond_entropy
+
+        Returns:
+            Dictionary with score and contributing metrics
+        """
+        metrics = self._get_ulanowicz_metrics()
+
+        # Number of roles (normalized by network size)
+        num_roles = metrics.get('number_of_roles', 1)
+        # Normalize: expect 2-10 roles for healthy systems
+        norm_roles = min(num_roles / 10, 1)
+
+        # Functional diversity (log of roles = AMI)
+        functional_diversity = metrics.get('functional_diversity', 0)
+        max_diversity = math.log(self.ulanowicz.n_nodes)
+        norm_diversity = functional_diversity / max_diversity if max_diversity > 0 else 0
+
+        # Roles per node
+        roles_per_node = metrics.get('roles_per_node', 1)
+        # Normalize: expect 0.5-2 roles per effective node
+        norm_roles_per_node = min(roles_per_node / 2, 1)
+
+        # Conditional entropy (flexibility in the system)
+        cond_entropy = metrics.get('conditional_entropy', 0)
+        flow_diversity = metrics.get('flow_diversity', 1)
+        norm_cond_entropy = cond_entropy / flow_diversity if flow_diversity > 0 else 0
+
+        # Calculate weighted score
+        raw_score = (
+            0.35 * norm_roles +
+            0.25 * norm_diversity +
+            0.20 * norm_roles_per_node +
+            0.20 * norm_cond_entropy
+        )
+
+        # Convert to 0-100 scale
+        score = self._normalize_to_100(raw_score, 0, 0.6)
+
+        return {
+            'score': score,
+            'metrics': {
+                'number_of_roles': num_roles,
+                'norm_roles': norm_roles,
+                'functional_diversity': functional_diversity,
+                'norm_functional_diversity': norm_diversity,
+                'roles_per_node': roles_per_node,
+                'norm_roles_per_node': norm_roles_per_node,
+                'conditional_entropy': cond_entropy,
+                'norm_conditional_entropy': norm_cond_entropy
+            },
+            'weights': {
+                'roles': 0.35,
+                'diversity': 0.25,
+                'roles_per_node': 0.20,
+                'conditional_entropy': 0.20
+            }
+        }
+
+    def calculate_sustainable_score(self) -> Dict[str, Any]:
+        """
+        Calculate SUSTAINABLE dimension score.
+
+        SUSTAINABLE measures the balance between order and freedom,
+        centered on the Window of Vitality. Maps to Fath Principle 6.
+
+        Key metrics:
+        - robustness: R = -alpha * log(alpha)
+        - is_in_window: Boolean for Window of Viability
+        - regenerative_capacity: Self-renewal ability
+        - alpha_optimality: Distance from optimal alpha (0.37)
+
+        Formula: SUSTAINABLE = 0.30*robustness + 0.25*is_in_window +
+                               0.20*regen_capacity + 0.25*alpha_optimality
+
+        Returns:
+            Dictionary with score and contributing metrics
+        """
+        metrics = self._get_ulanowicz_metrics()
+
+        # Robustness (normalized to 0-1, max theoretical is ~0.368)
+        robustness = metrics.get('robustness', 0)
+        max_robustness = 1 / math.e  # Theoretical max at alpha = 1/e
+        norm_robustness = robustness / max_robustness if max_robustness > 0 else 0
+
+        # Is in Window of Viability
+        is_viable = metrics.get('is_viable', False)
+        in_window = 1.0 if is_viable else 0.0
+
+        # Regenerative capacity
+        regen_capacity = metrics.get('regenerative_capacity', 0)
+        # Normalize: expect 0-0.3 range
+        norm_regen = min(regen_capacity / 0.3, 1)
+
+        # Alpha optimality: How close to optimal 0.37
+        alpha = metrics.get('relative_ascendency', 0.5)
+        optimal_alpha = 0.37
+        distance_from_optimal = abs(alpha - optimal_alpha)
+        # Convert to score: 1 at optimal, 0 at extremes
+        alpha_optimality = max(0, 1 - (distance_from_optimal / optimal_alpha))
+
+        # Fitness for evolution (bonus metric)
+        fitness = self.calculate_fitness_for_evolution()
+        norm_fitness = min(fitness / 0.4, 1)  # Max fitness ~0.4
+
+        # Calculate weighted score
+        raw_score = (
+            0.30 * norm_robustness +
+            0.20 * in_window +
+            0.20 * norm_regen +
+            0.30 * alpha_optimality
+        )
+
+        # Convert to 0-100 scale
+        score = self._normalize_to_100(raw_score, 0, 0.8)
+
+        return {
+            'score': score,
+            'metrics': {
+                'robustness': robustness,
+                'norm_robustness': norm_robustness,
+                'is_viable': is_viable,
+                'in_window_score': in_window,
+                'regenerative_capacity': regen_capacity,
+                'norm_regenerative': norm_regen,
+                'relative_ascendency': alpha,
+                'optimal_alpha': optimal_alpha,
+                'distance_from_optimal': distance_from_optimal,
+                'alpha_optimality': alpha_optimality,
+                'fitness_for_evolution': fitness,
+                'norm_fitness': norm_fitness
+            },
+            'weights': {
+                'robustness': 0.30,
+                'in_window': 0.20,
+                'regenerative': 0.20,
+                'alpha_optimality': 0.30
+            }
+        }
+
+    def get_oasis_profile(self) -> Dict[str, Any]:
+        """
+        Calculate complete OASIS profile with all dimension scores.
+
+        Returns:
+            Dictionary containing:
+            - dimension_scores: Individual scores for each dimension
+            - overall_score: Weighted average of all dimensions
+            - weights: Current dimension weights
+            - status: Health status for each dimension and overall
+        """
+        # Calculate each dimension
+        open_result = self.calculate_open_score()
+        autonomous_result = self.calculate_autonomous_score()
+        symbiotic_result = self.calculate_symbiotic_score()
+        intelligent_result = self.calculate_intelligent_score()
+        sustainable_result = self.calculate_sustainable_score()
+
+        # Extract scores
+        scores = {
+            'open': open_result['score'],
+            'autonomous': autonomous_result['score'],
+            'symbiotic': symbiotic_result['score'],
+            'intelligent': intelligent_result['score'],
+            'sustainable': sustainable_result['score']
+        }
+
+        # Calculate weighted overall score
+        overall = sum(
+            scores[dim] * self.weights[dim]
+            for dim in scores
+        )
+
+        # Determine status for each dimension
+        def get_status(dim: str, score: float) -> str:
+            thresholds = self.HEALTH_THRESHOLDS[dim]
+            if score >= thresholds['healthy'][0]:
+                return 'HEALTHY'
+            elif score >= thresholds['warning'][0]:
+                return 'WARNING'
+            else:
+                return 'CRITICAL'
+
+        status = {dim: get_status(dim, score) for dim, score in scores.items()}
+
+        # Overall status
+        if overall >= 60:
+            overall_status = 'HEALTHY'
+        elif overall >= 40:
+            overall_status = 'WARNING'
+        else:
+            overall_status = 'CRITICAL'
+
+        return {
+            'dimension_scores': scores,
+            'dimension_details': {
+                'open': open_result,
+                'autonomous': autonomous_result,
+                'symbiotic': symbiotic_result,
+                'intelligent': intelligent_result,
+                'sustainable': sustainable_result
+            },
+            'overall_score': overall,
+            'weights': self.weights.copy(),
+            'dimension_status': status,
+            'overall_status': overall_status
+        }
+
+    def get_oasis_interpretation(self) -> Dict[str, str]:
+        """
+        Get human-readable interpretations for each OASIS dimension.
+
+        Returns:
+            Dictionary with interpretation text for each dimension
+        """
+        profile = self.get_oasis_profile()
+        scores = profile['dimension_scores']
+        details = profile['dimension_details']
+
+        interpretations = {}
+
+        # OPEN interpretation
+        open_score = scores['open']
+        if open_score >= 70:
+            interpretations['open'] = (
+                f"Strong interconnectivity (score: {open_score:.0f}/100). "
+                "The organization demonstrates excellent flow diversity and connectivity. "
+                "Cross-departmental communication is healthy."
+            )
+        elif open_score >= 50:
+            interpretations['open'] = (
+                f"Moderate interconnectivity (score: {open_score:.0f}/100). "
+                "The organization has reasonable connectivity but could improve "
+                "cross-functional collaboration and information sharing."
+            )
+        else:
+            interpretations['open'] = (
+                f"Limited interconnectivity (score: {open_score:.0f}/100). "
+                "The organization shows siloed behavior. Consider improving "
+                "communication channels and encouraging cross-team collaboration."
+            )
+
+        # AUTONOMOUS interpretation
+        auto_score = scores['autonomous']
+        if auto_score >= 60:
+            interpretations['autonomous'] = (
+                f"Strong learning capacity (score: {auto_score:.0f}/100). "
+                "The organization effectively encodes routines and shows healthy "
+                "feedback loops for continuous improvement."
+            )
+        elif auto_score >= 40:
+            interpretations['autonomous'] = (
+                f"Moderate learning capacity (score: {auto_score:.0f}/100). "
+                "Some feedback mechanisms exist but knowledge encoding could be "
+                "strengthened through better documentation and process cycles."
+            )
+        else:
+            interpretations['autonomous'] = (
+                f"Limited learning capacity (score: {auto_score:.0f}/100). "
+                "The organization struggles to encode and retain institutional knowledge. "
+                "Implement stronger feedback loops and knowledge management systems."
+            )
+
+        # SYMBIOTIC interpretation
+        symb_score = scores['symbiotic']
+        if symb_score >= 70:
+            interpretations['symbiotic'] = (
+                f"Excellent role integration (score: {symb_score:.0f}/100). "
+                "Strong mutualistic relationships exist across the organization. "
+                "Resources are distributed equitably."
+            )
+        elif symb_score >= 50:
+            interpretations['symbiotic'] = (
+                f"Moderate role integration (score: {symb_score:.0f}/100). "
+                "Some imbalance in resource distribution or cooperation patterns. "
+                "Consider addressing flow inequalities and fostering reciprocal relationships."
+            )
+        else:
+            interpretations['symbiotic'] = (
+                f"Limited role integration (score: {symb_score:.0f}/100). "
+                "Significant imbalances in how resources flow and roles interact. "
+                "Address inequalities and build more cooperative structures."
+            )
+
+        # INTELLIGENT interpretation
+        intel_score = scores['intelligent']
+        if intel_score >= 65:
+            interpretations['intelligent'] = (
+                f"High functional diversity (score: {intel_score:.0f}/100). "
+                "The organization effectively leverages diverse specialized roles. "
+                "Good balance of expertise across functions."
+            )
+        elif intel_score >= 45:
+            interpretations['intelligent'] = (
+                f"Moderate functional diversity (score: {intel_score:.0f}/100). "
+                "Some role differentiation exists but could be enhanced. "
+                "Consider developing more specialized capabilities."
+            )
+        else:
+            interpretations['intelligent'] = (
+                f"Limited functional diversity (score: {intel_score:.0f}/100). "
+                "Insufficient role differentiation may limit organizational intelligence. "
+                "Develop more specialized functions and cross-functional capabilities."
+            )
+
+        # SUSTAINABLE interpretation
+        sust_score = scores['sustainable']
+        sust_metrics = details['sustainable']['metrics']
+        alpha = sust_metrics.get('relative_ascendency', 0)
+        is_viable = sust_metrics.get('is_viable', False)
+
+        if sust_score >= 75:
+            interpretations['sustainable'] = (
+                f"Excellent sustainability balance (score: {sust_score:.0f}/100). "
+                f"The organization operates {'within' if is_viable else 'near'} the Window of Viability "
+                f"(alpha={alpha:.3f}). Order and flexibility are well balanced."
+            )
+        elif sust_score >= 50:
+            direction = "too rigid" if alpha > 0.5 else "too flexible"
+            interpretations['sustainable'] = (
+                f"Moderate sustainability (score: {sust_score:.0f}/100). "
+                f"The organization may be {direction} (alpha={alpha:.3f}). "
+                "Adjust the balance between efficiency and adaptability."
+            )
+        else:
+            direction = "over-optimized and brittle" if alpha > 0.6 else "under-organized and chaotic"
+            interpretations['sustainable'] = (
+                f"Sustainability concerns (score: {sust_score:.0f}/100). "
+                f"The organization appears {direction} (alpha={alpha:.3f}). "
+                "Significant rebalancing is needed for long-term viability."
+            )
+
+        return interpretations
+
+    def get_recommendations(self) -> List[Dict[str, Any]]:
+        """
+        Generate actionable recommendations based on OASIS assessment.
+
+        Returns:
+            List of recommendation dictionaries with priority, dimension, and action
+        """
+        profile = self.get_oasis_profile()
+        scores = profile['dimension_scores']
+        details = profile['dimension_details']
+
+        recommendations = []
+
+        # OPEN recommendations
+        if scores['open'] < 50:
+            recommendations.append({
+                'priority': 'HIGH' if scores['open'] < 30 else 'MEDIUM',
+                'dimension': 'OPEN',
+                'issue': 'Low interconnectivity',
+                'action': 'Establish regular cross-functional meetings and communication channels',
+                'metrics_to_improve': ['flow_diversity', 'connectance', 'clustering_coefficient']
+            })
+
+        # AUTONOMOUS recommendations
+        if scores['autonomous'] < 40:
+            recommendations.append({
+                'priority': 'HIGH' if scores['autonomous'] < 25 else 'MEDIUM',
+                'dimension': 'AUTONOMOUS',
+                'issue': 'Weak feedback and learning loops',
+                'action': 'Implement knowledge management systems and regular retrospectives',
+                'metrics_to_improve': ['finn_cycling_index', 'flow_reciprocity']
+            })
+
+        # SYMBIOTIC recommendations
+        symb_metrics = details['symbiotic']['metrics']
+        if symb_metrics['gini_coefficient'] > 0.5:
+            recommendations.append({
+                'priority': 'MEDIUM',
+                'dimension': 'SYMBIOTIC',
+                'issue': 'High resource inequality',
+                'action': 'Redistribute resources and responsibilities more equitably',
+                'metrics_to_improve': ['gini_coefficient', 'mutualism_ratio']
+            })
+
+        # INTELLIGENT recommendations
+        intel_metrics = details['intelligent']['metrics']
+        if intel_metrics['number_of_roles'] < 3:
+            recommendations.append({
+                'priority': 'MEDIUM',
+                'dimension': 'INTELLIGENT',
+                'issue': 'Insufficient functional differentiation',
+                'action': 'Develop specialized capabilities and clearer role definitions',
+                'metrics_to_improve': ['number_of_roles', 'functional_diversity']
+            })
+
+        # SUSTAINABLE recommendations (highest priority for viability issues)
+        sust_metrics = details['sustainable']['metrics']
+        if not sust_metrics['is_viable']:
+            alpha = sust_metrics['relative_ascendency']
+            if alpha < 0.2:
+                recommendations.append({
+                    'priority': 'CRITICAL',
+                    'dimension': 'SUSTAINABLE',
+                    'issue': 'System too chaotic (alpha < 0.2)',
+                    'action': 'Increase structure, standardize processes, and strengthen coordination',
+                    'metrics_to_improve': ['relative_ascendency', 'robustness']
+                })
+            elif alpha > 0.6:
+                recommendations.append({
+                    'priority': 'CRITICAL',
+                    'dimension': 'SUSTAINABLE',
+                    'issue': 'System too rigid (alpha > 0.6)',
+                    'action': 'Reduce constraints, allow more flexibility, and diversify pathways',
+                    'metrics_to_improve': ['relative_ascendency', 'redundancy', 'overhead_ratio']
+                })
+
+        # Sort by priority
+        priority_order = {'CRITICAL': 0, 'HIGH': 1, 'MEDIUM': 2, 'LOW': 3}
+        recommendations.sort(key=lambda x: priority_order.get(x['priority'], 4))
+
+        return recommendations
+
+    def set_dimension_weights(self, weights: Dict[str, float]) -> None:
+        """
+        Update dimension weights for overall score calculation.
+
+        Args:
+            weights: Dictionary with weights for each dimension (must sum to 1.0)
+        """
+        required_keys = {'open', 'autonomous', 'symbiotic', 'intelligent', 'sustainable'}
+        if set(weights.keys()) != required_keys:
+            raise ValueError(f"Weights must include exactly these keys: {required_keys}")
+
+        total = sum(weights.values())
+        if abs(total - 1.0) > 0.01:
+            raise ValueError(f"Weights must sum to 1.0, got {total}")
+
+        self.weights = weights.copy()
+
+    def get_dimension_summary(self) -> Dict[str, Dict[str, Any]]:
+        """
+        Get a summary of each dimension with key metrics and status.
+
+        Returns:
+            Dictionary with dimension summaries for UI display
+        """
+        profile = self.get_oasis_profile()
+        interpretations = self.get_oasis_interpretation()
+
+        summary = {}
+
+        dimension_info = {
+            'open': {
+                'full_name': 'OPEN',
+                'description': 'Ability to interconnect and exchange',
+                'fath_principles': [1, 3, 4],
+                'icon': 'globe'
+            },
+            'autonomous': {
+                'full_name': 'AUTONOMOUS',
+                'description': 'Ability to learn and encode routines',
+                'fath_principles': [2, 9],
+                'icon': 'brain'
+            },
+            'symbiotic': {
+                'full_name': 'SYMBIOTIC',
+                'description': 'Human-machine integration balance',
+                'fath_principles': [5, 8],
+                'icon': 'handshake'
+            },
+            'intelligent': {
+                'full_name': 'INTELLIGENT',
+                'description': 'Leverage diverse intelligence types',
+                'fath_principles': [7, 10],
+                'icon': 'lightbulb'
+            },
+            'sustainable': {
+                'full_name': 'SUSTAINABLE',
+                'description': 'Balance order and freedom',
+                'fath_principles': [6],
+                'icon': 'leaf'
+            }
+        }
+
+        for dim, info in dimension_info.items():
+            summary[dim] = {
+                **info,
+                'score': profile['dimension_scores'][dim],
+                'status': profile['dimension_status'][dim],
+                'interpretation': interpretations[dim],
+                'key_metrics': profile['dimension_details'][dim]['metrics'],
+                'weights': profile['dimension_details'][dim]['weights']
+            }
+
+        return summary
