@@ -2,25 +2,30 @@
 Ulanowicz Ecosystem Sustainability Theory Calculator
 
 UPDATED: Now implements CORRECT Information Theory formulations from
-Ulanowicz et al. (2009) "Quantifying sustainability: Resilience, efficiency 
+Ulanowicz et al. (2009) "Quantifying sustainability: Resilience, efficiency
 and the return of information theory" - the foundational paper.
 
 Core Information Theory Metrics (Corrected - Using Natural Logarithms):
 - Total System Throughput (TST)
 - Development Capacity: C = -Σ(T_ij * ln(T_ij/T··)) [Eq. 11]
-- Ascendency: A = Σ(T_ij * ln(T_ij*T·· / (T_i·*T_·j))) [Eq. 12]  
+- Ascendency: A = Σ(T_ij * ln(T_ij*T·· / (T_i·*T_·j))) [Eq. 12]
 - Reserve: Φ = Σ(T_ij * ln(T_ij² / (T_i·*T_·j))) [Eq. 13]
 - Fundamental relationship: C = A + Φ [Eq. 14]
 - Relative Ascendency: α = A/C (key sustainability metric)
 
 Extended Regenerative Economics Indicators:
-- Flow Diversity (H)  
+- Flow Diversity (H)
 - Structural Information (SI)
 - Robustness (R) - TO BE IMPLEMENTED
 - Network Efficiency
 - Effective Link Density
 - Trophic Depth
 - Redundancy measures
+
+PERFORMANCE OPTIMIZATION (2024):
+- Added use_vectorized parameter to enable numpy-optimized O(n²) calculations
+- Precomputes row/column sums once instead of O(n³) redundant calculations
+- For large networks (>50 nodes), vectorized mode is enabled by default
 """
 
 import numpy as np
@@ -28,74 +33,162 @@ import networkx as nx
 from typing import Dict, List, Tuple, Optional, Any
 import math
 
+# Import vectorized metrics for optimized calculations
+try:
+    from vectorized_metrics import (
+        precompute_sums,
+        vectorized_flow_diversity,
+        vectorized_ami,
+        vectorized_ascendency,
+        vectorized_development_capacity,
+        vectorized_reserve,
+        vectorized_relative_ascendency,
+        vectorized_robustness,
+        vectorized_effective_flows,
+        vectorized_effective_nodes,
+        vectorized_effective_connectivity,
+        vectorized_number_of_roles,
+        get_all_vectorized_metrics,
+    )
+    VECTORIZED_AVAILABLE = True
+except ImportError:
+    VECTORIZED_AVAILABLE = False
+
 
 class UlanowiczCalculator:
     """
     Calculator for Ulanowicz ecosystem sustainability metrics.
-    
+
     Based on Ulanowicz's theory that sustainable systems must balance
     order (ascendency) and flexibility (overhead) within a window of viability.
+
+    Supports two computation modes:
+    - Original: Nested loop calculations (for small networks or verification)
+    - Vectorized: Numpy-optimized O(n²) calculations (for large networks)
     """
-    
-    def __init__(self, flow_matrix: np.ndarray, node_names: Optional[List[str]] = None):
+
+    # Threshold for automatic vectorization (nodes)
+    VECTORIZE_THRESHOLD = 50
+
+    def __init__(self, flow_matrix: np.ndarray,
+                 node_names: Optional[List[str]] = None,
+                 use_vectorized: Optional[bool] = None):
         """
         Initialize calculator with flow matrix.
-        
+
         Args:
             flow_matrix: Square matrix where element (i,j) represents flow from node i to node j
             node_names: Optional list of node names for labeling
+            use_vectorized: Whether to use vectorized calculations.
+                           If None (default), automatically enabled for networks > 50 nodes.
+                           Set to False to use original loop-based calculations.
         """
         self.flow_matrix = np.array(flow_matrix, dtype=float)
         self.n_nodes = self.flow_matrix.shape[0]
         self.node_names = node_names or [f"Node_{i}" for i in range(self.n_nodes)]
-        
+
         # Validate input
         if self.flow_matrix.shape[0] != self.flow_matrix.shape[1]:
             raise ValueError("Flow matrix must be square")
-        
-        # Calculate derived matrices
+
+        # Determine whether to use vectorized calculations
+        if use_vectorized is None:
+            # Auto-enable for large networks if available
+            self.use_vectorized = (
+                VECTORIZED_AVAILABLE and
+                self.n_nodes > self.VECTORIZE_THRESHOLD
+            )
+        else:
+            self.use_vectorized = use_vectorized and VECTORIZED_AVAILABLE
+
+        # Calculate derived matrices (precompute sums once)
         self._calculate_throughput_matrices()
+
+        # Precompute TST for efficiency
+        self._tst = np.sum(self.flow_matrix)
+
+        # Cache for vectorized metrics (lazy computation)
+        self._vectorized_cache: Dict[str, float] = {}
     
     def _calculate_throughput_matrices(self):
-        """Calculate input, output, and total throughput vectors."""
-        # Input throughput for each node (sum of incoming flows)
-        self.input_throughput = np.sum(self.flow_matrix, axis=0)
-        
-        # Output throughput for each node (sum of outgoing flows)
+        """
+        Calculate input, output, and total throughput vectors.
+
+        This method precomputes row/column sums ONCE, which is the key
+        optimization for O(n²) instead of O(n³) complexity.
+        """
+        # Output throughput for each node (sum of outgoing flows) - T_i.
+        # This is the row sum (sum along axis=1)
         self.output_throughput = np.sum(self.flow_matrix, axis=1)
-        
-        # Total throughput for each node
+
+        # Input throughput for each node (sum of incoming flows) - T_.j
+        # This is the column sum (sum along axis=0)
+        self.input_throughput = np.sum(self.flow_matrix, axis=0)
+
+        # Total throughput for each node (for compatibility)
         self.total_throughput = self.input_throughput + self.output_throughput
+
+    def get_precomputed_sums(self) -> Tuple[np.ndarray, np.ndarray, float]:
+        """
+        Get precomputed row sums, column sums, and TST.
+
+        This method provides access to the precomputed values that
+        enable efficient O(n²) calculations.
+
+        Returns:
+            Tuple of (output_throughput, input_throughput, tst):
+            - output_throughput: Row sums (T_i.) - outgoing flow per node
+            - input_throughput: Column sums (T_.j) - incoming flow per node
+            - tst: Total System Throughput
+        """
+        return (
+            self.output_throughput.copy(),
+            self.input_throughput.copy(),
+            self._tst
+        )
     
     def calculate_tst(self) -> float:
         """
         Calculate Total System Throughput (TST).
-        
+
         TST is the sum of all flows in the network, representing the total
         activity or metabolism of the system.
-        
+
         Returns:
             Total System Throughput value
         """
-        return np.sum(self.flow_matrix)
+        # Use precomputed value
+        return self._tst
     
     def calculate_ami(self) -> float:
         """
         Calculate Average Mutual Information (AMI).
-        
+
         AMI measures the degree of organization or constraint in the network.
         Higher AMI indicates more organized, less random flow patterns.
-        
+
         Formula: AMI = Σ(T_ij * log(T_ij * TST / (T_i. * T_.j))) / TST
         where T_ij is flow from i to j, T_i. is output from i, T_.j is input to j
-        
+
         Returns:
             Average Mutual Information value
         """
-        tst = self.calculate_tst()
+        # Use vectorized version if enabled
+        if self.use_vectorized:
+            if 'ami' not in self._vectorized_cache:
+                self._vectorized_cache['ami'] = vectorized_ami(
+                    self.flow_matrix,
+                    self.output_throughput,
+                    self.input_throughput,
+                    self._tst
+                )
+            return self._vectorized_cache['ami']
+
+        # Original loop-based implementation
+        tst = self._tst
         if tst == 0:
             return 0
-        
+
         ami_sum = 0
         for i in range(self.n_nodes):
             for j in range(self.n_nodes):
@@ -103,31 +196,43 @@ class UlanowiczCalculator:
                 if flow_ij > 0:
                     output_i = self.output_throughput[i]
                     input_j = self.input_throughput[j]
-                    
+
                     if output_i > 0 and input_j > 0:
                         # Calculate mutual information term
                         ratio = (flow_ij * tst) / (output_i * input_j)
                         ami_sum += flow_ij * math.log(ratio)
-        
+
         return ami_sum / tst if tst > 0 else 0
     
     def calculate_ascendency(self) -> float:
         """
         Calculate Ascendency (A) using CORRECT IT formulation.
-        
+
         Ascendency is the scaled mutual constraint representing the
         system's organized power.
-        
+
         Formula: A = Σ(T_ij * log(T_ij * T·· / (T_i· * T_·j)))
         From Ulanowicz et al. (2009) Eq. (12)
-        
+
         Returns:
-            Ascendency (flow-bits)
+            Ascendency (flow-nats)
         """
-        tst = self.calculate_tst()
+        # Use vectorized version if enabled
+        if self.use_vectorized:
+            if 'ascendency' not in self._vectorized_cache:
+                self._vectorized_cache['ascendency'] = vectorized_ascendency(
+                    self.flow_matrix,
+                    self.output_throughput,
+                    self.input_throughput,
+                    self._tst
+                )
+            return self._vectorized_cache['ascendency']
+
+        # Original loop-based implementation
+        tst = self._tst
         if tst == 0:
             return 0
-        
+
         ascendency_sum = 0
         for i in range(self.n_nodes):
             for j in range(self.n_nodes):
@@ -135,31 +240,41 @@ class UlanowiczCalculator:
                 if flow_ij > 0:
                     output_i = self.output_throughput[i]
                     input_j = self.input_throughput[j]
-                    
+
                     if output_i > 0 and input_j > 0:
                         # Direct ascendency calculation
                         ratio = (flow_ij * tst) / (output_i * input_j)
                         ascendency_sum += flow_ij * math.log(ratio)
-        
+
         return ascendency_sum
     
     def calculate_development_capacity(self) -> float:
         """
         Calculate Development Capacity (C) using CORRECT IT formulation.
-        
+
         Development Capacity represents the scaled system indeterminacy -
         the capacity for system development and change.
-        
+
         Formula: C = -Σ(T_ij * log(T_ij / T··))
         From Ulanowicz et al. (2009) Eq. (11)
-        
+
         Returns:
-            Development Capacity (flow-bits)
+            Development Capacity (flow-nats)
         """
-        tst = self.calculate_tst()
+        # Use vectorized version if enabled
+        if self.use_vectorized:
+            if 'development_capacity' not in self._vectorized_cache:
+                self._vectorized_cache['development_capacity'] = vectorized_development_capacity(
+                    self.flow_matrix,
+                    self._tst
+                )
+            return self._vectorized_cache['development_capacity']
+
+        # Original loop-based implementation
+        tst = self._tst
         if tst == 0:
             return 0
-        
+
         capacity_sum = 0
         for i in range(self.n_nodes):
             for j in range(self.n_nodes):
@@ -167,7 +282,7 @@ class UlanowiczCalculator:
                 if flow_ij > 0:
                     # Direct capacity calculation: T_ij * log(T_ij / T··)
                     capacity_sum += flow_ij * math.log(flow_ij / tst)
-        
+
         return -capacity_sum
     
     def calculate_reserve(self) -> float:
@@ -341,21 +456,31 @@ class UlanowiczCalculator:
     def calculate_flow_diversity(self) -> float:
         """
         Calculate Flow Diversity (H) using Shannon entropy.
-        
+
         Flow diversity measures the evenness of flow distribution
         across all network connections. Higher diversity indicates
         more evenly distributed flows.
-        
+
         Formula: H = -Σ(p_ij * log(p_ij))
         where p_ij = T_ij / TST
-        
+
         Returns:
-            Flow Diversity value
+            Flow Diversity value in nats
         """
-        tst = self.calculate_tst()
+        # Use vectorized version if enabled
+        if self.use_vectorized:
+            if 'flow_diversity' not in self._vectorized_cache:
+                self._vectorized_cache['flow_diversity'] = vectorized_flow_diversity(
+                    self.flow_matrix,
+                    self._tst
+                )
+            return self._vectorized_cache['flow_diversity']
+
+        # Original loop-based implementation
+        tst = self._tst
         if tst == 0:
             return 0
-        
+
         diversity_sum = 0
         for i in range(self.n_nodes):
             for j in range(self.n_nodes):
@@ -363,7 +488,7 @@ class UlanowiczCalculator:
                 if flow_ij > 0:
                     p_ij = flow_ij / tst
                     diversity_sum += p_ij * math.log(p_ij)
-        
+
         return -diversity_sum
     
     def calculate_structural_information(self) -> float:
@@ -386,34 +511,45 @@ class UlanowiczCalculator:
     def calculate_robustness(self) -> float:
         """
         Calculate Network Robustness (R).
-        
+
         Robustness measures the system's ability to maintain functionality
         under stress or disturbance. It balances efficiency and resilience.
-        
-        Based on Fath-Ulanowicz formulation combining ascendency and overhead.
-        
-        Formula: R = (A/C) * (1 - A/C) * log(C)
-        
+
+        Formula: R = -α·log(α) where α = A/C
+        Maximum at α = 1/e ≈ 0.368
+
+        Key reference points:
+        - α = 0.37: Empirical optimum where real ecosystems cluster
+        - α = 0.4596: Geometric center of window of vitality (Ulanowicz)
+
         Returns:
-            Robustness value
+            Robustness value (max ~0.368 at optimal α)
         """
+        # Use vectorized version if enabled
+        if self.use_vectorized:
+            if 'robustness' not in self._vectorized_cache:
+                self._vectorized_cache['robustness'] = vectorized_robustness(
+                    self.flow_matrix,
+                    self.output_throughput,
+                    self.input_throughput,
+                    self._tst
+                )
+            return self._vectorized_cache['robustness']
+
+        # Original implementation
         ascendency = self.calculate_ascendency()
         development_capacity = self.calculate_development_capacity()
-        
+
         if development_capacity == 0:
             return 0
-        
+
         a_c_ratio = ascendency / development_capacity
         # Symmetric robustness formula: R = -α·log(α)
-        # Maximum at α = 1/e ≈ 0.368
-        # Key reference points:
-        #   - α = 0.37: Empirical optimum where real ecosystems cluster
-        #   - α = 0.4596: Geometric center of window of vitality (Ulanowicz)
         if 0 < a_c_ratio < 1:
             robustness = -a_c_ratio * math.log(a_c_ratio)
         else:
             robustness = 0
-        
+
         return max(0, robustness)  # Ensure non-negative
     
     def calculate_network_efficiency(self) -> float:
@@ -838,101 +974,137 @@ class UlanowiczCalculator:
     def calculate_effective_flows(self) -> float:
         """
         Calculate effective number of flows (F).
-        
+
         Based on Zorach & Ulanowicz (2003), the effective number of flows
-        is the exponential of the negative sum of weighted log probabilities.
-        
-        Formula: F = exp(-Σ((Tij/T••) * log(Tij/T••)))
-        
+        is the exponential of the flow diversity (Shannon entropy).
+
+        Formula: F = exp(H) = exp(-Σ((Tij/T••) * log(Tij/T••)))
+
         Returns:
             Effective number of flows
         """
-        tst = self.calculate_tst()
-        if tst == 0:
-            return 0
-        
-        sum_term = 0
-        for i in range(self.n_nodes):
-            for j in range(self.n_nodes):
-                if self.flow_matrix[i, j] > 0:
-                    tij = self.flow_matrix[i, j]
-                    p_ij = tij / tst
-                    sum_term += p_ij * np.log(p_ij)
-        
-        # Note: sum_term is negative, so -sum_term is positive
-        return np.exp(-sum_term)
+        # Use vectorized version if enabled
+        if self.use_vectorized:
+            if 'effective_flows' not in self._vectorized_cache:
+                self._vectorized_cache['effective_flows'] = vectorized_effective_flows(
+                    self.flow_matrix,
+                    self._tst
+                )
+            return self._vectorized_cache['effective_flows']
+
+        # Original implementation: F = exp(H)
+        flow_diversity = self.calculate_flow_diversity()
+        return np.exp(flow_diversity)
     
     def calculate_effective_nodes(self) -> float:
         """
         Calculate effective number of nodes (N).
-        
+
         Based on the weighted distribution of node throughputs.
         Formula: N = exp(0.5 * Σ((Tij/T••) * log(T••²/(Ti•*T•j))))
-        
+
         Returns:
             Effective number of nodes
         """
-        tst = self.calculate_tst()
+        # Use vectorized version if enabled
+        if self.use_vectorized:
+            if 'effective_nodes' not in self._vectorized_cache:
+                self._vectorized_cache['effective_nodes'] = vectorized_effective_nodes(
+                    self.flow_matrix,
+                    self.output_throughput,
+                    self.input_throughput,
+                    self._tst
+                )
+            return self._vectorized_cache['effective_nodes']
+
+        # Original implementation - now using precomputed sums
+        tst = self._tst
         if tst == 0:
             return self.n_nodes
-        
+
         sum_term = 0
         for i in range(self.n_nodes):
             for j in range(self.n_nodes):
                 if self.flow_matrix[i, j] > 0:
                     tij = self.flow_matrix[i, j]
-                    ti_out = np.sum(self.flow_matrix[i, :])
-                    tj_in = np.sum(self.flow_matrix[:, j])
-                    
+                    # Use precomputed throughputs instead of recomputing
+                    ti_out = self.output_throughput[i]
+                    tj_in = self.input_throughput[j]
+
                     if ti_out > 0 and tj_in > 0:
                         weight = tij / tst
                         sum_term += weight * np.log(tst**2 / (ti_out * tj_in))
-        
+
         return np.exp(0.5 * sum_term)
     
     def calculate_effective_connectivity(self) -> float:
         """
         Calculate effective connectivity (C).
-        
+
         Based on Zorach & Ulanowicz (2003), effective connectivity is
         calculated directly from the flow distribution.
-        
+
         Formula: C = exp(0.5 * Σ((Tij/T••) * log(Tij²/(Ti•*T•j))))
-        
+
         Returns:
             Effective connectivity in flows per node
         """
-        tst = self.calculate_tst()
+        # Use vectorized version if enabled
+        if self.use_vectorized:
+            if 'effective_connectivity' not in self._vectorized_cache:
+                self._vectorized_cache['effective_connectivity'] = vectorized_effective_connectivity(
+                    self.flow_matrix,
+                    self.output_throughput,
+                    self.input_throughput,
+                    self._tst
+                )
+            return self._vectorized_cache['effective_connectivity']
+
+        # Original implementation - now using precomputed sums
+        tst = self._tst
         if tst == 0:
             return 0
-        
+
         sum_term = 0
         for i in range(self.n_nodes):
             for j in range(self.n_nodes):
                 if self.flow_matrix[i, j] > 0:
                     tij = self.flow_matrix[i, j]
-                    ti_out = np.sum(self.flow_matrix[i, :])
-                    tj_in = np.sum(self.flow_matrix[:, j])
-                    
+                    # Use precomputed throughputs instead of recomputing
+                    ti_out = self.output_throughput[i]
+                    tj_in = self.input_throughput[j]
+
                     if ti_out > 0 and tj_in > 0:
                         weight = tij / tst
                         sum_term += weight * np.log(tij**2 / (ti_out * tj_in))
-        
+
         return np.exp(0.5 * sum_term)
     
     def calculate_number_of_roles(self) -> float:
         """
         Calculate number of functional roles (R).
-        
+
         From Zorach & Ulanowicz (2003): R = exp(AMI)
         where AMI is the Average Mutual Information.
-        
+
         A role represents a specialized function where nodes take inputs
         from specific sources and pass them to specific destinations.
-        
+
         Returns:
             Number of functional roles in the network
         """
+        # Use vectorized version if enabled
+        if self.use_vectorized:
+            if 'number_of_roles' not in self._vectorized_cache:
+                self._vectorized_cache['number_of_roles'] = vectorized_number_of_roles(
+                    self.flow_matrix,
+                    self.output_throughput,
+                    self.input_throughput,
+                    self._tst
+                )
+            return self._vectorized_cache['number_of_roles']
+
+        # Original implementation
         ami = self.calculate_ami()
         return np.exp(ami)
     
@@ -1093,3 +1265,84 @@ class UlanowiczCalculator:
             return "HIGH - Strong regenerative capabilities"
         else:
             return "MODERATE - Some regenerative potential exists"
+
+    # =========================================================================
+    # Cache Management Methods (for vectorized computation optimization)
+    # =========================================================================
+
+    def clear_cache(self) -> None:
+        """
+        Clear the vectorized computation cache.
+
+        Call this method if the flow matrix has been modified externally
+        and cached values need to be invalidated.
+        """
+        self._vectorized_cache.clear()
+
+    def get_cache_info(self) -> Dict[str, Any]:
+        """
+        Get information about the current cache state.
+
+        Returns:
+            Dictionary with cache statistics and configuration
+        """
+        return {
+            'use_vectorized': self.use_vectorized,
+            'vectorized_available': VECTORIZED_AVAILABLE,
+            'cached_metrics': list(self._vectorized_cache.keys()),
+            'cache_size': len(self._vectorized_cache),
+            'n_nodes': self.n_nodes,
+            'vectorize_threshold': self.VECTORIZE_THRESHOLD,
+            'auto_vectorized': self.n_nodes > self.VECTORIZE_THRESHOLD
+        }
+
+    def get_all_vectorized_metrics(self) -> Dict[str, float]:
+        """
+        Get all metrics using vectorized computation in a single efficient pass.
+
+        This method computes all Tier 2 metrics at once using shared
+        precomputed values, which is more efficient than calling
+        individual methods separately.
+
+        Returns:
+            Dictionary of all computed metrics
+        """
+        if not self.use_vectorized or not VECTORIZED_AVAILABLE:
+            # Fall back to individual method calls
+            return {
+                'total_system_throughput': self.calculate_tst(),
+                'flow_diversity': self.calculate_flow_diversity(),
+                'average_mutual_information': self.calculate_ami(),
+                'ascendency': self.calculate_ascendency(),
+                'development_capacity': self.calculate_development_capacity(),
+                'reserve': self.calculate_reserve(),
+                'relative_ascendency': self.calculate_relative_ascendency(),
+                'robustness': self.calculate_robustness(),
+                'effective_flows': self.calculate_effective_flows(),
+                'effective_nodes': self.calculate_effective_nodes(),
+                'effective_connectivity': self.calculate_effective_connectivity(),
+                'number_of_roles': self.calculate_number_of_roles(),
+            }
+
+        # Use batch vectorized computation
+        return get_all_vectorized_metrics(self.flow_matrix)
+
+    def set_vectorized_mode(self, enabled: bool) -> None:
+        """
+        Enable or disable vectorized computation mode.
+
+        Args:
+            enabled: Whether to use vectorized computations
+
+        Note:
+            This will clear the cache when changing modes.
+        """
+        if enabled and not VECTORIZED_AVAILABLE:
+            raise ValueError(
+                "Vectorized metrics module not available. "
+                "Ensure vectorized_metrics.py is in the path."
+            )
+
+        if self.use_vectorized != enabled:
+            self.use_vectorized = enabled
+            self.clear_cache()

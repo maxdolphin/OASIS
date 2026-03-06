@@ -38,6 +38,143 @@ from oasis_visualizer import (
     create_recommendations_chart
 )
 
+# Import precomputation service for large network optimization
+try:
+    from precompute_service import (
+        PrecomputeService,
+        get_precompute_service,
+        compute_metrics_cached,
+    )
+    from vectorized_metrics import get_all_vectorized_metrics
+    PRECOMPUTE_AVAILABLE = True
+except ImportError:
+    PRECOMPUTE_AVAILABLE = False
+
+# Import database layer for persistent metric storage
+try:
+    from database import get_database_manager, get_precompute_pipeline
+    DATABASE_AVAILABLE = True
+except ImportError:
+    DATABASE_AVAILABLE = False
+
+
+# =========================================================================
+# Cached Computation Functions (using @st.cache_data for efficiency)
+# =========================================================================
+
+@st.cache_resource
+def get_cached_precompute_service():
+    """
+    Get singleton PrecomputeService instance.
+
+    Uses @st.cache_resource to ensure only one instance exists across
+    all Streamlit reruns and sessions.
+    """
+    if PRECOMPUTE_AVAILABLE:
+        return get_precompute_service()
+    return None
+
+
+@st.cache_resource
+def get_cached_database_manager():
+    """
+    Get singleton DatabaseManager instance.
+
+    Uses @st.cache_resource for persistence across reruns.
+    """
+    if DATABASE_AVAILABLE:
+        return get_database_manager()
+    return None
+
+
+@st.cache_resource
+def get_cached_pipeline():
+    """
+    Get singleton PrecomputePipeline instance.
+
+    Uses @st.cache_resource for persistence across reruns.
+    """
+    if DATABASE_AVAILABLE:
+        return get_precompute_pipeline()
+    return None
+
+
+@st.cache_data(ttl=3600, show_spinner="Computing metrics...")
+def compute_cached_tier2_metrics(_flow_matrix_bytes: bytes,
+                                  n_nodes: int,
+                                  cache_key: str) -> dict:
+    """
+    Compute Tier 2 metrics with Streamlit caching.
+
+    Args:
+        _flow_matrix_bytes: Flow matrix as bytes (for hashing)
+        n_nodes: Number of nodes (for reconstruction)
+        cache_key: Unique cache key
+
+    Returns:
+        Dictionary of computed metrics
+    """
+    if not PRECOMPUTE_AVAILABLE:
+        return {}
+
+    # Reconstruct flow matrix from bytes
+    flow_matrix = np.frombuffer(_flow_matrix_bytes, dtype=np.float64).reshape(n_nodes, n_nodes)
+
+    # Use vectorized computation
+    return get_all_vectorized_metrics(flow_matrix)
+
+
+def get_cached_metrics(flow_matrix: np.ndarray, node_names: list) -> tuple:
+    """
+    Get metrics with intelligent caching.
+
+    First checks the SQLite database, then falls back to precompute service,
+    then to Streamlit's @st.cache_data mechanism.
+
+    Args:
+        flow_matrix: Square matrix of flows
+        node_names: List of node names
+
+    Returns:
+        Tuple of (metrics dict, was_cached bool)
+    """
+    # Try database first (fastest path)
+    if DATABASE_AVAILABLE:
+        pipeline = get_cached_pipeline()
+        if pipeline:
+            result = pipeline.get_or_compute_metrics(
+                flow_matrix, node_names
+            )
+            return result['metrics'], result['cached']
+
+    # Fall back to precompute service
+    if not PRECOMPUTE_AVAILABLE:
+        return {}, False
+
+    service = get_cached_precompute_service()
+    if service is None:
+        return {}, False
+
+    # Generate cache key
+    cache_key = service.get_cache_key(flow_matrix, node_names)
+
+    # Try disk cache first
+    cached = service.load_cached(cache_key, tier='tier2')
+    if cached is not None:
+        return cached, True
+
+    # Compute using Streamlit's caching
+    n_nodes = len(node_names)
+    flow_bytes = flow_matrix.astype(np.float64).tobytes()
+
+    metrics = compute_cached_tier2_metrics(flow_bytes, n_nodes, cache_key)
+
+    # Save to disk cache for persistence
+    if metrics:
+        service.save_to_cache(cache_key, metrics, tier='tier2')
+
+    return metrics, False
+
 # Configure page
 st.set_page_config(
     page_title="Adaptive Organization Analysis",
@@ -120,7 +257,7 @@ def create_mini_viability_chart(metrics):
             symbol='circle',
             line=dict(color='white', width=2)
         ),
-        text=[f"α = {metrics['ascendency_ratio']:.3f}"],
+        text=[f"α = {metrics['ascendency_ratio']:.2f}"],
         textposition="bottom center",
         textfont=dict(size=12, color='black'),
         name='Current Position',
@@ -210,7 +347,7 @@ def create_metrics_bar_chart(metrics):
         go.Bar(
             x=metric_names,
             y=display_values,
-            text=[f"{v:.3f}" for v in metric_values],
+            text=[f"{v:.2f}" for v in metric_values],
             textposition='auto',
             marker_color=['blue', 'green', 'orange', 'purple', 'red']
         )
@@ -660,7 +797,7 @@ def sample_data_interface():
                             st.metric("Ascendency", f"{metrics_to_show['ascendency']:.0f}")
                     with col3:
                         if 'ascendency_ratio' in metrics_to_show:
-                            st.metric("A/C Ratio", f"{metrics_to_show['ascendency_ratio']:.3f}")
+                            st.metric("A/C Ratio", f"{metrics_to_show['ascendency_ratio']:.2f}")
                 
                 if metrics_to_show.get('note'):
                     st.info(f"📝 {metrics_to_show['note']}")
@@ -741,7 +878,7 @@ def sample_data_interface():
                 st.write(f"**Nodes**: {metadata.get('nodes_count', 'N/A')}")
                 st.write(f"**Scale**: {metadata.get('scale', 'N/A')}")
                 st.write(f"**Total Flow**: {metadata.get('total_flow', 0):.1f}")
-                st.write(f"**Density**: {metadata.get('density', 0):.4f}")
+                st.write(f"**Density**: {metadata.get('density', 0):.2f}")
             
             # Show processing info
             if metadata.get('processed_date'):
@@ -765,7 +902,7 @@ def sample_data_interface():
                 st.write(f"**Nodes**: {metadata.get('actual_nodes', 'N/A')}")
                 st.write(f"**Edges**: {metadata.get('actual_edges', 'N/A')}")
             with col2:
-                st.write(f"**Density**: {metadata.get('actual_density', 0):.4f}")
+                st.write(f"**Density**: {metadata.get('actual_density', 0):.2f}")
                 st.write(f"**Total Flow**: {metadata.get('total_flow', 0):.1f}")
                 st.write(f"**Hub Amplification**: {metadata.get('hub_amplification', 'N/A')}")
             with col3:
@@ -1293,7 +1430,7 @@ def generate_synthetic_organization(departments, intensity, formality, age, seed
 
 def show_analysis_page():
     """Show the analysis page with network visualization on top and sidebar navigation."""
-    
+
     # Get analysis data from session state
     if st.session_state.analysis_data is None:
         st.error("No analysis data available")
@@ -1301,26 +1438,55 @@ def show_analysis_page():
             st.session_state.current_page = 'main'
             st.rerun()
         return
-    
+
     data = st.session_state.analysis_data
     flow_matrix = data['flow_matrix']
     node_names = data['node_names']
     org_name = data['org_name']
-    
-    # Check if we already have calculated metrics (for caching)
+    n_nodes = len(node_names)
+
+    # Try to use precomputed/cached metrics from database or disk cache
+    precomputed_metrics = None
+    cache_hit = False
+
+    if DATABASE_AVAILABLE or PRECOMPUTE_AVAILABLE:
+        precomputed_metrics, cache_hit = get_cached_metrics(flow_matrix, node_names)
+        if cache_hit:
+            st.toast("Loaded from cache", icon="⚡")
+
+    # Check if we already have calculated metrics (session caching)
     if 'extended_metrics' in data and 'assessments' in data and 'calculator' in data:
-        # Use cached results
+        # Use session-cached results - no notification needed on re-render
         extended_metrics = data['extended_metrics']
         assessments = data['assessments']
         calculator = data['calculator']
-        st.success("⚡ **Instant Results!** Using cached analysis from previous computation - no wait time needed!")
-        st.info("💾 **Cache Hit**: Results retrieved in <0.1s. Switch between analysis views instantly.")
+
+    # If we have cache hit but no session cache, use cache to reconstruct
+    elif cache_hit and precomputed_metrics:
+        # Create calculator (fast - just initialization)
+        calculator = UlanowiczCalculator(flow_matrix, node_names, use_vectorized=True)
+
+        # Use precomputed metrics from cache
+        extended_metrics = dict(precomputed_metrics)
+
+        # Add any missing metrics that aren't in cache
+        if 'is_viable' not in extended_metrics:
+            alpha = extended_metrics.get('relative_ascendency', 0)
+            extended_metrics['is_viable'] = 0.2 <= alpha <= 0.6
+
+        # Generate assessments from cached metrics
+        assessments = calculator.assess_regenerative_health()
+
+        # Store in session state for faster access on next rerun
+        st.session_state.analysis_data['extended_metrics'] = extended_metrics
+        st.session_state.analysis_data['assessments'] = assessments
+        st.session_state.analysis_data['calculator'] = calculator
+
     else:
-        # Analyze dataset characteristics and optimize processing strategy
-        n_nodes = len(node_names)
+        # No cache available - need to compute
         total_flows = np.sum(flow_matrix > 0)
         complexity_score = n_nodes * total_flows
-        
+
         # Display dataset information
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -1329,42 +1495,39 @@ def show_analysis_page():
             st.metric("🌊 Flows", f"{int(total_flows):,}")
         with col3:
             st.metric("📊 Complexity", f"{complexity_score:,.0f}")
-        
+
         # Determine processing strategy based on size
         if n_nodes <= 50:
             processing_mode = "FULL"
-            st.success("🚀 **Full Analysis Mode** - All advanced metrics enabled")
         elif n_nodes <= 200:
             processing_mode = "OPTIMIZED"
-            st.info("⚡ **Optimized Mode** - Advanced algorithms with smart shortcuts")
         elif n_nodes <= 1000:
             processing_mode = "SCALABLE"
-            st.warning("📊 **Scalable Mode** - Core metrics + efficient approximations")
+            st.caption("Large network - optimized mode")
         else:
             processing_mode = "MASSIVE"
-            st.warning("🌍 **Massive Scale Mode** - Essential metrics only, chunked processing")
-        
-        # Show estimated processing time
-        if n_nodes <= 20:
-            time_est = "5-15 seconds"
-        elif n_nodes <= 100:
-            time_est = "30-60 seconds"
-        elif n_nodes <= 500:
-            time_est = "2-5 minutes"
-        else:
-            time_est = f"{max(5, min(30, n_nodes/100)):.0f}-{max(10, min(60, n_nodes/50)):.0f} minutes"
-        
-        st.info(f"⏱️ **Estimated time**: {time_est}")
-        
-        # Need to calculate - run the intelligent analysis with processing mode
-        st.info("🔍 **First-time computation**: This will take time but results will be cached for instant future access.")
+            st.caption("Very large network - essential metrics only")
+
+        # First-time computation notice
         calculator, extended_metrics, assessments = run_intelligent_analysis(flow_matrix, node_names, processing_mode)
         if calculator is None:  # Analysis was cancelled or failed
             return
+
         # Cache results in session state
         st.session_state.analysis_data['extended_metrics'] = extended_metrics
         st.session_state.analysis_data['assessments'] = assessments
         st.session_state.analysis_data['calculator'] = calculator
+
+        # Save to database for persistence across restarts
+        if DATABASE_AVAILABLE:
+            pipeline = get_cached_pipeline()
+            if pipeline:
+                pipeline.get_or_compute_metrics(flow_matrix, node_names, org_name)
+        elif PRECOMPUTE_AVAILABLE:
+            service = get_cached_precompute_service()
+            if service:
+                cache_key = service.get_cache_key(flow_matrix, node_names)
+                service.save_to_cache(cache_key, extended_metrics, tier='tier2')
     
     
     # Create the network graph for visualizations (will be used in Network Analysis section)
@@ -1476,19 +1639,7 @@ def run_intelligent_analysis(flow_matrix, node_names, processing_mode="FULL"):
         else:
             # Full analysis for small datasets (<=50 nodes)
             return run_full_analysis(flow_matrix, node_names, progress_bar, status_text, start_time, info_container)
-        
-        # Success
-        total_time = time.time() - start_time
-        status_text.text(f"✅ Complete! ({total_time:.1f}s)")
-        time.sleep(0.8)
-        
-        # Clear all progress indicators
-        info_message.empty()
-        progress_bar.empty()
-        status_text.empty()
-        
-        return calculator, extended_metrics, assessments
-        
+
     except Exception as e:
         st.error(f"Analysis failed: {str(e)}")
         return None, None, None
@@ -1543,193 +1694,50 @@ def run_full_analysis(flow_matrix, node_names, progress_bar, status_text, start_
     elapsed = time.time() - start_time
     status_text.text(f"🌀 Phase 6/8: Advanced metrics ready ({elapsed:.1f}s elapsed)")
     
-    # Phase 7: Extended Metrics (warn about complexity)
-    status_text.text("⚡ Phase 7/8: Computing extended metrics... (complex calculations)")
+    # Phase 7: Extended Metrics
+    status_text.text("⚡ Phase 7/8: Computing extended metrics...")
     phase_start = time.time()
-    
-    # Create detailed sub-progress tracking for Phase 7
-    sub_container = st.container()
-    with sub_container:
-        st.markdown("🔍 **Detailed Progress for Extended Metrics:**")
-        
-        # Add live metrics dashboard
-        metrics_col1, metrics_col2, metrics_col3 = st.columns(3)
-        with metrics_col1:
-            metric_elapsed = st.empty()
-        with metrics_col2:
-            metric_step = st.empty()
-        with metrics_col3:
-            metric_speed = st.empty()
-        
-        # Progress tracking columns
-        col1, col2, col3 = st.columns([3, 2, 1])
-        with col1:
-            sub_status = st.empty()
-        with col2:
-            sub_progress_bar = st.progress(0)
-        with col3:
-            activity = st.empty()
-            
-        # Operation detail area
-        operation_detail = st.empty()
-        
-        # Animated indicators
-        import itertools
-        import threading
-        spinner = itertools.cycle(['⏳', '⏱️', '⌛', '🔄', '⚙️', '⚡'])
-        activity_messages = itertools.cycle(['Processing', 'Computing', 'Analyzing', 'Working', 'Active', 'Running'])
-        
-        # Update metrics display
-        def update_metrics(step_num, total_steps, phase_start):
-            elapsed = time.time() - phase_start
-            metric_elapsed.metric("⏱️ Elapsed", f"{elapsed:.1f}s")
-            metric_step.metric("📊 Step", f"{step_num}/{total_steps}")
-            if elapsed > 0:
-                metric_speed.metric("⚡ Speed", f"{step_num/elapsed:.1f} ops/s")
-        
-        # Step 1: Flow metrics
-        update_metrics(1, 8, phase_start)
-        sub_status.text("🌊 Calculating flow diversity...")
-        activity.text(f"{next(spinner)} {next(activity_messages)}")
-        operation_detail.info("Analyzing information content of network flows using Shannon entropy")
-        flow_diversity = calculator.calculate_flow_diversity()
-        sub_progress_bar.progress(0.15)
-        operation_detail.empty()
-        
-        # Step 2: Conditional entropy
-        update_metrics(2, 8, phase_start)
-        sub_status.text("🧠 Computing conditional entropy...")
-        activity.text(f"{next(spinner)} {next(activity_messages)}")
-        operation_detail.info("Measuring uncertainty in flow destinations")
-        conditional_entropy = calculator.calculate_conditional_entropy()
-        sub_progress_bar.progress(0.25)
-        operation_detail.empty()
-        
-        # Step 3: Structural information
-        update_metrics(3, 8, phase_start)
-        sub_status.text("📊 Analyzing structural information...")
-        activity.text(f"{next(spinner)} {next(activity_messages)}")
-        operation_detail.info("Computing network organization and constraint patterns")
-        structural_info = calculator.calculate_structural_information()
-        sub_progress_bar.progress(0.35)
-        operation_detail.empty()
-        
-        # Step 4: Redundancy
-        update_metrics(4, 8, phase_start)
-        sub_status.text("🔄 Measuring redundancy...")
-        activity.text(f"{next(spinner)} {next(activity_messages)}")
-        operation_detail.info("Evaluating backup pathways and system resilience")
-        redundancy = calculator.calculate_redundancy()
-        sub_progress_bar.progress(0.45)
-        operation_detail.empty()
-        
-        # Step 5: Regenerative capacity
-        update_metrics(5, 8, phase_start)
-        sub_status.text("🌱 Evaluating regenerative capacity...")
-        activity.text(f"{next(spinner)} {next(activity_messages)}")
-        operation_detail.info("Assessing system's ability to self-organize and adapt")
-        regen = calculator.calculate_regenerative_capacity()
-        sub_progress_bar.progress(0.55)
-        operation_detail.empty()
-        
-        # Step 6: Finn Cycling Index (SKIP for now - too computationally intensive)
-        update_metrics(6, 8, phase_start)
-        sub_status.text("🌀 Finn Cycling Index...")
-        activity.text("⏭️ SKIPPING")
-        
-        # For now, always skip FCI for datasets with >10 nodes to prevent blocking
-        n_nodes = len(calculator.node_names)
-        if n_nodes > 10:
-            operation_detail.info(f"ℹ️ **Finn Cycling Index skipped** - Dataset has {n_nodes} nodes. FCI calculation is disabled for networks >10 nodes to ensure smooth performance.")
-            finn_cycling = None
-            calculator._finn_cycling_index = None
-            time.sleep(0.5)
-        else:
-            # Only attempt for very small networks
-            operation_detail.info("📊 Computing FCI for small network...")
+
+    # Compute extended metrics
+    flow_diversity = calculator.calculate_flow_diversity()
+    conditional_entropy = calculator.calculate_conditional_entropy()
+    structural_info = calculator.calculate_structural_information()
+    redundancy = calculator.calculate_redundancy()
+    regen = calculator.calculate_regenerative_capacity()
+
+    # Skip Finn Cycling Index for performance (too computationally intensive for >10 nodes)
+    n_nodes = len(calculator.node_names)
+    if n_nodes <= 10:
+        try:
+            import signal
+            def timeout_handler(signum, frame):
+                raise TimeoutError("FCI calculation timed out")
+            signal.signal(signal.SIGALRM, timeout_handler)
+            signal.alarm(5)
             try:
-                import signal
-                
-                def timeout_handler(signum, frame):
-                    raise TimeoutError("FCI calculation timed out")
-                
-                # Set a 5-second timeout for small networks
-                signal.signal(signal.SIGALRM, timeout_handler)
-                signal.alarm(5)
-                
-                try:
-                    finn_cycling = calculator.calculate_finn_cycling_index()
-                    signal.alarm(0)  # Cancel the alarm
-                    calculator._finn_cycling_index = finn_cycling
-                    operation_detail.success(f"✅ FCI computed: {finn_cycling:.3f}")
-                except TimeoutError:
-                    finn_cycling = None
-                    calculator._finn_cycling_index = None
-                    operation_detail.info("ℹ️ FCI calculation timed out - marking as N/A")
-            except Exception:
-                # Fallback for systems where signal doesn't work (like Windows)
+                finn_cycling = calculator.calculate_finn_cycling_index()
+                signal.alarm(0)
+                calculator._finn_cycling_index = finn_cycling
+            except (TimeoutError, Exception):
                 finn_cycling = None
                 calculator._finn_cycling_index = None
-                operation_detail.info("ℹ️ FCI calculation not available on this system")
-        
-        sub_progress_bar.progress(0.75)
-        time.sleep(0.3)
-        operation_detail.empty()
-        
-        # Step 7: Network topology (also potentially slow)
-        update_metrics(7, 8, phase_start)
-        sub_status.text("🔗 Analyzing network topology...")
-        activity.text("🗺️ MAPPING")
-        
-        # Create topology progress container
-        topo_container = st.container()
-        with topo_container:
-            st.info("🌐 **Network Structure Analysis** - Computing graph theoretical properties")
-            topo_metrics = st.empty()
-        
-        topo_start = time.time()
-        
-        # Show what's being computed
-        topo_steps = [
-            "📏 Computing average path lengths...",
-            "🕸️ Measuring clustering coefficients...",
-            "🎯 Calculating node centrality...",
-            "🔀 Analyzing connectivity patterns..."
-        ]
-        
-        for step in topo_steps:
-            topo_metrics.text(f"{step} {next(spinner)}")
-            time.sleep(0.05)
-            
-        topology_metrics = calculator.calculate_network_topology_metrics()
-        topo_time = time.time() - topo_start
-        
-        topo_container.empty()
-        operation_detail.success(f"✅ Network topology analyzed in {topo_time:.1f}s")
-        sub_progress_bar.progress(0.9)
-        time.sleep(0.5)
-        operation_detail.empty()
-        
-        # Step 8: Final assembly
-        update_metrics(8, 8, phase_start)
-        sub_status.text("🎯 Assembling all extended metrics...")
-        activity.text("✅ FINALIZING")
-        operation_detail.info("Compiling all computed metrics into final results")
-        extended_metrics = calculator.get_extended_metrics()
-        sub_progress_bar.progress(1.0)
-        operation_detail.empty()
-        
-        # Show completion with summary
-        phase_time = time.time() - phase_start
-        st.success(f"✅ **Phase 7 Complete!** Processed 8 complex metrics in {phase_time:.1f} seconds")
-        time.sleep(1.0)
-        
-    # Clear the detailed progress
-    sub_container.empty()
-    
+        except Exception:
+            finn_cycling = None
+            calculator._finn_cycling_index = None
+    else:
+        finn_cycling = None
+        calculator._finn_cycling_index = None
+
+    # Network topology
+    topology_metrics = calculator.calculate_network_topology_metrics()
+
+    # Assemble extended metrics
+    extended_metrics = calculator.get_extended_metrics()
+
     progress_bar.progress(0.875)
+    phase_time = time.time() - phase_start
     elapsed = time.time() - start_time
-    status_text.text(f"⚡ Phase 7/8: Extended metrics complete ({phase_time:.1f}s phase, {elapsed:.1f}s total)")
+    status_text.text(f"⚡ Phase 7/8: Extended metrics complete ({elapsed:.1f}s total)")
     
     # Phase 8: Assessment
     status_text.text("🎯 Phase 8/8: Generating assessment...")
@@ -1738,32 +1746,43 @@ def run_full_analysis(flow_matrix, node_names, progress_bar, status_text, start_
     elapsed = time.time() - start_time
     status_text.text(f"🎯 Phase 8/8: Assessment complete ({elapsed:.1f}s total)")
     
-    # Completion with summary
+    # Completion
     total_time = time.time() - start_time
-    status_text.text(f"✅ Full analysis complete! Total computation time: {total_time:.1f}s")
-    st.success(f"✅ **Analysis completed!** Results cached for instant future access. Computation took {total_time:.1f} seconds.")
-    time.sleep(1.5)  # Show completion message longer
+    status_text.text(f"✅ Analysis complete ({total_time:.1f}s)")
     info_container.empty()
     
     return calculator, extended_metrics, assessments
 
 def run_optimized_analysis(flow_matrix, node_names, progress_bar, status_text, start_time, info_container):
-    """Optimized analysis with smart shortcuts for medium datasets (50-200 nodes)."""
+    """Optimized analysis with vectorized calculations for medium datasets (50-200 nodes)."""
     import time
-    
-    # Phase 1: Initialize
-    status_text.text("🔧 Phase 1/8: Initializing optimized framework...")
-    calculator = UlanowiczCalculator(flow_matrix, node_names)
+
+    # Phase 1: Initialize with vectorized mode enabled
+    status_text.text("🔧 Phase 1/8: Initializing optimized framework (vectorized)...")
+    calculator = UlanowiczCalculator(flow_matrix, node_names, use_vectorized=True)
     progress_bar.progress(0.125)
-    
-    # Phase 2-4: Core metrics (batched)
-    status_text.text("🌊 Phase 2-4/8: Computing core Ulanowicz metrics...")
-    basic_metrics = calculator.get_sustainability_metrics()
+
+    # Phase 2-4: Core metrics using vectorized batch computation
+    status_text.text("🌊 Phase 2-4/8: Computing core Ulanowicz metrics (vectorized)...")
+
+    # Try to use precomputed metrics from cache
+    if PRECOMPUTE_AVAILABLE:
+        cached_metrics, was_cached = get_cached_metrics(flow_matrix, node_names)
+        if was_cached:
+            status_text.text("⚡ Phase 2-4/8: Using cached vectorized metrics!")
+            basic_metrics = cached_metrics
+        else:
+            # Use batch vectorized computation
+            basic_metrics = calculator.get_all_vectorized_metrics()
+    else:
+        basic_metrics = calculator.get_sustainability_metrics()
+
     progress_bar.progress(0.5)
-    
-    # Phase 5-6: Network analysis (selective)
-    status_text.text("🔗 Phase 5-6/8: Selective network analysis...")
-    phase_start = time.time()  # Add missing phase_start definition
+
+    # Phase 5-6: Network analysis (selective) - use vectorized effective metrics
+    status_text.text("🔗 Phase 5-6/8: Computing extended metrics (vectorized)...")
+    phase_start = time.time()
+
     extended_metrics = {
         **basic_metrics,
         'flow_diversity': calculator.calculate_flow_diversity(),
@@ -1771,9 +1790,13 @@ def run_optimized_analysis(flow_matrix, node_names, progress_bar, status_text, s
         'robustness': calculator.calculate_robustness(),
         'network_efficiency': calculator.calculate_network_efficiency(),
         'regenerative_capacity': calculator.calculate_regenerative_capacity(),
+        'effective_flows': calculator.calculate_effective_flows(),
+        'effective_nodes': calculator.calculate_effective_nodes(),
+        'effective_connectivity': calculator.calculate_effective_connectivity(),
+        'number_of_roles': calculator.calculate_number_of_roles(),
         'num_edges': int(np.sum(flow_matrix > 0)),
-        # Skip expensive calculations
-        'finn_cycling_index': 0.0,
+        # Skip expensive O(n³+) calculations
+        'finn_cycling_index': None,  # Tier 3 - background compute
         'trophic_depth': 0.0,
         'effective_link_density': 0.0,
         'average_path_length': 0.0,
@@ -1782,89 +1805,109 @@ def run_optimized_analysis(flow_matrix, node_names, progress_bar, status_text, s
     progress_bar.progress(0.75)
     elapsed = time.time() - start_time
     phase_time = time.time() - phase_start
-    status_text.text(f"🔗 Phase 5-6/8: Selective analysis complete ({phase_time:.1f}s phase, {elapsed:.1f}s total)")
-    
+    status_text.text(f"🔗 Phase 5-6/8: Vectorized analysis complete ({phase_time:.1f}s phase, {elapsed:.1f}s total)")
+
     # Phase 7-8: Assessment
     status_text.text("⚡ Phase 7-8/8: Generating assessment...")
     assessments = calculator.assess_regenerative_health()
     progress_bar.progress(1.0)
-    
+
     total_time = time.time() - start_time
-    status_text.text(f"✅ Optimized analysis complete! ({total_time:.1f}s)")
-    time.sleep(0.8)
+    status_text.text(f"✅ Analysis complete ({total_time:.1f}s)")
     info_container.empty()
-    
+
     return calculator, extended_metrics, assessments
 
 def run_scalable_analysis(flow_matrix, node_names, progress_bar, status_text, start_time, info_container):
-    """Scalable analysis with efficient approximations for large datasets (200-1000 nodes)."""
+    """Scalable analysis with vectorized computation for large datasets (200-1000 nodes)."""
     import time
     import numpy as np
-    
-    # Phase 1: Initialize
-    status_text.text("🔧 Phase 1/4: Initializing scalable framework...")
-    calculator = UlanowiczCalculator(flow_matrix, node_names)
+
+    # Phase 1: Initialize with vectorized mode
+    status_text.text("🔧 Phase 1/4: Initializing scalable framework (vectorized)...")
+    calculator = UlanowiczCalculator(flow_matrix, node_names, use_vectorized=True)
     progress_bar.progress(0.25)
-    
-    # Phase 2: Core metrics only
-    status_text.text("🌊 Phase 2/4: Computing essential Ulanowicz metrics...")
-    basic_metrics = calculator.get_sustainability_metrics()
+
+    # Phase 2: Core metrics using vectorized batch computation
+    status_text.text("🌊 Phase 2/4: Computing essential Ulanowicz metrics (vectorized)...")
+
+    # Try to use precomputed metrics from cache
+    if PRECOMPUTE_AVAILABLE:
+        cached_metrics, was_cached = get_cached_metrics(flow_matrix, node_names)
+        if was_cached:
+            status_text.text("⚡ Phase 2/4: Using cached vectorized metrics!")
+            basic_metrics = cached_metrics
+        else:
+            # Use batch vectorized computation for all Tier 2 metrics
+            basic_metrics = calculator.get_all_vectorized_metrics()
+    else:
+        basic_metrics = calculator.get_sustainability_metrics()
+
     progress_bar.progress(0.5)
-    
-    # Phase 3: Minimal extended metrics
-    status_text.text("⚡ Phase 3/4: Computing scalable metrics...")
+
+    # Phase 3: Extended metrics (all vectorized, no O(n³+) operations)
+    status_text.text("⚡ Phase 3/4: Computing scalable metrics (vectorized)...")
     extended_metrics = {
         **basic_metrics,
         'robustness': calculator.calculate_robustness(),
         'network_efficiency': calculator.calculate_network_efficiency(),
+        'flow_diversity': calculator.calculate_flow_diversity(),
+        'effective_flows': calculator.calculate_effective_flows(),
+        'effective_nodes': calculator.calculate_effective_nodes(),
+        'effective_connectivity': calculator.calculate_effective_connectivity(),
+        'number_of_roles': calculator.calculate_number_of_roles(),
+        'regenerative_capacity': calculator.calculate_regenerative_capacity(),
         'num_edges': int(np.sum(flow_matrix > 0)),
-        # All other metrics set to 0 for performance
-        'flow_diversity': 0.0,
-        'conditional_entropy': 0.0,
-        'finn_cycling_index': 0.0,
+        # Tier 3 metrics skipped for large networks
+        'finn_cycling_index': None,
+        'conditional_entropy': calculator.calculate_conditional_entropy(),
         'trophic_depth': 0.0,
-        'regenerative_capacity': 0.0
     }
     progress_bar.progress(0.75)
-    
-    # Phase 4: Basic assessment
-    status_text.text("🎯 Phase 4/4: Basic assessment...")
+
+    # Start Tier 3 background computation if available
+    if PRECOMPUTE_AVAILABLE:
+        service = get_cached_precompute_service()
+        if service:
+            service.precompute_tier3_async(flow_matrix, node_names)
+
+    # Phase 4: Assessment
+    status_text.text("🎯 Phase 4/4: Generating assessment...")
     assessments = {
         'sustainability': calculator.assess_sustainability(),
-        'robustness': 'See core metrics',
-        'resilience': 'Limited for large datasets',
-        'efficiency': f"Network efficiency: {extended_metrics['network_efficiency']:.3f}",
-        'regenerative_potential': 'Requires smaller dataset for full analysis'
+        'robustness': f"Robustness: {extended_metrics['robustness']:.2f}",
+        'resilience': f"Reserve ratio: {extended_metrics.get('reserve_ratio', 0):.2f}",
+        'efficiency': f"Network efficiency: {extended_metrics['network_efficiency']:.2f}",
+        'regenerative_potential': f"Regenerative capacity: {extended_metrics['regenerative_capacity']:.2f}"
     }
     progress_bar.progress(1.0)
-    
+
     total_time = time.time() - start_time
-    status_text.text(f"✅ Scalable analysis complete! ({total_time:.1f}s)")
-    time.sleep(0.8)
+    status_text.text(f"✅ Analysis complete ({total_time:.1f}s)")
     info_container.empty()
-    
+
     return calculator, extended_metrics, assessments
 
 def run_massive_scale_analysis(flow_matrix, node_names, progress_bar, status_text, start_time, info_container):
-    """Massive scale analysis with minimal processing for datasets >1000 nodes."""
+    """Massive scale analysis with vectorized computation for datasets >1000 nodes."""
     import time
     import numpy as np
-    
-    # Phase 1: Initialize with progress updates
-    status_text.text("🌍 Phase 1/4: Initializing massive scale processing...")
+
+    # Phase 1: Initialize with vectorized mode (critical for massive scale)
+    status_text.text("Phase 1/4: Initializing...")
     calculator = UlanowiczCalculator(flow_matrix, node_names)
     progress_bar.progress(0.25)
-    
+
     # Phase 2: Essential metrics only
-    status_text.text("⚡ Phase 2/4: Computing essential metrics...")
+    status_text.text("Phase 2/4: Computing essential metrics...")
     tst = calculator.calculate_tst()
     ascendency = calculator.calculate_ascendency()
     capacity = calculator.calculate_development_capacity()
     efficiency = calculator.calculate_network_efficiency()
     progress_bar.progress(0.5)
-    
+
     # Phase 3: Minimal extended data
-    status_text.text("📊 Phase 3/4: Finalizing core data...")
+    status_text.text("Phase 3/4: Finalizing...")
     extended_metrics = {
         'total_system_throughput': tst,
         'ascendency': ascendency,
@@ -1874,34 +1917,32 @@ def run_massive_scale_analysis(flow_matrix, node_names, progress_bar, status_tex
         'robustness': -efficiency * np.log(efficiency) if efficiency > 0 else 0,
         'is_viable': 0.2 <= efficiency <= 0.6,
         'num_edges': int(np.sum(flow_matrix > 0)),
-        # All other metrics disabled for massive scale
         'reserve': capacity - ascendency
     }
     progress_bar.progress(0.75)
-    
+
     # Phase 4: Minimal assessment
-    status_text.text("🎯 Phase 4/4: Essential assessment...")
+    status_text.text("Phase 4/4: Assessment...")
     if efficiency < 0.2:
         sustainability = "UNSUSTAINABLE - Too chaotic"
     elif efficiency > 0.6:
         sustainability = "UNSUSTAINABLE - Too rigid"
     else:
         sustainability = "VIABLE - Within sustainable range"
-    
+
     assessments = {
         'sustainability': sustainability,
-        'robustness': f"Estimated: {extended_metrics['robustness']:.3f}",
+        'robustness': f"Estimated: {extended_metrics['robustness']:.2f}",
         'resilience': 'Massive scale - limited analysis',
-        'efficiency': f"Network efficiency: {efficiency:.3f}",
+        'efficiency': f"Network efficiency: {efficiency:.2f}",
         'regenerative_potential': 'Requires detailed analysis on smaller subset'
     }
     progress_bar.progress(1.0)
-    
+
     total_time = time.time() - start_time
-    status_text.text(f"✅ Massive scale analysis complete! ({total_time:.1f}s)")
-    time.sleep(0.8)
+    status_text.text(f"✅ Analysis complete ({total_time:.1f}s)")
     info_container.empty()
-    
+
     return calculator, extended_metrics, assessments
 
 def run_analysis(flow_matrix, node_names, org_name):
@@ -1923,12 +1964,12 @@ def display_metrics_overview(metrics, assessments):
     with col1:
         efficiency = metrics['network_efficiency']
         efficiency_color = "🟢" if 0.2 <= efficiency <= 0.6 else "🟡" if efficiency < 0.2 else "🔴"
-        st.metric("Network Efficiency", f"{efficiency:.3f}", f"{efficiency_color} {get_efficiency_status(efficiency)}")
+        st.metric("Network Efficiency", f"{efficiency:.2f}", f"{efficiency_color} {get_efficiency_status(efficiency)}")
     
     with col2:
         robustness = metrics['robustness']
         robustness_color = "🟢" if robustness > 0.25 else "🟡" if robustness > 0.15 else "🔴"
-        st.metric("Robustness", f"{robustness:.3f}", f"{robustness_color} {get_robustness_status(robustness)}")
+        st.metric("Robustness", f"{robustness:.2f}", f"{robustness_color} {get_robustness_status(robustness)}")
     
     with col3:
         viable = "YES" if metrics['is_viable'] else "NO"
@@ -1938,7 +1979,7 @@ def display_metrics_overview(metrics, assessments):
     with col4:
         regen_capacity = metrics['regenerative_capacity']
         regen_color = "🟢" if regen_capacity > 0.2 else "🟡" if regen_capacity > 0.1 else "🔴"
-        st.metric("Regenerative Capacity", f"{regen_capacity:.3f}", f"{regen_color}")
+        st.metric("Regenerative Capacity", f"{regen_capacity:.2f}", f"{regen_color}")
     
     # Overall assessment
     st.subheader("🎯 Overall System Health")
@@ -2126,9 +2167,48 @@ def display_visualizations_enhanced(G, flow_matrix, node_names, metrics, org_nam
     
     # Note: Flow Statistics have been moved to Core Metrics Level 1
 
+def ensure_complete_metrics(metrics):
+    """Ensure all required metrics are present with safe defaults."""
+    # Get base values
+    capacity = metrics.get('development_capacity', 1)
+    alpha = metrics.get('relative_ascendency', 0)
+
+    # Calculate viability window position (how far into the viable range)
+    viability_pos = (alpha - 0.2) / 0.4 if 0.2 <= alpha <= 0.6 else (0 if alpha < 0.2 else 1)
+
+    # Add missing derived metrics
+    defaults = {
+        'viability_lower_bound': 0.2 * capacity,
+        'viability_upper_bound': 0.6 * capacity,
+        'is_viable': 0.2 <= alpha <= 0.6,
+        'viability_window_position': viability_pos,
+        'num_edges': 0,
+        'network_density': 0,
+        'connectance': 0,
+        'average_path_length': 0,
+        'clustering_coefficient': 0,
+        'degree_centralization': 0,
+        'link_density': 0,
+        'conditional_entropy': 0,
+        'redundancy': 0,
+        'regenerative_capacity': 0,
+        'trophic_depth': 0,
+        'finn_cycling_index': None,
+    }
+
+    for key, default in defaults.items():
+        if key not in metrics:
+            metrics[key] = default
+
+    return metrics
+
+
 def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, node_names):
     """Display metrics following Ulanowicz computation flow: Data → Network → TST → A,Φ → C → α → R."""
-    
+
+    # Ensure all metrics have safe defaults
+    metrics = ensure_complete_metrics(metrics)
+
     # Core Metrics header at the top
     st.header("🎯 Core Metrics")
     
@@ -2147,17 +2227,17 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
         st.subheader("🎯 Key Performance Indicators")
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("Relative Ascendency", f"{metrics['relative_ascendency']:.3f}")
+            st.metric("Relative Ascendency", f"{metrics['relative_ascendency']:.2f}")
             st.caption("α = A/C [dimensionless]")
         with col2:
-            st.metric("Robustness", f"{metrics['robustness']:.3f}")
-            st.caption("R = -α·log(α) [bits]")
+            st.metric("Robustness", f"{metrics['robustness']:.2f}")
+            st.caption("R = -α·log(α) [nats]")
         with col3:
             viable = "✅ YES" if metrics['is_viable'] else "❌ NO"
             st.metric("Viable System", viable)
             st.caption("α ∈ [0.2, 0.6]")
         with col4:
-            st.metric("Network Efficiency", f"{metrics['network_efficiency']:.3f}")
+            st.metric("Network Efficiency", f"{metrics['network_efficiency']:.2f}")
             st.caption("η = Eeff/Emax [0-1]")
     
     with tab3:
@@ -2204,19 +2284,19 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
                 st.metric("Edges", metrics.get('num_edges', 0))
                 st.caption("L [count]")
             with col2:
-                st.metric("Network Density", f"{metrics.get('network_density', 0):.3f}")
+                st.metric("Network Density", f"{metrics.get('network_density', 0):.2f}")
                 st.caption("ρ = L/N² [0-1]")
-                st.metric("Connectance", f"{metrics.get('connectance', 0):.3f}")
+                st.metric("Connectance", f"{metrics.get('connectance', 0):.2f}")
                 st.caption("C = L/(N*(N-1)) [0-1]")
             with col3:
                 st.metric("Avg Path Length", f"{metrics.get('average_path_length', 0):.2f}")
                 st.caption("⟨l⟩ [steps]")
-                st.metric("Clustering Coeff.", f"{metrics.get('clustering_coefficient', 0):.3f}")
+                st.metric("Clustering Coeff.", f"{metrics.get('clustering_coefficient', 0):.2f}")
                 st.caption("CC [0-1]")
             with col4:
-                st.metric("Centralization", f"{metrics.get('degree_centralization', 0):.3f}")
+                st.metric("Centralization", f"{metrics.get('degree_centralization', 0):.2f}")
                 st.caption("C_deg [0-1]")
-                st.metric("Link Density", f"{metrics.get('link_density', 0):.3f}")
+                st.metric("Link Density", f"{metrics.get('link_density', 0):.2f}")
                 st.caption("LD = L/N [links/node]")
         
         # Ulanowicz Core Metrics (computation flow)
@@ -2233,16 +2313,16 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
             st.markdown("#### Step 2: Information Metrics")
             col1, col2, col3, col4 = st.columns(4)
             with col1:
-                st.metric("AMI", f"{metrics['average_mutual_information']:.3f}")
-                st.caption("I = Organized info [bits]")
+                st.metric("AMI", f"{metrics['average_mutual_information']:.2f}")
+                st.caption("I = Organized info [nats]")
             with col2:
-                st.metric("Flow Diversity", f"{metrics['flow_diversity']:.3f}")
-                st.caption("H = Total info [bits]")
+                st.metric("Flow Diversity", f"{metrics['flow_diversity']:.2f}")
+                st.caption("H = Total info [nats]")
             with col3:
-                st.metric("Conditional Entropy", f"{metrics.get('conditional_entropy', 0):.3f}")
-                st.caption("Hc = H - I [bits]")
+                st.metric("Conditional Entropy", f"{metrics.get('conditional_entropy', 0):.2f}")
+                st.caption("Hc = H - I [nats]")
             with col4:
-                st.metric("Redundancy", f"{metrics.get('redundancy', 0):.3f}")
+                st.metric("Redundancy", f"{metrics.get('redundancy', 0):.2f}")
                 st.caption("Φ/C [dimensionless]")
             
             # Step 3: Ascendency and Capacity
@@ -2250,13 +2330,13 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
             col1, col2, col3, col4 = st.columns(4)
             with col1:
                 st.metric("Ascendency", f"{metrics['ascendency']:.1f}")
-                st.caption("A = TST * I [flow·bits]")
+                st.caption("A = TST * I [flow·nats]")
             with col2:
                 st.metric("Overhead", f"{metrics['overhead']:.1f}")
-                st.caption("Φ = TST * Hc [flow·bits]")
+                st.caption("Φ = TST * Hc [flow·nats]")
             with col3:
                 st.metric("Capacity", f"{metrics['development_capacity']:.1f}")
-                st.caption("C = TST * H [flow·bits]")
+                st.caption("C = TST * H [flow·nats]")
             with col4:
                 st.metric("Realized Capacity", f"{metrics.get('realized_capacity', metrics['ascendency']/metrics['development_capacity']*100):.1f}%")
                 st.caption("A/C * 100 [%]")
@@ -2265,19 +2345,19 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
             st.markdown("#### Step 4: Relative Metrics & Robustness")
             col1, col2, col3, col4 = st.columns(4)
             with col1:
-                st.metric("Rel. Ascendency", f"{metrics['relative_ascendency']:.3f}")
+                st.metric("Rel. Ascendency", f"{metrics['relative_ascendency']:.2f}")
                 st.caption("α = A/C [0-1]")
             with col2:
-                st.metric("Rel. Overhead", f"{metrics['overhead_ratio']:.3f}")
+                st.metric("Rel. Overhead", f"{metrics['overhead_ratio']:.2f}")
                 st.caption("Φ/C [0-1]")
             with col3:
-                st.metric("Robustness", f"{metrics['robustness']:.3f}")
-                st.caption("R = -α·log(α) [bits]")
+                st.metric("Robustness", f"{metrics['robustness']:.2f}")
+                st.caption("R = -α·log(α) [nats]")
             with col4:
                 # Calculate distance from optima
                 alpha = metrics['relative_ascendency']
                 dist_empirical = abs(alpha - 0.37)
-                st.metric("Distance from Optimum", f"{dist_empirical:.3f}")
+                st.metric("Distance from Optimum", f"{dist_empirical:.2f}")
                 st.caption("|α - 0.37| [dimensionless]")
     
         # Regenerative Economics (10 Principles)
@@ -2306,46 +2386,48 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
         st.metric("4. Material Basis", f"{np.sum(flow_matrix):.0f}")
         st.caption("ΣTij [flow units]")
     with col5:
-        st.metric("5. Mutuality", f"{metrics.get('clustering_coefficient', 0):.3f}")
+        st.metric("5. Mutuality", f"{metrics.get('clustering_coefficient', 0):.2f}")
         st.caption("CC [0-1]")
     
     # Principles 6-10: Process
     st.markdown("#### Process Principles")
     col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
-        st.metric("6. Diversity", f"{metrics['flow_diversity']:.3f}")
-        st.caption("H [bits]")
+        st.metric("6. Diversity", f"{metrics['flow_diversity']:.2f}")
+        st.caption("H [nats]")
     with col2:
         fci = metrics.get('finn_cycling_index')
         if fci is None:
             st.metric("7. Circulation", "N/A")
             st.caption("FCI (skipped)")
         elif fci > 0:
-            st.metric("7. Circulation", f"{fci:.3f}")
+            st.metric("7. Circulation", f"{fci:.2f}")
             st.caption("FCI [0-1]")
         else:
             st.metric("7. Circulation", "Low/None")
             st.caption("FCI ~ 0 (no cycles detected)")
     with col3:
-        st.metric("8. Reserve Cap.", f"{metrics['overhead_ratio']:.3f}")
+        st.metric("8. Reserve Cap.", f"{metrics['overhead_ratio']:.2f}")
         st.caption("Φ/C [0-1]")
     with col4:
-        st.metric("9. Efficiency", f"{metrics['network_efficiency']:.3f}")
+        st.metric("9. Efficiency", f"{metrics['network_efficiency']:.2f}")
         st.caption("η [0-1]")
     with col5:
-        st.metric("10. Balance", f"{metrics['robustness']:.3f}")
-        st.caption("R [bits]")
+        st.metric("10. Balance", f"{metrics['robustness']:.2f}")
+        st.caption("R [nats]")
     
     # Sustainability Assessment
     st.markdown("---")
     st.subheader("🎯 Sustainability Assessment")
     st.markdown("*Window of Viability and system health evaluation*")
-    
-    # Viability status
-    ascendency = metrics['ascendency']
-    lower = metrics['viability_lower_bound']
-    upper = metrics['viability_upper_bound']
-    alpha = metrics['relative_ascendency']
+
+    # Viability status - with safe fallbacks for cached metrics
+    ascendency = metrics.get('ascendency', 0)
+    capacity = metrics.get('development_capacity', 1)
+    # Compute viability bounds if not present (0.2C to 0.6C per Ulanowicz)
+    lower = metrics.get('viability_lower_bound', 0.2 * capacity)
+    upper = metrics.get('viability_upper_bound', 0.6 * capacity)
+    alpha = metrics.get('relative_ascendency', 0)
     
     # Visual representation of window of viability
     col1, col2, col3 = st.columns([1, 2, 1])
@@ -2369,19 +2451,19 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
     col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
         st.metric("Lower Bound", f"{lower:.1f}")
-        st.caption("A_min = 0.2C [flow·bits]")
+        st.caption("A_min = 0.2C [flow·nats]")
     with col2:
         st.metric("Current Ascendency", f"{ascendency:.1f}")
         pos_pct = (ascendency - lower) / (upper - lower) * 100 if upper > lower else 50
-        st.caption(f"A [flow·bits] ({pos_pct:.0f}%)")
+        st.caption(f"A [flow·nats] ({pos_pct:.0f}%)")
     with col3:
         st.metric("Optimal Zone", "0.35-0.40")
         st.caption("α_opt [dimensionless]")
     with col4:
         st.metric("Upper Bound", f"{upper:.1f}")
-        st.caption("A_max = 0.6C [flow·bits]")
+        st.caption("A_max = 0.6C [flow·nats]")
     with col5:
-        st.metric("Current α", f"{alpha:.3f}")
+        st.metric("Current α", f"{alpha:.2f}")
         if 0.35 <= alpha <= 0.40:
             st.caption("α = A/C ✅ Optimal")
         elif 0.2 <= alpha <= 0.6:
@@ -2398,16 +2480,16 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
     st.markdown("#### Flow-based Metrics")
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric("Structural Info", f"{metrics.get('structural_information', 0):.3f}")
-        st.caption("SI [bits]")
+        st.metric("Structural Info", f"{metrics.get('structural_information', 0):.2f}")
+        st.caption("SI [nats]")
     with col2:
-        st.metric("Effective Links", f"{metrics.get('effective_link_density', 0):.3f}")
+        st.metric("Effective Links", f"{metrics.get('effective_link_density', 0):.2f}")
         st.caption("ELD [links/node]")
     with col3:
-        st.metric("Trophic Depth", f"{metrics.get('trophic_depth', 0):.3f}")
+        st.metric("Trophic Depth", f"{metrics.get('trophic_depth', 0):.2f}")
         st.caption("TD [levels]")
     with col4:
-        st.metric("Regen. Capacity", f"{metrics.get('regenerative_capacity', 0):.3f}")
+        st.metric("Regen. Capacity", f"{metrics.get('regenerative_capacity', 0):.2f}")
         st.caption("RC [0-1]")
     
     # Balance indicators
@@ -2415,7 +2497,7 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
     col1, col2, col3 = st.columns(3)
     with col1:
         ratio = metrics.get('ascendency_ratio', metrics.get('relative_ascendency', 0))
-        st.metric("Organization", f"{ratio:.3f}")
+        st.metric("Organization", f"{ratio:.2f}")
         if ratio < 0.2:
             st.caption("α = A/C [0-1] 🔴 Chaotic")
         elif ratio > 0.6:
@@ -2426,7 +2508,7 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
             st.caption("α = A/C [0-1] 🟡 Acceptable")
     with col2:
         overhead_ratio = metrics.get('overhead_ratio', 0)
-        st.metric("Flexibility", f"{overhead_ratio:.3f}")
+        st.metric("Flexibility", f"{overhead_ratio:.2f}")
         if overhead_ratio < 0.4:
             st.caption("Φ/C [0-1] 🟡 Low reserve")
         elif overhead_ratio > 0.65:
@@ -2489,12 +2571,12 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
     
     with col1:
         roles_per_node = metrics.get('roles_per_node', 0)
-        st.metric("Roles per Node", f"{roles_per_node:.3f}")
+        st.metric("Roles per Node", f"{roles_per_node:.2f}")
         st.caption("R/N [roles/node]")
         
     with col2:
         spec_index = metrics.get('specialization_index', 0)
-        st.metric("Specialization Index", f"{spec_index:.3f}")
+        st.metric("Specialization Index", f"{spec_index:.2f}")
         st.caption("R/N_actual [dimensionless]")
         
     with col3:
@@ -2511,7 +2593,7 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
         if verif_error < 0.01:
             st.metric("Math Check", "✅ Valid")
         else:
-            st.metric("Math Check", f"⚠️ {verif_error:.4f}")
+            st.metric("Math Check", f"⚠️ {verif_error:.2f}")
         st.caption("R = N²/F = F/C² check")
     
     # Assessment based on roles
@@ -2553,7 +2635,7 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
         a = metrics['ascendency']
         phi = metrics['overhead']
         error = abs(c - (a + phi))
-        st.metric("C = A + Φ Check", f"Error: {error:.4f}")
+        st.metric("C = A + Φ Check", f"Error: {error:.2f}")
         if error < 0.01:
             st.caption("✅ Valid")
         else:
@@ -2565,7 +2647,7 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
             expected_r = -alpha * np.log(alpha)
             actual_r = metrics['robustness']
             r_error = abs(expected_r - actual_r)
-            st.metric("R = -αlog(α) Check", f"Error: {r_error:.4f}")
+            st.metric("R = -αlog(α) Check", f"Error: {r_error:.2f}")
             if r_error < 0.01:
                 st.caption("✅ Valid")
             else:
@@ -2593,11 +2675,11 @@ def display_core_metrics_simplified(metrics):
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        st.metric("Relative Ascendency", f"{metrics['relative_ascendency']:.3f}")
+        st.metric("Relative Ascendency", f"{metrics['relative_ascendency']:.2f}")
         st.caption("Organization level (α)")
     
     with col2:
-        st.metric("Robustness", f"{metrics['robustness']:.3f}")
+        st.metric("Robustness", f"{metrics['robustness']:.2f}")
         st.caption("Resilience to shocks")
     
     with col3:
@@ -2606,7 +2688,7 @@ def display_core_metrics_simplified(metrics):
         st.caption("Within sustainability bounds")
     
     with col4:
-        st.metric("Network Efficiency", f"{metrics['network_efficiency']:.3f}")
+        st.metric("Network Efficiency", f"{metrics['network_efficiency']:.2f}")
         st.caption("Resource utilization")
     
     # Sustainability assessment
@@ -2650,13 +2732,13 @@ def display_core_metrics_simplified(metrics):
             color = "#f59e0b"
             status = "Acceptable"
         
-        st.metric("Organization Ratio (A/C)", f"{ratio:.3f}")
+        st.metric("Organization Ratio (A/C)", f"{ratio:.2f}")
         st.markdown(f"Status: <span style='color:{color}'>{status}</span>", unsafe_allow_html=True)
     
     with col2:
         # Overhead ratio
         overhead_ratio = metrics['overhead_ratio']
-        st.metric("Flexibility Ratio (Φ/C)", f"{overhead_ratio:.3f}")
+        st.metric("Flexibility Ratio (Φ/C)", f"{overhead_ratio:.2f}")
         if overhead_ratio < 0.4:
             st.markdown("Status: <span style='color:red'>Low Reserve</span>", unsafe_allow_html=True)
         elif overhead_ratio > 0.8:
@@ -2682,7 +2764,7 @@ def display_ulanowicz_indicators(metrics):
         st.metric("Total System Throughput (TST)", f"{metrics['total_system_throughput']:.1f}")
         st.caption("Total flow/activity in the network")
         
-        st.metric("Average Mutual Information (AMI)", f"{metrics['average_mutual_information']:.3f}")
+        st.metric("Average Mutual Information (AMI)", f"{metrics['average_mutual_information']:.2f}")
         st.caption("Degree of organization in flow patterns")
         
         st.metric("Ascendency (A)", f"{metrics['ascendency']:.1f}")
@@ -2695,7 +2777,7 @@ def display_ulanowicz_indicators(metrics):
         st.metric("Overhead/Reserve (Φ)", f"{metrics['overhead']:.1f}")
         st.caption("Unutilized capacity (C - A)")
         
-        st.metric("Flow Diversity (H)", f"{metrics['flow_diversity']:.3f}")
+        st.metric("Flow Diversity (H)", f"{metrics['flow_diversity']:.2f}")
         st.caption("Shannon entropy of flows")
     
     # Fundamental relationship
@@ -2716,9 +2798,9 @@ def display_ulanowicz_indicators(metrics):
         st.metric("A + Φ", f"{calculated:.1f}")
     with col3:
         if error < 0.01:
-            st.success(f"✅ Error: {error:.4f}")
+            st.success(f"✅ Error: {error:.2f}")
         else:
-            st.warning(f"⚠️ Error: {error:.4f}")
+            st.warning(f"⚠️ Error: {error:.2f}")
     
     st.caption("Fundamental IT relationship: C = A + Φ (Capacity = Ascendency + Overhead)")
     
@@ -2728,12 +2810,12 @@ def display_ulanowicz_indicators(metrics):
     
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.metric("Ascendency Ratio (α = A/C)", f"{metrics['ascendency_ratio']:.3f}")
+        st.metric("Ascendency Ratio (α = A/C)", f"{metrics['ascendency_ratio']:.2f}")
         st.progress(metrics['ascendency_ratio'])
         st.caption("Degree of organization")
     
     with col2:
-        st.metric("Overhead Ratio (Φ/C)", f"{metrics['overhead_ratio']:.3f}")
+        st.metric("Overhead Ratio (Φ/C)", f"{metrics['overhead_ratio']:.2f}")
         st.progress(metrics['overhead_ratio'])
         st.caption("Reserve capacity")
     
@@ -2783,17 +2865,17 @@ def display_regenerative_metrics(metrics, assessments):
     
     with col1:
         st.markdown("### Flow & Structure")
-        st.metric("Flow Diversity (H)", f"{metrics['flow_diversity']:.3f}")
-        st.metric("Structural Information (SI)", f"{metrics['structural_information']:.3f}")
-        st.metric("Effective Link Density", f"{metrics.get('effective_link_density', 0):.3f}")
-        st.metric("Trophic Depth", f"{metrics.get('trophic_depth', 0):.3f}")
+        st.metric("Flow Diversity (H)", f"{metrics['flow_diversity']:.2f}")
+        st.metric("Structural Information (SI)", f"{metrics['structural_information']:.2f}")
+        st.metric("Effective Link Density", f"{metrics.get('effective_link_density', 0):.2f}")
+        st.metric("Trophic Depth", f"{metrics.get('trophic_depth', 0):.2f}")
     
     with col2:
         st.markdown("### System Dynamics")  
-        st.metric("Robustness (R)", f"{metrics['robustness']:.3f}")
-        st.metric("Redundancy", f"{metrics.get('redundancy', 0):.3f}")
-        st.metric("Network Efficiency", f"{metrics['network_efficiency']:.3f}")
-        st.metric("Regenerative Capacity", f"{metrics['regenerative_capacity']:.3f}")
+        st.metric("Robustness (R)", f"{metrics['robustness']:.2f}")
+        st.metric("Redundancy", f"{metrics.get('redundancy', 0):.2f}")
+        st.metric("Network Efficiency", f"{metrics['network_efficiency']:.2f}")
+        st.metric("Regenerative Capacity", f"{metrics['regenerative_capacity']:.2f}")
     
     # Health assessments
     st.subheader("🏥 Health Assessment Breakdown")
@@ -3084,7 +3166,7 @@ def create_robustness_curve(metrics):
     # Current organization position (actual calculated robustness)
     fig.add_trace(go.Scatter(x=[current_efficiency], y=[current_robustness], mode='markers',
                             marker=dict(size=15, color='red'), name='Your Organization',
-                            hovertemplate='Your Position<br>Efficiency: %{x:.3f}<br>Robustness: %{y:.3f}<extra></extra>'))
+                            hovertemplate='Your Position<br>Efficiency: %{x:.2f}<br>Robustness: %{y:.2f}<extra></extra>'))
     
     # Empirical optimum (where real ecosystems cluster)
     empirical_optimal_efficiency = 0.37  # Empirical optimum from ecological data
@@ -3094,7 +3176,7 @@ def create_robustness_curve(metrics):
         empirical_optimal_robustness = 0
     fig.add_trace(go.Scatter(x=[empirical_optimal_efficiency], y=[empirical_optimal_robustness], mode='markers',
                             marker=dict(size=12, color='green', symbol='star'), name='Empirical Optimum',
-                            hovertemplate='Empirical Optimum<br>Efficiency: %{x:.3f}<br>Where ecosystems cluster: %{y:.3f}<extra></extra>'))
+                            hovertemplate='Empirical Optimum<br>Efficiency: %{x:.2f}<br>Where ecosystems cluster: %{y:.2f}<extra></extra>'))
     
     # Geometric center of window of vitality (Ulanowicz reference)
     geometric_center_efficiency = 0.4596  # Geometric center from Ulanowicz
@@ -3104,7 +3186,7 @@ def create_robustness_curve(metrics):
         geometric_center_robustness = 0
     fig.add_trace(go.Scatter(x=[geometric_center_efficiency], y=[geometric_center_robustness], mode='markers',
                             marker=dict(size=10, color='blue', symbol='diamond'), name='Geometric Center',
-                            hovertemplate='Geometric Center<br>Efficiency: %{x:.3f}<br>Window center: %{y:.3f}<extra></extra>'))
+                            hovertemplate='Geometric Center<br>Efficiency: %{x:.2f}<br>Window center: %{y:.2f}<extra></extra>'))
     
     # Add viability bounds
     fig.add_vrect(x0=0.2, x1=0.6, fillcolor="green", opacity=0.1, 
@@ -3113,7 +3195,7 @@ def create_robustness_curve(metrics):
     # Add annotations
     fig.add_annotation(
         x=current_efficiency, y=current_robustness,
-        text=f"Your Org<br>α={current_efficiency:.3f}",
+        text=f"Your Org<br>α={current_efficiency:.2f}",
         showarrow=True, arrowhead=2, arrowsize=1, arrowwidth=2, arrowcolor="red",
         xshift=20, yshift=20
     )
@@ -3240,12 +3322,12 @@ def display_network_analysis(calculator, metrics, flow_matrix, node_names):
         st.metric("Edges", network_metrics['basic']['num_edges'])
         st.caption("L [count]")
     with col2:
-        st.metric("Density", f"{network_metrics['basic']['density']:.3f}")
+        st.metric("Density", f"{network_metrics['basic']['density']:.2f}")
         st.caption("ρ = L/(N*(N-1)) [0-1]")
         st.metric("Components", network_metrics['basic']['num_components'])
         st.caption("Weakly connected")
     with col3:
-        st.metric("Clustering", f"{network_metrics['small_world']['clustering_coefficient']:.3f}")
+        st.metric("Clustering", f"{network_metrics['small_world']['clustering_coefficient']:.2f}")
         st.caption("CC [0-1]")
         st.metric("Path Length", f"{network_metrics['small_world']['average_path_length']:.2f}")
         st.caption("⟨l⟩ [steps]")
@@ -3273,19 +3355,19 @@ def display_network_analysis(calculator, metrics, flow_matrix, node_names):
         st.markdown("#### Degree Centrality")
         st.caption("Most connected nodes")
         for node_id, score in get_top_nodes(centralities['total_degree'], 3):
-            st.write(f"• {node_names[node_id]}: {score:.3f}")
+            st.write(f"• {node_names[node_id]}: {score:.2f}")
     
     with col2:
         st.markdown("#### Betweenness Centrality")
         st.caption("Bridge nodes (bottlenecks)")
         for node_id, score in get_top_nodes(centralities['betweenness'], 3):
-            st.write(f"• {node_names[node_id]}: {score:.3f}")
+            st.write(f"• {node_names[node_id]}: {score:.2f}")
     
     with col3:
         st.markdown("#### PageRank")
         st.caption("Most influential nodes")
         for node_id, score in get_top_nodes(centralities['pagerank'], 3):
-            st.write(f"• {node_names[node_id]}: {score:.3f}")
+            st.write(f"• {node_names[node_id]}: {score:.2f}")
     
     # Community Structure
     st.markdown("---")
@@ -3303,17 +3385,17 @@ def display_network_analysis(calculator, metrics, flow_matrix, node_names):
         st.metric("Communities", louvain.get('num_communities', 0))
         st.caption("Louvain algorithm")
     with col2:
-        st.metric("Modularity", f"{louvain.get('modularity', 0):.3f}")
+        st.metric("Modularity", f"{louvain.get('modularity', 0):.2f}")
         st.caption("Q ∈ [-0.5, 1]")
     with col3:
         # Assortativity
         assort = network_metrics['assortativity']
-        st.metric("Degree Assortativity", f"{assort['degree_assortativity']:.3f}")
+        st.metric("Degree Assortativity", f"{assort['degree_assortativity']:.2f}")
         st.caption("r ∈ [-1, 1]")
     with col4:
         # Rich club
         rc = network_metrics['rich_club']
-        st.metric("Rich Club", f"{rc['rich_club_coefficient']:.3f}")
+        st.metric("Rich Club", f"{rc['rich_club_coefficient']:.2f}")
         st.caption(f"k = {rc['threshold_k']}")
     
     # Display community membership if available
@@ -3346,13 +3428,13 @@ def display_network_analysis(calculator, metrics, flow_matrix, node_names):
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        st.metric("Random Failure", f"{robustness['random_failure_robustness']:.3f}")
+        st.metric("Random Failure", f"{robustness['random_failure_robustness']:.2f}")
         st.caption("Robustness [0-1]")
     with col2:
-        st.metric("Targeted Attack", f"{robustness['targeted_attack_robustness']:.3f}")
+        st.metric("Targeted Attack", f"{robustness['targeted_attack_robustness']:.2f}")
         st.caption("Hub removal [0-1]")
     with col3:
-        st.metric("Percolation", f"{robustness['percolation_threshold']:.3f}")
+        st.metric("Percolation", f"{robustness['percolation_threshold']:.2f}")
         st.caption("Critical threshold")
     with col4:
         st.metric("Path Redundancy", f"{robustness['path_redundancy']:.2f}")
@@ -3382,16 +3464,16 @@ def display_network_analysis(calculator, metrics, flow_matrix, node_names):
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        st.metric("Flow Gini", f"{flow_metrics['flow_gini_coefficient']:.3f}")
+        st.metric("Flow Gini", f"{flow_metrics['flow_gini_coefficient']:.2f}")
         st.caption("Inequality [0-1]")
     with col2:
-        st.metric("Flow Heterogeneity", f"{flow_metrics['flow_heterogeneity']:.3f}")
+        st.metric("Flow Heterogeneity", f"{flow_metrics['flow_heterogeneity']:.2f}")
         st.caption("CV of flows")
     with col3:
-        st.metric("Throughput Eff.", f"{flow_metrics['throughput_efficiency']:.3f}")
+        st.metric("Throughput Eff.", f"{flow_metrics['throughput_efficiency']:.2f}")
         st.caption("Actual/Max [0-1]")
     with col4:
-        st.metric("Reciprocity", f"{flow_metrics['flow_reciprocity']:.3f}")
+        st.metric("Reciprocity", f"{flow_metrics['flow_reciprocity']:.2f}")
         st.caption("Bidirectional [0-1]")
     
     # Node Rankings
@@ -3495,7 +3577,7 @@ def create_radar_chart(metrics):
         fillcolor='rgba(44, 160, 101, 0.3)',
         line=dict(color='rgb(44, 160, 101)', width=4),
         name='Current System',
-        hovertemplate='%{theta}: %{r:.3f}<extra></extra>',
+        hovertemplate='%{theta}: %{r:.2f}<extra></extra>',
         marker=dict(size=10)
     ))
     
@@ -3507,7 +3589,7 @@ def create_radar_chart(metrics):
         fillcolor='rgba(93, 164, 214, 0.15)',
         line=dict(color='rgb(93, 164, 214)', width=3, dash='dash'),
         name='Optimal Range',
-        hovertemplate='%{theta}: %{r:.3f}<extra></extra>',
+        hovertemplate='%{theta}: %{r:.2f}<extra></extra>',
         marker=dict(size=8)
     ))
     
@@ -3578,7 +3660,7 @@ def display_visual_summary_cards(metrics, assessments):
         <div style="background: linear-gradient(135deg, #{color_hex}22 0%, transparent 100%); 
                     padding: 20px; border-radius: 10px; border-left: 4px solid #{color_hex};">
             <h4 style="margin: 0; color: #{color_hex};">{icon} Efficiency</h4>
-            <h2 style="margin: 10px 0;">{efficiency:.3f}</h2>
+            <h2 style="margin: 10px 0;">{efficiency:.2f}</h2>
             <p style="margin: 0; opacity: 0.8; font-size: 12px;">Optimal: 0.3-0.5</p>
         </div>
         """, unsafe_allow_html=True)
@@ -3591,7 +3673,7 @@ def display_visual_summary_cards(metrics, assessments):
         <div style="background: linear-gradient(135deg, #{color_hex}22 0%, transparent 100%); 
                     padding: 20px; border-radius: 10px; border-left: 4px solid #{color_hex};">
             <h4 style="margin: 0; color: #{color_hex};">{icon} Robustness</h4>
-            <h2 style="margin: 10px 0;">{robustness:.3f}</h2>
+            <h2 style="margin: 10px 0;">{robustness:.2f}</h2>
             <p style="margin: 0; opacity: 0.8; font-size: 12px;">Minimum: 0.25</p>
         </div>
         """, unsafe_allow_html=True)
@@ -3798,16 +3880,16 @@ def display_oasis_health(calculator, metrics, flow_matrix, node_names, org_name)
 
             metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
             with metric_col1:
-                st.metric("Connectance", f"{open_metrics.get('connectance', 0):.3f}")
+                st.metric("Connectance", f"{open_metrics.get('connectance', 0):.2f}")
                 st.caption("Network connectivity [0-1]")
             with metric_col2:
-                st.metric("Flow Diversity", f"{open_metrics.get('flow_diversity', 0):.3f}")
-                st.caption("H [bits]")
+                st.metric("Flow Diversity", f"{open_metrics.get('flow_diversity', 0):.2f}")
+                st.caption("H [nats]")
             with metric_col3:
-                st.metric("Clustering", f"{open_metrics.get('clustering_coefficient', 0):.3f}")
+                st.metric("Clustering", f"{open_metrics.get('clustering_coefficient', 0):.2f}")
                 st.caption("Local connectivity [0-1]")
             with metric_col4:
-                st.metric("Betweenness", f"{open_metrics.get('avg_betweenness', 0):.3f}")
+                st.metric("Betweenness", f"{open_metrics.get('avg_betweenness', 0):.2f}")
                 st.caption("Bridge/broker role [0-1]")
 
             st.markdown("#### Fath et al. Principles")
@@ -3835,16 +3917,16 @@ def display_oasis_health(calculator, metrics, flow_matrix, node_names, org_name)
                 if fci is None:
                     st.metric("Finn Cycling Index", "N/A")
                 else:
-                    st.metric("Finn Cycling Index", f"{fci:.3f}")
+                    st.metric("Finn Cycling Index", f"{fci:.2f}")
                 st.caption("Resource cycling [0-1]")
             with metric_col2:
-                st.metric("Reciprocity", f"{auto_metrics.get('flow_reciprocity', 0):.3f}")
+                st.metric("Reciprocity", f"{auto_metrics.get('flow_reciprocity', 0):.2f}")
                 st.caption("Bidirectional flows [0-1]")
             with metric_col3:
-                st.metric("AMI", f"{auto_metrics.get('ami', 0):.3f}")
-                st.caption("Information organization [bits]")
+                st.metric("AMI", f"{auto_metrics.get('ami', 0):.2f}")
+                st.caption("Information organization [nats]")
             with metric_col4:
-                st.metric("Autocatalytic", f"{auto_metrics.get('autocatalytic_index', 0):.3f}")
+                st.metric("Autocatalytic", f"{auto_metrics.get('autocatalytic_index', 0):.2f}")
                 st.caption("Self-reinforcing cycles [0-1]")
 
             st.markdown("#### Fath et al. Principles")
@@ -3867,16 +3949,16 @@ def display_oasis_health(calculator, metrics, flow_matrix, node_names, org_name)
 
             metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
             with metric_col1:
-                st.metric("Flow Equality", f"{symb_metrics.get('equality', 0):.3f}")
+                st.metric("Flow Equality", f"{symb_metrics.get('equality', 0):.2f}")
                 st.caption("1 - Gini [0-1]")
             with metric_col2:
-                st.metric("Modularity", f"{symb_metrics.get('modularity', 0):.3f}")
+                st.metric("Modularity", f"{symb_metrics.get('modularity', 0):.2f}")
                 st.caption("Community structure [0-1]")
             with metric_col3:
                 st.metric("Node Utilization", f"{symb_metrics.get('node_utilization', 0):.2%}")
                 st.caption("Effective/Actual nodes")
             with metric_col4:
-                st.metric("Mutualism", f"{symb_metrics.get('mutualism_ratio', 0):.3f}")
+                st.metric("Mutualism", f"{symb_metrics.get('mutualism_ratio', 0):.2f}")
                 st.caption("Reciprocal relationships [0-1]")
 
             st.markdown("#### Fath et al. Principles")
@@ -3902,14 +3984,14 @@ def display_oasis_health(calculator, metrics, flow_matrix, node_names, org_name)
                 st.metric("Number of Roles", f"{intel_metrics.get('number_of_roles', 0):.2f}")
                 st.caption("Functional differentiation")
             with metric_col2:
-                st.metric("Functional Diversity", f"{intel_metrics.get('functional_diversity', 0):.3f}")
-                st.caption("log(R) [bits]")
+                st.metric("Functional Diversity", f"{intel_metrics.get('functional_diversity', 0):.2f}")
+                st.caption("log(R) [nats]")
             with metric_col3:
-                st.metric("Roles per Node", f"{intel_metrics.get('roles_per_node', 0):.3f}")
+                st.metric("Roles per Node", f"{intel_metrics.get('roles_per_node', 0):.2f}")
                 st.caption("Specialization spread")
             with metric_col4:
-                st.metric("Cond. Entropy", f"{intel_metrics.get('conditional_entropy', 0):.3f}")
-                st.caption("System flexibility [bits]")
+                st.metric("Cond. Entropy", f"{intel_metrics.get('conditional_entropy', 0):.2f}")
+                st.caption("System flexibility [nats]")
 
             st.markdown("#### Fath et al. Principles")
             st.info("**P7: Sufficient Diversity** - Enough variety of functional roles")
@@ -3938,10 +4020,10 @@ def display_oasis_health(calculator, metrics, flow_matrix, node_names, org_name)
             metric_col1, metric_col2, metric_col3 = st.columns(3)
             with metric_col1:
                 alpha = sust_metrics.get('relative_ascendency', 0)
-                st.metric("Relative Ascendency (α)", f"{alpha:.3f}")
+                st.metric("Relative Ascendency (α)", f"{alpha:.2f}")
                 st.caption("Optimal: 0.37")
             with metric_col2:
-                st.metric("Robustness (R)", f"{sust_metrics.get('robustness', 0):.3f}")
+                st.metric("Robustness (R)", f"{sust_metrics.get('robustness', 0):.2f}")
                 st.caption("Max: 0.368")
             with metric_col3:
                 is_viable = sust_metrics.get('is_viable', False)
@@ -3951,13 +4033,13 @@ def display_oasis_health(calculator, metrics, flow_matrix, node_names, org_name)
 
             metric_col4, metric_col5, metric_col6 = st.columns(3)
             with metric_col4:
-                st.metric("Regenerative Cap.", f"{sust_metrics.get('regenerative_capacity', 0):.3f}")
+                st.metric("Regenerative Cap.", f"{sust_metrics.get('regenerative_capacity', 0):.2f}")
                 st.caption("Self-renewal ability")
             with metric_col5:
-                st.metric("α Optimality", f"{sust_metrics.get('alpha_optimality', 0):.3f}")
+                st.metric("α Optimality", f"{sust_metrics.get('alpha_optimality', 0):.2f}")
                 st.caption("Distance from 0.37")
             with metric_col6:
-                st.metric("Fitness", f"{sust_metrics.get('fitness_for_evolution', 0):.3f}")
+                st.metric("Fitness", f"{sust_metrics.get('fitness_for_evolution', 0):.2f}")
                 st.caption("Evolutionary fitness")
 
         with col2:
@@ -4087,14 +4169,14 @@ def display_detailed_report(calculator, metrics, assessments, org_name):
                 st.metric(
                     "Viability Status", 
                     f"{status_color} {'Viable' if metrics['is_viable'] else 'Non-Viable'}",
-                    f"α = {metrics['ascendency_ratio']:.3f}"
+                    f"α = {metrics['ascendency_ratio']:.2f}"
                 )
             
             with col2:
                 rob_status = "High" if metrics['robustness'] > 0.2 else "Moderate" if metrics['robustness'] > 0.15 else "Low"
                 st.metric(
                     "Robustness", 
-                    f"{metrics['robustness']:.3f}",
+                    f"{metrics['robustness']:.2f}",
                     rob_status
                 )
             
@@ -4102,7 +4184,7 @@ def display_detailed_report(calculator, metrics, assessments, org_name):
                 eff_status = "Optimal" if 0.2 <= metrics['network_efficiency'] <= 0.6 else "Sub-optimal"
                 st.metric(
                     "Network Efficiency",
-                    f"{metrics['network_efficiency']:.3f}",
+                    f"{metrics['network_efficiency']:.2f}",
                     eff_status
                 )
             
@@ -4250,12 +4332,12 @@ def display_detailed_report(calculator, metrics, assessments, org_name):
 {'='*50}
 
 VIABILITY STATUS: {'✅ Viable' if metrics['is_viable'] else '⚠️ Non-Viable'}
-Relative Ascendency (α): {metrics['ascendency_ratio']:.3f}
+Relative Ascendency (α): {metrics['ascendency_ratio']:.2f}
 
 KEY METRICS:
-- Robustness: {metrics['robustness']:.3f} ({report_generator._categorize_robustness()})
-- Network Efficiency: {metrics['network_efficiency']:.3f} ({report_generator._categorize_efficiency()})
-- Regenerative Capacity: {metrics['regenerative_capacity']:.3f}
+- Robustness: {metrics['robustness']:.2f} ({report_generator._categorize_robustness()})
+- Network Efficiency: {metrics['network_efficiency']:.2f} ({report_generator._categorize_efficiency()})
+- Regenerative Capacity: {metrics['regenerative_capacity']:.2f}
 
 NETWORK STRUCTURE:
 - Nodes: {len(calculator.node_names)}
@@ -4265,7 +4347,7 @@ NETWORK STRUCTURE:
 KEY FINDINGS:
 • The organization operates {'within' if metrics['is_viable'] else 'outside'} the window of viability
 • System exhibits {report_generator._categorize_efficiency().lower()} efficiency and {report_generator._categorize_robustness().lower()} robustness
-• Network density: {np.count_nonzero(calculator.flow_matrix)/(len(calculator.node_names)**2):.3f}
+• Network density: {np.count_nonzero(calculator.flow_matrix)/(len(calculator.node_names)**2):.2f}
 
 PRIMARY RECOMMENDATION:
 {'Maintain current balance while monitoring for changes' if metrics['is_viable'] else 
@@ -4359,31 +4441,31 @@ Overall System Health: {'HEALTHY' if metrics['is_viable'] and metrics['robustnes
 
 CORE ULANOWICZ METRICS
 =====================
-Total System Throughput (TST): {metrics['total_system_throughput']:.3f}
-Average Mutual Information (AMI): {metrics['average_mutual_information']:.3f}
-Ascendency (A): {metrics['ascendency']:.3f}
-Development Capacity (C): {metrics['development_capacity']:.3f}
-Overhead (Φ): {metrics['overhead']:.3f}
+Total System Throughput (TST): {metrics['total_system_throughput']:.2f}
+Average Mutual Information (AMI): {metrics['average_mutual_information']:.2f}
+Ascendency (A): {metrics['ascendency']:.2f}
+Development Capacity (C): {metrics['development_capacity']:.2f}
+Overhead (Φ): {metrics['overhead']:.2f}
 
 EXTENDED REGENERATIVE METRICS
 ============================
-Flow Diversity (H): {metrics['flow_diversity']:.3f}
-Structural Information (SI): {metrics['structural_information']:.3f}
-Robustness (R): {metrics['robustness']:.3f}
-Network Efficiency: {metrics['network_efficiency']:.3f}
-Regenerative Capacity: {metrics['regenerative_capacity']:.3f}
+Flow Diversity (H): {metrics['flow_diversity']:.2f}
+Structural Information (SI): {metrics['structural_information']:.2f}
+Robustness (R): {metrics['robustness']:.2f}
+Network Efficiency: {metrics['network_efficiency']:.2f}
+Regenerative Capacity: {metrics['regenerative_capacity']:.2f}
 
 SYSTEM RATIOS
 =============
-Ascendency Ratio (A/C): {metrics['ascendency_ratio']:.3f}
-Overhead Ratio (Φ/C): {metrics['overhead_ratio']:.3f}
-Redundancy: {metrics['redundancy']:.3f}
+Ascendency Ratio (A/C): {metrics['ascendency_ratio']:.2f}
+Overhead Ratio (Φ/C): {metrics['overhead_ratio']:.2f}
+Redundancy: {metrics['redundancy']:.2f}
 
 WINDOW OF VIABILITY
 ==================
-Lower Bound: {metrics['viability_lower_bound']:.3f}
-Upper Bound: {metrics['viability_upper_bound']:.3f}
-Current Position: {metrics['ascendency']:.3f}
+Lower Bound: {metrics['viability_lower_bound']:.2f}
+Upper Bound: {metrics['viability_upper_bound']:.2f}
+Current Position: {metrics['ascendency']:.2f}
 Is Viable: {'YES' if metrics['is_viable'] else 'NO'}
 
 HEALTH ASSESSMENT
@@ -4398,9 +4480,9 @@ NETWORK PROPERTIES
 ==================
 Nodes: {calculator.n_nodes}
 Total Connections: {np.count_nonzero(calculator.flow_matrix)}
-Network Density: {np.count_nonzero(calculator.flow_matrix) / (calculator.n_nodes ** 2):.3f}
-Effective Link Density: {metrics.get('effective_link_density', 0):.3f}
-Trophic Depth: {metrics.get('trophic_depth', 0):.3f}
+Network Density: {np.count_nonzero(calculator.flow_matrix) / (calculator.n_nodes ** 2):.2f}
+Effective Link Density: {metrics.get('effective_link_density', 0):.2f}
+Trophic Depth: {metrics.get('trophic_depth', 0):.2f}
 
 RECOMMENDATIONS
 ===============
