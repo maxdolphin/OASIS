@@ -40,26 +40,91 @@ class PrecomputePipeline:
         self.db = db_manager or get_database_manager()
         self._vectorized_calculator = None
 
-    def _get_vectorized_metrics(self, flow_matrix: np.ndarray) -> Dict[str, float]:
+    def _get_vectorized_metrics(self, flow_matrix: np.ndarray, node_names: list = None) -> Dict[str, float]:
         """
         Compute vectorized metrics for a flow matrix.
 
         Args:
             flow_matrix: Square flow matrix
+            node_names: Optional node names for UlanowiczCalculator
 
         Returns:
-            Dictionary of computed metrics
+            Dictionary of computed metrics including FCI
         """
+        metrics = {}
+
+        # Get vectorized metrics
         try:
             from vectorized_metrics import get_all_vectorized_metrics
-            return get_all_vectorized_metrics(flow_matrix)
+            metrics = get_all_vectorized_metrics(flow_matrix)
         except ImportError:
             try:
                 from src.vectorized_metrics import get_all_vectorized_metrics
-                return get_all_vectorized_metrics(flow_matrix)
+                metrics = get_all_vectorized_metrics(flow_matrix)
             except ImportError:
                 logger.warning("Vectorized metrics not available, using fallback")
-            return self._compute_basic_metrics(flow_matrix)
+                metrics = self._compute_basic_metrics(flow_matrix)
+
+        # Add metrics from UlanowiczCalculator (FCI, topology, etc.)
+        try:
+            from ulanowicz_calculator import UlanowiczCalculator
+            calc = self._get_calculator(flow_matrix, node_names)
+            self._add_calculator_metrics(metrics, calc, flow_matrix)
+        except ImportError:
+            try:
+                from src.ulanowicz_calculator import UlanowiczCalculator
+                calc = self._get_calculator(flow_matrix, node_names)
+                self._add_calculator_metrics(metrics, calc, flow_matrix)
+            except Exception as e:
+                logger.warning(f"Could not compute additional metrics: {e}")
+
+        return metrics
+
+    def _get_calculator(self, flow_matrix: np.ndarray, node_names: list = None):
+        """Get UlanowiczCalculator instance."""
+        try:
+            from ulanowicz_calculator import UlanowiczCalculator
+        except ImportError:
+            from src.ulanowicz_calculator import UlanowiczCalculator
+
+        if node_names is None:
+            node_names = [f"N{i}" for i in range(flow_matrix.shape[0])]
+        return UlanowiczCalculator(flow_matrix, node_names)
+
+    def _add_calculator_metrics(self, metrics: dict, calc, flow_matrix: np.ndarray) -> None:
+        """Add metrics from UlanowiczCalculator to the metrics dict."""
+        n_nodes = flow_matrix.shape[0]
+
+        # Finn Cycling Index
+        try:
+            metrics['finn_cycling_index'] = calc.calculate_finn_cycling_index()
+        except Exception:
+            metrics['finn_cycling_index'] = None
+
+        # Network topology metrics
+        try:
+            topology = calc.calculate_network_topology_metrics()
+            if topology:
+                metrics['average_path_length'] = topology.get('average_path_length', 0)
+                metrics['clustering_coefficient'] = topology.get('clustering_coefficient', 0)
+                metrics['degree_centralization'] = topology.get('degree_centralization', 0)
+        except Exception:
+            pass
+
+        # Basic network structure
+        num_edges = int(np.sum(flow_matrix > 0))
+        metrics['num_edges'] = num_edges
+        metrics['network_density'] = num_edges / (n_nodes * n_nodes) if n_nodes > 0 else 0
+        metrics['connectance'] = num_edges / (n_nodes * (n_nodes - 1)) if n_nodes > 1 else 0
+        metrics['link_density'] = num_edges / n_nodes if n_nodes > 0 else 0
+
+        # Additional metrics
+        try:
+            metrics['conditional_entropy'] = calc.calculate_conditional_entropy()
+            metrics['redundancy'] = calc.calculate_redundancy()
+            metrics['regenerative_capacity'] = calc.calculate_regenerative_capacity()
+        except Exception:
+            pass
 
     def _compute_basic_metrics(self, flow_matrix: np.ndarray) -> Dict[str, float]:
         """
@@ -150,9 +215,9 @@ class PrecomputePipeline:
             network_hash=network_hash
         )
 
-        # Compute and store metrics
+        # Compute and store metrics (including FCI)
         start_time = time.time()
-        metrics = self._get_vectorized_metrics(flow_matrix)
+        metrics = self._get_vectorized_metrics(flow_matrix, node_names)
         computation_time_ms = int((time.time() - start_time) * 1000)
 
         self.db.save_precomputed_metrics(
@@ -213,9 +278,9 @@ class PrecomputePipeline:
             network_hash=network_hash
         )
 
-        # Compute metrics
+        # Compute metrics (including FCI)
         start_time = time.time()
-        metrics = self._get_vectorized_metrics(flow_matrix)
+        metrics = self._get_vectorized_metrics(flow_matrix, node_names)
         computation_time_ms = int((time.time() - start_time) * 1000)
 
         # Store metrics

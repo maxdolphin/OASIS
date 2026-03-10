@@ -1,11 +1,54 @@
 """
 Streamlit Web Application for Adaptive Organization Analysis
 
-This web app provides an interactive interface for analyzing organizational 
+This web app provides an interactive interface for analyzing organizational
 sustainability using Ulanowicz's ecosystem theory and regenerative economics.
 """
 
 import streamlit as st
+
+
+def format_large_number(value):
+    """
+    Format large numbers with K/M/B suffixes for readability.
+
+    Args:
+        value: Numeric value to format
+
+    Returns:
+        Formatted string
+    """
+    if value is None:
+        return "N/A"
+
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return "N/A"
+
+    if value != value:  # NaN check
+        return "N/A"
+
+    abs_val = abs(value)
+
+    if abs_val == 0:
+        return "0"
+    elif abs_val < 0.001:
+        return "{:.2e}".format(value)
+    elif abs_val < 1:
+        return "{:.4f}".format(value).rstrip('0').rstrip('.')
+    elif abs_val < 10:
+        return "{:.2f}".format(value)
+    elif abs_val < 1000:
+        return "{:.1f}".format(value)
+    elif abs_val < 1000000:
+        return "{:.2f}K".format(value / 1000).replace('.00K', 'K')
+    elif abs_val < 1000000000:
+        return "{:.2f}M".format(value / 1000000).replace('.00M', 'M')
+    elif abs_val < 1000000000000:
+        return "{:.2f}B".format(value / 1000000000).replace('.00B', 'B')
+    else:
+        return "{:.2f}T".format(value / 1000000000000).replace('.00T', 'T')
 import pandas as pd
 import numpy as np
 import json
@@ -57,6 +100,13 @@ try:
 except ImportError:
     DATABASE_AVAILABLE = False
 
+# Import HuggingFace Discovery Agent
+try:
+    from huggingface_discovery_agent import HuggingFaceDiscoveryAgent, KEYWORD_TAXONOMY
+    DISCOVERY_AVAILABLE = True
+except ImportError:
+    DISCOVERY_AVAILABLE = False
+
 
 # =========================================================================
 # Cached Computation Functions (using @st.cache_data for efficiency)
@@ -96,6 +146,21 @@ def get_cached_pipeline():
     """
     if DATABASE_AVAILABLE:
         return get_precompute_pipeline()
+    return None
+
+
+@st.cache_resource
+def get_cached_discovery_agent():
+    """
+    Get singleton HuggingFaceDiscoveryAgent instance.
+
+    Uses @st.cache_resource for persistence across reruns.
+    """
+    if DISCOVERY_AVAILABLE and DATABASE_AVAILABLE:
+        db_manager = get_cached_database_manager()
+        return HuggingFaceDiscoveryAgent(db_manager=db_manager)
+    elif DISCOVERY_AVAILABLE:
+        return HuggingFaceDiscoveryAgent(db_manager=None)
     return None
 
 
@@ -540,6 +605,105 @@ def create_network_mini_view(flow_matrix, node_names, max_nodes=10):
     
     return fig
 
+
+def create_network_chart_v2(flow_matrix, node_names, max_nodes=30):
+    """Create network visualization using spring layout (v2 style).
+
+    This creates a force-directed graph visualization using NetworkX's spring layout
+    algorithm, with node sizes scaled by throughput and colors using the Viridis colorscale.
+
+    Args:
+        flow_matrix: numpy array of flow values between nodes
+        node_names: list of node names
+        max_nodes: maximum number of nodes to display (top nodes by throughput)
+
+    Returns:
+        Plotly Figure object
+    """
+    import networkx as nx
+
+    n_nodes = len(node_names)
+
+    # Filter to top nodes by throughput if network is large
+    if n_nodes > max_nodes:
+        node_throughput = [np.sum(flow_matrix[i, :]) + np.sum(flow_matrix[:, i]) for i in range(n_nodes)]
+        top_indices = sorted(range(n_nodes), key=lambda i: node_throughput[i], reverse=True)[:max_nodes]
+        display_matrix = flow_matrix[np.ix_(top_indices, top_indices)]
+        display_names = [node_names[i] for i in top_indices]
+    else:
+        display_matrix = flow_matrix
+        display_names = node_names
+
+    # Build NetworkX graph
+    G = nx.DiGraph()
+    for i, name in enumerate(display_names):
+        G.add_node(i, label=name)
+
+    for i in range(len(display_matrix)):
+        for j in range(len(display_matrix)):
+            if display_matrix[i, j] > 0:
+                G.add_edge(i, j, weight=display_matrix[i, j])
+
+    # Calculate spring layout positions
+    pos = nx.spring_layout(G, seed=42, k=1.5)
+
+    # Calculate node sizes based on throughput
+    total_flow = {}
+    for node in G.nodes():
+        inflow = sum([display_matrix[i][node] for i in range(len(display_matrix))])
+        outflow = sum([display_matrix[node][j] for j in range(len(display_matrix))])
+        total_flow[node] = inflow + outflow
+
+    max_flow = max(total_flow.values()) if total_flow else 1
+    min_flow = min(total_flow.values()) if total_flow else 0
+    flow_range = max_flow - min_flow if max_flow != min_flow else 1
+
+    node_sizes = [30 + 40 * (total_flow[n] - min_flow) / flow_range for n in G.nodes()]
+
+    # Create edge traces
+    edge_traces = []
+    for edge in G.edges():
+        x0, y0 = pos[edge[0]]
+        x1, y1 = pos[edge[1]]
+        edge_traces.append(go.Scatter(
+            x=[x0, x1, None], y=[y0, y1, None],
+            mode='lines',
+            line=dict(width=1, color='rgba(100, 150, 200, 0.3)'),
+            hoverinfo='skip',
+            showlegend=False
+        ))
+
+    # Create node trace
+    node_trace = go.Scatter(
+        x=[pos[n][0] for n in G.nodes()],
+        y=[pos[n][1] for n in G.nodes()],
+        mode='markers+text',
+        text=display_names,
+        textposition="top center",
+        marker=dict(
+            size=node_sizes,
+            color=[total_flow[n] for n in G.nodes()],
+            colorscale='Viridis',
+            showscale=True,
+            colorbar=dict(title="Total Flow"),
+            line=dict(color='white', width=1)
+        ),
+        hoverinfo='text'
+    )
+
+    fig = go.Figure(data=edge_traces + [node_trace])
+
+    fig.update_layout(
+        title=f"Network Structure - Spring Layout ({len(display_names)} nodes)",
+        showlegend=False,
+        height=600,
+        xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+        yaxis=dict(showgrid=False, zeroline=False, showticklabels=False)
+    )
+
+    return fig
+
+
 def main():
     """Main application function."""
     
@@ -571,17 +735,35 @@ def show_main_page():
     
     # Sidebar for navigation
     st.sidebar.title("🎛️ Control Panel")
+
+    # Build mode list dynamically based on available features
+    mode_list = [
+        "📊 Upload Data",
+        "🧪 Use Sample Data",
+        "⚡ Generate Synthetic Data"
+    ]
+    if DISCOVERY_AVAILABLE:
+        mode_list.append("🔍 Discover Datasets")
+    mode_list.extend([
+        "📚 Learn More",
+        "🌱 10 Principles",
+        "🔬 Formulas Reference",
+        "📓 Validation Notebooks"
+    ])
+
     analysis_mode = st.sidebar.radio(
         "Choose Analysis Mode:",
-        ["📊 Upload Data", "🧪 Use Sample Data", "⚡ Generate Synthetic Data", "📚 Learn More", "🌱 10 Principles", "🔬 Formulas Reference", "📓 Validation Notebooks"]
+        mode_list
     )
-    
+
     if analysis_mode == "📊 Upload Data":
         upload_data_interface()
     elif analysis_mode == "🧪 Use Sample Data":
         sample_data_interface()
     elif analysis_mode == "⚡ Generate Synthetic Data":
         synthetic_data_interface()
+    elif analysis_mode == "🔍 Discover Datasets":
+        discovery_interface()
     elif analysis_mode == "📚 Learn More":
         learn_more_interface()
     elif analysis_mode == "🌱 10 Principles":
@@ -682,37 +864,183 @@ def upload_data_interface():
 
 def sample_data_interface():
     """Interface for using built-in and user-saved sample data."""
-    
+
     st.header("🧪 Analyze Sample Organizations & Ecosystems")
     st.markdown("Choose from organizational samples, real ecosystems from scientific literature, large-scale real-world datasets, or your saved networks.")
-    
+
     # Load all available datasets (built-in + user-saved + ecosystems)
     all_datasets = load_all_sample_datasets()
-    
+
     if not all_datasets:
         st.warning("No sample datasets available. Try generating some networks first!")
         return
-    
+
     # Organize datasets by type for better UX
     builtin_datasets = {k: v for k, v in all_datasets.items() if v["type"] == "builtin"}
     ecosystem_datasets = {k: v for k, v in all_datasets.items() if v["type"] == "ecosystem"}
     reallife_datasets = {k: v for k, v in all_datasets.items() if v["type"] in ["reallife", "realworld_processed"]}
     user_datasets = {k: v for k, v in all_datasets.items() if v["type"] == "user_saved"}
-    
-    # Show counts
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.info(f"📁 **Samples**: {len(builtin_datasets)}")
-    with col2:
-        st.info(f"🌿 **Ecosystems**: {len(ecosystem_datasets)}")
-    with col3:
-        st.info(f"🌍 **Real Life Data**: {len(reallife_datasets)}")
-    with col4:
-        st.info(f"💾 **Your Networks**: {len(user_datasets)}")
-    
-    # Dataset selection
-    selected_dataset = st.selectbox("Choose an organization:", list(all_datasets.keys()))
-    dataset_info = all_datasets[selected_dataset]
+
+    # Initialize session state for dataset selection
+    if 'selected_category' not in st.session_state:
+        st.session_state.selected_category = None
+    if 'selected_dataset_name' not in st.session_state:
+        st.session_state.selected_dataset_name = None
+
+    # Create tabs for each category
+    tab_samples, tab_ecosystems, tab_reallife, tab_user = st.tabs([
+        f"📁 Samples ({len(builtin_datasets)})",
+        f"🌿 Ecosystems ({len(ecosystem_datasets)})",
+        f"🌍 Real Life Data ({len(reallife_datasets)})",
+        f"💾 Your Networks ({len(user_datasets)})"
+    ])
+
+    selected_dataset = None
+    dataset_info = None
+
+    # Helper to clean dataset names (remove emoji prefixes)
+    def clean_name(name):
+        # Remove common emoji prefixes
+        prefixes = ['📁 ', '🌿 ', '🌍 ', '💾 ', '🧬 ']
+        for prefix in prefixes:
+            if name.startswith(prefix):
+                name = name[len(prefix):]
+        return name
+
+    with tab_samples:
+        if builtin_datasets:
+            # Create clean names for display
+            sample_names = list(builtin_datasets.keys())
+            display_names = [clean_name(n) for n in sample_names]
+
+            selected_idx = st.selectbox(
+                "Select a sample organization:",
+                range(len(sample_names)),
+                format_func=lambda i: display_names[i],
+                key="sample_select"
+            )
+
+            if st.button("📊 Use This Dataset", key="use_sample", type="primary"):
+                selected_dataset = sample_names[selected_idx]
+                dataset_info = builtin_datasets[selected_dataset]
+                st.session_state.selected_category = "Samples"
+                st.session_state.selected_dataset_name = selected_dataset
+        else:
+            st.info("No sample organizations available.")
+
+    with tab_ecosystems:
+        if ecosystem_datasets:
+            eco_names = list(ecosystem_datasets.keys())
+            display_names = [clean_name(n) for n in eco_names]
+
+            selected_idx = st.selectbox(
+                "Select an ecosystem:",
+                range(len(eco_names)),
+                format_func=lambda i: display_names[i],
+                key="ecosystem_select"
+            )
+
+            # Show preview of selected ecosystem
+            preview_dataset = eco_names[selected_idx]
+            preview_info = ecosystem_datasets[preview_dataset]
+            if "metadata" in preview_info:
+                meta = preview_info["metadata"]
+                with st.container():
+                    st.caption(f"**Source:** {meta.get('primary_source', meta.get('source', 'N/A'))}")
+                    st.caption(f"**Location:** {meta.get('location', 'N/A')} • **Compartments:** {meta.get('compartments', 'N/A')}")
+
+            if st.button("📊 Use This Dataset", key="use_ecosystem", type="primary"):
+                selected_dataset = eco_names[selected_idx]
+                dataset_info = ecosystem_datasets[selected_dataset]
+                st.session_state.selected_category = "Ecosystems"
+                st.session_state.selected_dataset_name = selected_dataset
+        else:
+            st.info("No ecosystem datasets available.")
+
+    with tab_reallife:
+        if reallife_datasets:
+            real_names = list(reallife_datasets.keys())
+            display_names = [clean_name(n) for n in real_names]
+
+            selected_idx = st.selectbox(
+                "Select a real-world dataset:",
+                range(len(real_names)),
+                format_func=lambda i: display_names[i],
+                key="reallife_select"
+            )
+
+            # Show preview
+            preview_dataset = real_names[selected_idx]
+            preview_info = reallife_datasets[preview_dataset]
+            if "metadata" in preview_info:
+                meta = preview_info["metadata"]
+                with st.container():
+                    st.caption(f"**Source:** {meta.get('source', 'N/A')}")
+                    st.caption(f"**Type:** {meta.get('flow_type', meta.get('type', 'N/A'))} • **Scale:** {meta.get('scale', 'N/A')}")
+
+            if st.button("📊 Use This Dataset", key="use_reallife", type="primary"):
+                selected_dataset = real_names[selected_idx]
+                dataset_info = reallife_datasets[selected_dataset]
+                st.session_state.selected_category = "Real Life Data"
+                st.session_state.selected_dataset_name = selected_dataset
+        else:
+            st.info("No real-world datasets available.")
+
+    with tab_user:
+        if user_datasets:
+            user_names = list(user_datasets.keys())
+            display_names = [clean_name(n) for n in user_names]
+
+            selected_idx = st.selectbox(
+                "Select your saved network:",
+                range(len(user_names)),
+                format_func=lambda i: display_names[i],
+                key="user_select"
+            )
+
+            # Show preview
+            preview_dataset = user_names[selected_idx]
+            preview_info = user_datasets[preview_dataset]
+            if "metadata" in preview_info:
+                meta = preview_info["metadata"]
+                with st.container():
+                    st.caption(f"**Type:** {meta.get('network_description', 'N/A')}")
+                    st.caption(f"**Nodes:** {meta.get('actual_nodes', 'N/A')} • **Edges:** {meta.get('actual_edges', 'N/A')}")
+
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("📊 Use This Dataset", key="use_user", type="primary"):
+                    selected_dataset = user_names[selected_idx]
+                    dataset_info = user_datasets[selected_dataset]
+                    st.session_state.selected_category = "Your Networks"
+                    st.session_state.selected_dataset_name = selected_dataset
+            with col2:
+                if st.button("🗑️ Delete", key="delete_user", type="secondary"):
+                    try:
+                        os.remove(user_datasets[user_names[selected_idx]]["path"])
+                        st.success("✅ Network deleted!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Failed to delete: {str(e)}")
+        else:
+            st.info("No saved networks yet. Use the Network Generator to create and save networks!")
+
+    # If a dataset was selected via session state (from previous selection), use it
+    if selected_dataset is None and st.session_state.selected_dataset_name:
+        selected_dataset = st.session_state.selected_dataset_name
+        if selected_dataset in all_datasets:
+            dataset_info = all_datasets[selected_dataset]
+
+    # Show active selection
+    if st.session_state.selected_dataset_name and st.session_state.selected_dataset_name in all_datasets:
+        st.success(f"**Selected:** {clean_name(st.session_state.selected_dataset_name)} ({st.session_state.selected_category})")
+        selected_dataset = st.session_state.selected_dataset_name
+        dataset_info = all_datasets[selected_dataset]
+
+    # If no dataset selected yet, return early
+    if dataset_info is None:
+        st.info("👆 Select a dataset from one of the categories above, then click 'Use This Dataset'")
+        return
     
     # Show metadata based on dataset type
     if dataset_info["type"] == "ecosystem" and "metadata" in dataset_info:
@@ -773,14 +1101,14 @@ def sample_data_interface():
                     dry_season = validation_metrics['dry_season_published']
                     col1, col2, col3, col4 = st.columns(4)
                     with col1:
-                        st.metric("TST", f"{dry_season.get('TST', 0):.0f}")
+                        st.metric("TST", format_large_number(dry_season.get('TST', 0)))
                     with col2:
-                        st.metric("Development Capacity", f"{dry_season.get('development_capacity', 0):.0f}")
+                        st.metric("Development Capacity", format_large_number(dry_season.get('development_capacity', 0)))
                     with col3:
-                        st.metric("Ascendancy", f"{dry_season.get('ascendancy', 0):.0f}")
+                        st.metric("Ascendancy", format_large_number(dry_season.get('ascendancy', 0)))
                     with col4:
                         st.metric("A/C Ratio", f"{dry_season.get('ascendency_percent', 0):.1f}%")
-                    
+
                     col1, col2 = st.columns(2)
                     with col1:
                         st.metric("FCI", f"{dry_season.get('finn_cycling_index', 0):.1f}%")
@@ -791,10 +1119,10 @@ def sample_data_interface():
                     col1, col2, col3 = st.columns(3)
                     with col1:
                         if 'total_system_throughput' in metrics_to_show:
-                            st.metric("TST", f"{metrics_to_show['total_system_throughput']:.0f}")
+                            st.metric("TST", format_large_number(metrics_to_show['total_system_throughput']))
                     with col2:
                         if 'ascendency' in metrics_to_show:
-                            st.metric("Ascendency", f"{metrics_to_show['ascendency']:.0f}")
+                            st.metric("Ascendency", format_large_number(metrics_to_show['ascendency']))
                     with col3:
                         if 'ascendency_ratio' in metrics_to_show:
                             st.metric("A/C Ratio", f"{metrics_to_show['ascendency_ratio']:.2f}")
@@ -918,8 +1246,8 @@ def sample_data_interface():
                 st.write(f"**Flow Range**: {metadata.get('flow_range', 'N/A')}")
     
     # Analysis buttons
-    col1, col2 = st.columns(2)
-    
+    st.markdown("---")
+
     # Check if this is a validation-only dataset
     is_validation_only = False
     if dataset_info["type"] == "ecosystem":
@@ -929,36 +1257,25 @@ def sample_data_interface():
             is_validation_only = data.get('flows') == "NOT_AVAILABLE"
         except:
             is_validation_only = False
+
+    if dataset_info["type"] == "reallife":
+        # For real-life reference datasets, show a different button
+        if st.button("📊 View Dataset Info", type="primary", use_container_width=True):
+            st.info("This is a reference dataset. Please download and convert the data to use our analysis tools.")
+        analyze_button = False
+    elif is_validation_only:
+        # For validation-only datasets, show information button
+        if st.button("📊 View Validation Metrics", type="primary", use_container_width=True):
+            st.info("This dataset contains only published validation metrics. Raw flow matrix data is not available for analysis.")
+        analyze_button = False
+    elif dataset_info["type"] == "realworld_processed":
+        # For processed real-world datasets, full analysis available
+        analyze_button = st.button("🚀 Analyze Real-World Network", type="primary", use_container_width=True)
+    else:
+        analyze_button = st.button("🚀 Analyze Selected Organization", type="primary", use_container_width=True)
     
-    with col1:
-        if dataset_info["type"] == "reallife":
-            # For real-life reference datasets, show a different button
-            if st.button("📊 View Dataset Info", type="primary"):
-                st.info("This is a reference dataset. Please download and convert the data to use our analysis tools.")
-        elif is_validation_only:
-            # For validation-only datasets, show information button
-            if st.button("📊 View Validation Metrics", type="primary"):
-                st.info("This dataset contains only published validation metrics. Raw flow matrix data is not available for analysis.")
-        elif dataset_info["type"] == "realworld_processed":
-            # For processed real-world datasets, full analysis available
-            analyze_button = st.button("🚀 Analyze Real-World Network", type="primary")
-        else:
-            analyze_button = st.button("🚀 Analyze Selected Organization", type="primary")
-    with col2:
-        if dataset_info["type"] == "user_saved":
-            if st.button("🗑️ Delete This Network", type="secondary"):
-                try:
-                    os.remove(dataset_info["path"])
-                    st.success("✅ Network deleted successfully!")
-                    st.rerun()  # Refresh the interface
-                except Exception as e:
-                    st.error(f"❌ Failed to delete: {str(e)}")
-    
-    # Only proceed with analysis if not a reallife reference dataset or validation-only dataset
-    if (dataset_info["type"] not in ["reallife"] and 
-        not is_validation_only and 
-        'analyze_button' in locals() and 
-        analyze_button):
+    # Only proceed with analysis if the analyze button was clicked
+    if analyze_button:
         dataset_path = dataset_info["path"]
         
         try:
@@ -967,7 +1284,7 @@ def sample_data_interface():
             
             flow_matrix = np.array(data['flows'])
             node_names = data['nodes']
-            org_name = data.get('organization', selected_dataset.split(' - ')[0])  # Clean up display name
+            org_name = data.get('organization', clean_name(selected_dataset).split(' - ')[0])  # Clean up display name
             
             # Store data in session state and navigate to analysis page
             st.session_state.analysis_data = {
@@ -1461,6 +1778,14 @@ def show_analysis_page():
         assessments = data['assessments']
         calculator = data['calculator']
 
+        # Ensure missing extended metrics are computed (SI, ELD, TD)
+        if 'structural_information' not in extended_metrics or extended_metrics.get('structural_information', 0) == 0:
+            extended_metrics['structural_information'] = calculator.calculate_structural_information()
+        if 'effective_link_density' not in extended_metrics or extended_metrics.get('effective_link_density', 0) == 0:
+            extended_metrics['effective_link_density'] = calculator.calculate_effective_link_density()
+        if 'trophic_depth' not in extended_metrics or extended_metrics.get('trophic_depth', 0) == 0:
+            extended_metrics['trophic_depth'] = calculator.calculate_trophic_depth()
+
     # If we have cache hit but no session cache, use cache to reconstruct
     elif cache_hit and precomputed_metrics:
         # Create calculator (fast - just initialization)
@@ -1473,6 +1798,14 @@ def show_analysis_page():
         if 'is_viable' not in extended_metrics:
             alpha = extended_metrics.get('relative_ascendency', 0)
             extended_metrics['is_viable'] = 0.2 <= alpha <= 0.6
+
+        # Compute missing extended metrics if not in cache (SI, ELD, TD)
+        if 'structural_information' not in extended_metrics or extended_metrics.get('structural_information', 0) == 0:
+            extended_metrics['structural_information'] = calculator.calculate_structural_information()
+        if 'effective_link_density' not in extended_metrics or extended_metrics.get('effective_link_density', 0) == 0:
+            extended_metrics['effective_link_density'] = calculator.calculate_effective_link_density()
+        if 'trophic_depth' not in extended_metrics or extended_metrics.get('trophic_depth', 0) == 0:
+            extended_metrics['trophic_depth'] = calculator.calculate_trophic_depth()
 
         # Generate assessments from cached metrics
         assessments = calculator.assess_regenerative_health()
@@ -1553,9 +1886,17 @@ def show_analysis_page():
         st.session_state.current_page = 'main'
         st.session_state.analysis_data = None
         st.rerun()
-    
+
+    # Show current network in sidebar
+    st.sidebar.markdown(f"""
+    <div style="background: #f0f7f0; padding: 10px; border-radius: 6px; border-left: 4px solid #2d8a3e; margin: 10px 0;">
+        <p style="margin: 0; font-size: 0.75rem; color: #666;">Analyzing:</p>
+        <p style="margin: 2px 0 0 0; font-weight: 600; color: #1a5f2a; font-size: 0.9rem;">{org_name}</p>
+    </div>
+    """, unsafe_allow_html=True)
+
     st.sidebar.markdown("---")
-    
+
     # Sidebar navigation for detailed analysis
     st.sidebar.title("📊 Analysis Sections")
     
@@ -1578,7 +1919,23 @@ def show_analysis_page():
         st.rerun()
     
     analysis_section = st.session_state.current_analysis_section
-    
+
+    # Persistent header showing current network name
+    st.markdown(f"""
+    <div style="background: linear-gradient(90deg, #1a5f2a 0%, #2d8a3e 100%);
+                padding: 12px 20px;
+                border-radius: 8px;
+                margin-bottom: 20px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+        <h2 style="margin: 0; color: white; font-size: 1.4rem;">
+            🌱 {org_name}
+        </h2>
+        <p style="margin: 4px 0 0 0; color: rgba(255,255,255,0.8); font-size: 0.85rem;">
+            {n_nodes} nodes • {int(np.sum(flow_matrix > 0))} connections • TST: {format_large_number(extended_metrics.get('total_system_throughput', 0))}
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
     # Display selected section directly (each section has its own title)
     if analysis_section == "🎯 Core Metrics":
         display_core_metrics_combined(extended_metrics, assessments, org_name, flow_matrix, node_names)
@@ -1705,26 +2062,11 @@ def run_full_analysis(flow_matrix, node_names, progress_bar, status_text, start_
     redundancy = calculator.calculate_redundancy()
     regen = calculator.calculate_regenerative_capacity()
 
-    # Skip Finn Cycling Index for performance (too computationally intensive for >10 nodes)
-    n_nodes = len(calculator.node_names)
-    if n_nodes <= 10:
-        try:
-            import signal
-            def timeout_handler(signum, frame):
-                raise TimeoutError("FCI calculation timed out")
-            signal.signal(signal.SIGALRM, timeout_handler)
-            signal.alarm(5)
-            try:
-                finn_cycling = calculator.calculate_finn_cycling_index()
-                signal.alarm(0)
-                calculator._finn_cycling_index = finn_cycling
-            except (TimeoutError, Exception):
-                finn_cycling = None
-                calculator._finn_cycling_index = None
-        except Exception:
-            finn_cycling = None
-            calculator._finn_cycling_index = None
-    else:
+    # Compute Finn Cycling Index (simplified O(n²) algorithm handles up to 500 nodes)
+    try:
+        finn_cycling = calculator.calculate_finn_cycling_index()
+        calculator._finn_cycling_index = finn_cycling
+    except Exception:
         finn_cycling = None
         calculator._finn_cycling_index = None
 
@@ -1787,6 +2129,7 @@ def run_optimized_analysis(flow_matrix, node_names, progress_bar, status_text, s
         **basic_metrics,
         'flow_diversity': calculator.calculate_flow_diversity(),
         'conditional_entropy': calculator.calculate_conditional_entropy(),
+        'structural_information': calculator.calculate_structural_information(),
         'robustness': calculator.calculate_robustness(),
         'network_efficiency': calculator.calculate_network_efficiency(),
         'regenerative_capacity': calculator.calculate_regenerative_capacity(),
@@ -1795,10 +2138,10 @@ def run_optimized_analysis(flow_matrix, node_names, progress_bar, status_text, s
         'effective_connectivity': calculator.calculate_effective_connectivity(),
         'number_of_roles': calculator.calculate_number_of_roles(),
         'num_edges': int(np.sum(flow_matrix > 0)),
+        'effective_link_density': calculator.calculate_effective_link_density(),
+        'trophic_depth': calculator.calculate_trophic_depth(),
         # Skip expensive O(n³+) calculations
         'finn_cycling_index': None,  # Tier 3 - background compute
-        'trophic_depth': 0.0,
-        'effective_link_density': 0.0,
         'average_path_length': 0.0,
         'clustering_coefficient': 0.0
     }
@@ -1852,16 +2195,18 @@ def run_scalable_analysis(flow_matrix, node_names, progress_bar, status_text, st
         'robustness': calculator.calculate_robustness(),
         'network_efficiency': calculator.calculate_network_efficiency(),
         'flow_diversity': calculator.calculate_flow_diversity(),
+        'structural_information': calculator.calculate_structural_information(),
         'effective_flows': calculator.calculate_effective_flows(),
         'effective_nodes': calculator.calculate_effective_nodes(),
         'effective_connectivity': calculator.calculate_effective_connectivity(),
         'number_of_roles': calculator.calculate_number_of_roles(),
         'regenerative_capacity': calculator.calculate_regenerative_capacity(),
         'num_edges': int(np.sum(flow_matrix > 0)),
+        'effective_link_density': calculator.calculate_effective_link_density(),
+        'trophic_depth': calculator.calculate_trophic_depth(),
         # Tier 3 metrics skipped for large networks
         'finn_cycling_index': None,
         'conditional_entropy': calculator.calculate_conditional_entropy(),
-        'trophic_depth': 0.0,
     }
     progress_bar.progress(0.75)
 
@@ -2010,18 +2355,31 @@ def display_visualizations_enhanced(G, flow_matrix, node_names, metrics, org_nam
     
     # Network Visualization first
     st.subheader("🌐 Network Diagram")
-    
+
     # Check network size and warn if large
     n_nodes = len(flow_matrix)
     n_edges = np.count_nonzero(flow_matrix)
-    
+
     if n_nodes > 100 or n_edges > 1000:
         st.warning(f"⚠️ **Large Network Detected**: {n_nodes} nodes, {n_edges} edges")
         st.info("💡 **Performance Optimization Active:**\n"
                 "- Showing simplified visualizations for better performance\n"
                 "- Use the controls below to adjust detail level\n"
                 "- Consider the heatmap for detailed flow analysis")
-    
+
+    # V2 Spring Layout visualization (new - on top)
+    st.markdown("**Spring Layout View**")
+    try:
+        fig_v2 = create_network_chart_v2(flow_matrix, node_names, max_nodes=30)
+        st.plotly_chart(fig_v2, use_container_width=True)
+    except Exception as e:
+        st.warning(f"Could not generate spring layout: {str(e)}")
+
+    st.divider()
+
+    # Original directed network visualization (below)
+    st.markdown("**Directed Network View**")
+
     # Display network visualization with performance settings
     if n_nodes <= 50:
         # Small network - full visualization
@@ -2211,9 +2569,13 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
 
     # Core Metrics header at the top
     st.header("🎯 Core Metrics")
-    
+
     # Network name
     st.markdown(f"### 🌐 {org_name}")
+
+    # System Robustness vs Network Efficiency chart at the top
+    robustness_fig = create_robustness_curve(metrics)
+    st.plotly_chart(robustness_fig, use_container_width=True)
     
     # Add interactive dashboard layout with tabs
     tab1, tab2, tab3, tab4 = st.tabs(["📈 Overview", "📊 Detailed Metrics", "🔬 Analysis Levels", "📋 Summary"])
@@ -2247,28 +2609,28 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
             
             col1, col2, col3, col4 = st.columns(4)
             with col1:
-                st.metric("Total Flow", f"{np.sum(flow_matrix):.1f}")
+                st.metric("Total Flow", format_large_number(np.sum(flow_matrix)))
                 st.caption("ΣTij [flow units]")
                 st.metric("Active Connections", np.count_nonzero(flow_matrix))
                 st.caption("N_links [count]")
             with col2:
                 avg_flow = np.mean(flow_matrix[flow_matrix > 0]) if np.any(flow_matrix > 0) else 0
                 median_flow = np.median(flow_matrix[flow_matrix > 0]) if np.any(flow_matrix > 0) else 0
-                st.metric("Avg Flow", f"{avg_flow:.2f}")
+                st.metric("Avg Flow", format_large_number(avg_flow))
                 st.caption("μ(Tij>0) [flow units]")
-                st.metric("Median Flow", f"{median_flow:.2f}")
+                st.metric("Median Flow", format_large_number(median_flow))
                 st.caption("Med(Tij>0) [flow units]")
             with col3:
                 max_flow = np.max(flow_matrix) if flow_matrix.size > 0 else 0
                 min_flow = np.min(flow_matrix[flow_matrix > 0]) if np.any(flow_matrix > 0) else 0
-                st.metric("Max Flow", f"{max_flow:.1f}")
+                st.metric("Max Flow", format_large_number(max_flow))
                 st.caption("Max(Tij) [flow units]")
-                st.metric("Min Flow (>0)", f"{min_flow:.2f}")
+                st.metric("Min Flow (>0)", format_large_number(min_flow))
                 st.caption("Min(Tij>0) [flow units]")
             with col4:
                 flow_std = np.std(flow_matrix[flow_matrix > 0]) if np.any(flow_matrix > 0) else 0
                 flow_cv = flow_std / avg_flow if avg_flow > 0 else 0
-                st.metric("Flow Std Dev", f"{flow_std:.2f}")
+                st.metric("Flow Std Dev", format_large_number(flow_std))
                 st.caption("σ(Tij) [flow units]")
                 st.metric("Coeff. of Variation", f"{flow_cv:.2f}")
                 st.caption("CV = σ/μ [dimensionless]")
@@ -2305,7 +2667,7 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
             
             # Step 1: TST (foundation)
             st.markdown("#### Step 1: Total System Throughput")
-            st.metric("Total System Throughput (TST)", f"{metrics['total_system_throughput']:.1f}")
+            st.metric("Total System Throughput (TST)", format_large_number(metrics['total_system_throughput']))
             st.caption("TST = ΣTij = Sum of all flows in the network [flow units]")
             st.info("ℹ️ Note: External flows (imports/exports/respiration) require additional data beyond the flow matrix")
             
@@ -2329,13 +2691,13 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
             st.markdown("#### Step 3: Ascendency & Development Capacity")
             col1, col2, col3, col4 = st.columns(4)
             with col1:
-                st.metric("Ascendency", f"{metrics['ascendency']:.1f}")
+                st.metric("Ascendency", format_large_number(metrics['ascendency']))
                 st.caption("A = TST * I [flow·nats]")
             with col2:
-                st.metric("Overhead", f"{metrics['overhead']:.1f}")
+                st.metric("Overhead", format_large_number(metrics['overhead']))
                 st.caption("Φ = TST * Hc [flow·nats]")
             with col3:
-                st.metric("Capacity", f"{metrics['development_capacity']:.1f}")
+                st.metric("Capacity", format_large_number(metrics['development_capacity']))
                 st.caption("C = TST * H [flow·nats]")
             with col4:
                 st.metric("Realized Capacity", f"{metrics.get('realized_capacity', metrics['ascendency']/metrics['development_capacity']*100):.1f}%")
@@ -2376,14 +2738,14 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
             st.metric("1. In-Out Balance", "N/A")
             st.caption("Requires external flows")
     with col2:
-        st.metric("2. Sufficient Size", f"{metrics['total_system_throughput']:.0f}")
+        st.metric("2. Sufficient Size", format_large_number(metrics['total_system_throughput']))
         st.caption("TST [flow units]")
     with col3:
         hier_level = metrics.get('hierarchical_levels', metrics.get('trophic_depth', 0))
         st.metric("3. Hierarchy", f"{hier_level:.1f}")
         st.caption("TL [levels]")
     with col4:
-        st.metric("4. Material Basis", f"{np.sum(flow_matrix):.0f}")
+        st.metric("4. Material Basis", format_large_number(np.sum(flow_matrix)))
         st.caption("ΣTij [flow units]")
     with col5:
         st.metric("5. Mutuality", f"{metrics.get('clustering_coefficient', 0):.2f}")
@@ -2450,17 +2812,17 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
     st.markdown("#### Window of Viability Bounds")
     col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
-        st.metric("Lower Bound", f"{lower:.1f}")
+        st.metric("Lower Bound", format_large_number(lower))
         st.caption("A_min = 0.2C [flow·nats]")
     with col2:
-        st.metric("Current Ascendency", f"{ascendency:.1f}")
+        st.metric("Current Ascendency", format_large_number(ascendency))
         pos_pct = (ascendency - lower) / (upper - lower) * 100 if upper > lower else 50
         st.caption(f"A [flow·nats] ({pos_pct:.0f}%)")
     with col3:
         st.metric("Optimal Zone", "0.35-0.40")
         st.caption("α_opt [dimensionless]")
     with col4:
-        st.metric("Upper Bound", f"{upper:.1f}")
+        st.metric("Upper Bound", format_large_number(upper))
         st.caption("A_max = 0.6C [flow·nats]")
     with col5:
         st.metric("Current α", f"{alpha:.2f}")
@@ -2761,20 +3123,20 @@ def display_ulanowicz_indicators(metrics):
     col1, col2 = st.columns(2)
     
     with col1:
-        st.metric("Total System Throughput (TST)", f"{metrics['total_system_throughput']:.1f}")
+        st.metric("Total System Throughput (TST)", format_large_number(metrics['total_system_throughput']))
         st.caption("Total flow/activity in the network")
-        
+
         st.metric("Average Mutual Information (AMI)", f"{metrics['average_mutual_information']:.2f}")
         st.caption("Degree of organization in flow patterns")
-        
-        st.metric("Ascendency (A)", f"{metrics['ascendency']:.1f}")
+
+        st.metric("Ascendency (A)", format_large_number(metrics['ascendency']))
         st.caption("Organized power (TST * AMI)")
-    
+
     with col2:
-        st.metric("Development Capacity (C)", f"{metrics['development_capacity']:.1f}")
+        st.metric("Development Capacity (C)", format_large_number(metrics['development_capacity']))
         st.caption("Maximum possible organization")
-        
-        st.metric("Overhead/Reserve (Φ)", f"{metrics['overhead']:.1f}")
+
+        st.metric("Overhead/Reserve (Φ)", format_large_number(metrics['overhead']))
         st.caption("Unutilized capacity (C - A)")
         
         st.metric("Flow Diversity (H)", f"{metrics['flow_diversity']:.2f}")
@@ -2844,16 +3206,16 @@ def display_ulanowicz_indicators(metrics):
     
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.metric("Lower Bound", f"{lower:.1f}")
+        st.metric("Lower Bound", format_large_number(lower))
         st.caption("20% of capacity")
     with col2:
-        st.metric("Current Position", f"{current:.1f}")
+        st.metric("Current Position", format_large_number(current))
         if lower <= current <= upper:
             st.caption("✅ Within bounds")
         else:
             st.caption("❌ Outside bounds")
     with col3:
-        st.metric("Upper Bound", f"{upper:.1f}")
+        st.metric("Upper Bound", format_large_number(upper))
         st.caption("60% of capacity")
 
 def display_regenerative_metrics(metrics, assessments):
@@ -2926,9 +3288,21 @@ def create_sankey_diagram(flow_matrix, node_names, max_nodes=50, threshold_perce
     value = []
     link_colors = []
     link_labels = []
-    
+
+    # Performance limit: max links to display
+    MAX_SANKEY_LINKS = 100
+    n_edges = np.count_nonzero(flow_matrix)
+
     # Get max flow for color scaling
     max_flow = np.max(flow_matrix) if np.max(flow_matrix) > 0 else 1
+
+    # For dense networks, only show top flows
+    if n_edges > MAX_SANKEY_LINKS:
+        # Get all non-zero flows and their indices
+        non_zero_mask = flow_matrix > 0
+        flows_flat = flow_matrix[non_zero_mask]
+        flow_threshold = np.percentile(flows_flat, 100 * (1 - MAX_SANKEY_LINKS / n_edges))
+        st.info(f"📊 Dense network ({n_edges} flows). Showing top {MAX_SANKEY_LINKS} flows for performance.")
     
     # Define consistent color scheme
     strong_flow_color = 'rgba(220, 38, 127, 0.5)'   # Pink/Red for strong flows
@@ -2955,14 +3329,20 @@ def create_sankey_diagram(flow_matrix, node_names, max_nodes=50, threshold_perce
         # For small networks or when no threshold, show all non-zero flows
         threshold = 0
     
+    # Use the more restrictive threshold for dense networks
+    if n_edges > MAX_SANKEY_LINKS:
+        effective_threshold = max(threshold, flow_threshold)
+    else:
+        effective_threshold = threshold
+
     for i in range(len(flow_matrix)):
         for j in range(len(flow_matrix[0])):
-            if flow_matrix[i][j] > threshold:  # Only include flows above threshold
+            if flow_matrix[i][j] > effective_threshold:  # Only include flows above threshold
                 source.append(i)
                 target.append(j)
                 value.append(flow_matrix[i][j])
                 link_labels.append(f"{node_names[i]} → {node_names[j]}")
-                
+
                 # Color based on flow strength with consistent thresholds
                 intensity = flow_matrix[i][j] / max_flow
                 if intensity > 0.66:
@@ -4191,7 +4571,7 @@ def display_detailed_report(calculator, metrics, assessments, org_name):
             with col4:
                 st.metric(
                     "Total Throughput",
-                    f"{metrics['total_system_throughput']:.1f}",
+                    format_large_number(metrics['total_system_throughput']),
                     f"{len(calculator.node_names)} nodes"
                 )
             
@@ -4521,6 +4901,381 @@ def get_robustness_status(robustness):
         return "Moderate"
     else:
         return "Low"
+
+
+def discovery_interface():
+    """Interface for discovering and processing HuggingFace datasets."""
+
+    st.header("🔍 HuggingFace Dataset Discovery")
+
+    if not DISCOVERY_AVAILABLE:
+        st.error("""
+        **Discovery Agent Not Available**
+
+        The HuggingFace discovery agent requires additional dependencies.
+        Please install them with:
+
+        ```bash
+        pip install huggingface_hub datasets
+        ```
+        """)
+        return
+
+    st.markdown("""
+    Discover datasets from HuggingFace Hub that can be converted to flow network matrices
+    for organizational and ecosystem analysis.
+    """)
+
+    # Get the discovery agent
+    agent = get_cached_discovery_agent()
+
+    if agent is None:
+        st.error("Could not initialize the discovery agent.")
+        return
+
+    # Tabs for different discovery functions
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "🔎 Run Discovery",
+        "📋 Pending Approvals",
+        "⚙️ Process Approved",
+        "📊 Statistics"
+    ])
+
+    with tab1:
+        _discovery_run_tab(agent)
+
+    with tab2:
+        _discovery_approvals_tab(agent)
+
+    with tab3:
+        _discovery_process_tab(agent)
+
+    with tab4:
+        _discovery_stats_tab(agent)
+
+
+def _discovery_run_tab(agent):
+    """Tab for running new discovery searches."""
+
+    st.subheader("Search for Flow Network Datasets")
+
+    # Category selection
+    st.markdown("### Select Categories to Search")
+
+    col1, col2 = st.columns(2)
+
+    categories = list(KEYWORD_TAXONOMY.keys())
+    selected_categories = []
+
+    with col1:
+        for cat in categories[:len(categories)//2]:
+            info = KEYWORD_TAXONOMY[cat]
+            if st.checkbox(f"**{cat.replace('_', ' ').title()}** ({info['weight']:.2f})",
+                          value=True, key=f"cat_{cat}"):
+                selected_categories.append(cat)
+            st.caption(info['description'])
+
+    with col2:
+        for cat in categories[len(categories)//2:]:
+            info = KEYWORD_TAXONOMY[cat]
+            if st.checkbox(f"**{cat.replace('_', ' ').title()}** ({info['weight']:.2f})",
+                          value=False, key=f"cat_{cat}"):
+                selected_categories.append(cat)
+            st.caption(info['description'])
+
+    st.markdown("---")
+
+    # Discovery parameters
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        max_per_category = st.slider("Max datasets per category", 10, 100, 30)
+
+    with col2:
+        min_score = st.slider("Minimum score threshold", 0, 70, 30)
+
+    with col3:
+        st.metric("Categories Selected", len(selected_categories))
+
+    # Run discovery button
+    if st.button("🚀 Run Discovery", type="primary", disabled=len(selected_categories) == 0):
+        if len(selected_categories) == 0:
+            st.warning("Please select at least one category.")
+        else:
+            with st.spinner(f"Searching HuggingFace Hub across {len(selected_categories)} categories..."):
+                try:
+                    results = agent.run_discovery(
+                        categories=selected_categories,
+                        max_per_category=max_per_category,
+                        min_score=min_score
+                    )
+
+                    st.success(f"Discovery complete! Found {results['total_found']} datasets.")
+
+                    # Show summary metrics
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Total Found", results['total_found'])
+                    with col2:
+                        st.metric("High Potential", results['high_potential'])
+                    with col3:
+                        st.metric("Medium Potential", results['medium_potential'])
+
+                    # Show errors if any
+                    if results.get('errors'):
+                        with st.expander("⚠️ Errors encountered"):
+                            for error in results['errors']:
+                                st.error(error)
+
+                    # Show top results by category
+                    st.markdown("### Top Discoveries by Category")
+                    for category, cat_results in results.get('datasets_found', {}).items():
+                        with st.expander(f"**{category.replace('_', ' ').title()}** ({cat_results['count']} found)"):
+                            for ds in cat_results.get('datasets', [])[:5]:
+                                score = ds['score']
+                                st.markdown(f"""
+                                **{ds['hf_id']}** - Score: {ds['weighted_score']:.1f}
+                                - Recommendation: `{score['recommendation']}`
+                                - Complexity: `{score['conversion_complexity']}`
+                                - Structure: {score['structure_score']:.0f}/35 | Size: {score['size_score']:.0f}/20 | Quality: {score['quality_score']:.0f}/20
+                                """)
+
+                except Exception as e:
+                    st.error(f"Discovery failed: {str(e)}")
+
+
+def _discovery_approvals_tab(agent):
+    """Tab for reviewing and approving pending datasets."""
+
+    st.subheader("Review Pending Datasets")
+
+    if not DATABASE_AVAILABLE:
+        st.warning("Database not available. Approvals require database storage.")
+        return
+
+    # Filter options
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        filter_min_score = st.slider("Min Score", 0, 100, 50, key="approval_min_score")
+
+    with col2:
+        filter_recommendation = st.selectbox(
+            "Recommendation",
+            ["All", "high", "medium", "low"],
+            key="approval_rec"
+        )
+
+    with col3:
+        limit = st.slider("Max Results", 10, 100, 25, key="approval_limit")
+
+    # Get pending datasets
+    rec_filter = None if filter_recommendation == "All" else filter_recommendation
+    pending = agent.get_pending_approvals(
+        min_score=filter_min_score,
+        recommendation=rec_filter,
+        limit=limit
+    )
+
+    if not pending:
+        st.info("No pending datasets matching your criteria.")
+        return
+
+    st.markdown(f"### {len(pending)} Pending Datasets")
+
+    # Bulk actions
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("✅ Approve All High-Scoring (≥70)", type="primary"):
+            approved_count = 0
+            for ds in pending:
+                if ds['total_score'] >= 70:
+                    agent.approve_dataset(ds['hf_id'], approved_by='bulk_auto')
+                    approved_count += 1
+            if approved_count > 0:
+                st.success(f"Approved {approved_count} datasets!")
+                st.rerun()
+            else:
+                st.info("No high-scoring datasets to approve.")
+
+    with col2:
+        if st.button("🗑️ Reject All Low-Scoring (<40)"):
+            rejected_count = 0
+            for ds in pending:
+                if ds['total_score'] < 40:
+                    agent.reject_dataset(ds['hf_id'], reason='Low score auto-reject')
+                    rejected_count += 1
+            if rejected_count > 0:
+                st.success(f"Rejected {rejected_count} datasets!")
+                st.rerun()
+            else:
+                st.info("No low-scoring datasets to reject.")
+
+    st.markdown("---")
+
+    # Individual dataset cards
+    for ds in pending:
+        with st.expander(f"**{ds['hf_id']}** - Score: {ds['total_score']:.1f} ({ds['recommendation'].upper()})"):
+            col1, col2 = st.columns([2, 1])
+
+            with col1:
+                st.markdown(f"""
+                **Author:** {ds.get('hf_author', 'Unknown')}
+
+                **Category:** {ds.get('discovery_category', 'N/A').replace('_', ' ').title()}
+
+                **Conversion Complexity:** `{ds.get('conversion_complexity', 'unknown')}`
+
+                **License:** {ds.get('license', 'Unknown')}
+                """)
+
+                # Description preview
+                desc = ds.get('description', 'No description available.')
+                if desc and len(desc) > 300:
+                    desc = desc[:300] + "..."
+                st.markdown(f"**Description:** {desc}")
+
+            with col2:
+                st.markdown("**Score Breakdown:**")
+                st.progress(ds['structure_score'] / 35, text=f"Structure: {ds['structure_score']:.0f}/35")
+                st.progress(ds['size_score'] / 20, text=f"Size: {ds['size_score']:.0f}/20")
+                st.progress(ds['quality_score'] / 20, text=f"Quality: {ds['quality_score']:.0f}/20")
+                st.progress(ds['license_score'] / 15, text=f"License: {ds['license_score']:.0f}/15")
+                st.progress(ds['feasibility_score'] / 10, text=f"Feasibility: {ds['feasibility_score']:.0f}/10")
+
+            # Action buttons
+            col1, col2, col3 = st.columns([1, 1, 2])
+            with col1:
+                if st.button("✅ Approve", key=f"approve_{ds['hf_id']}", type="primary"):
+                    agent.approve_dataset(ds['hf_id'], approved_by='user')
+                    st.success("Approved!")
+                    st.rerun()
+
+            with col2:
+                if st.button("❌ Reject", key=f"reject_{ds['hf_id']}"):
+                    agent.reject_dataset(ds['hf_id'], reason='User rejected')
+                    st.warning("Rejected")
+                    st.rerun()
+
+            with col3:
+                st.link_button(
+                    "🔗 View on HuggingFace",
+                    f"https://huggingface.co/datasets/{ds['hf_id']}"
+                )
+
+
+def _discovery_process_tab(agent):
+    """Tab for processing approved datasets."""
+
+    st.subheader("Process Approved Datasets")
+
+    if not DATABASE_AVAILABLE:
+        st.warning("Database not available. Processing requires database storage.")
+        return
+
+    # Get count of approved but not processed
+    conn = agent.db_manager._get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT COUNT(*) as count FROM discovered_datasets
+        WHERE approval_status = 'approved' AND converted_network_id IS NULL
+    """)
+    pending_count = cursor.fetchone()['count']
+
+    st.metric("Approved & Ready to Process", pending_count)
+
+    if pending_count == 0:
+        st.info("No approved datasets waiting to be processed. Approve some from the Pending Approvals tab!")
+        return
+
+    # Processing options
+    max_process = st.slider("Max datasets to process", 1, min(20, pending_count), min(5, pending_count))
+
+    if st.button("⚡ Process Datasets", type="primary"):
+        with st.spinner(f"Processing up to {max_process} datasets..."):
+            results = agent.process_approved_datasets(max_process=max_process)
+
+        st.markdown("### Processing Results")
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Processed", results['processed'])
+        with col2:
+            st.metric("Successful", results['successful'])
+        with col3:
+            st.metric("Failed", results['failed'])
+
+        # Show successful conversions
+        if results['networks']:
+            st.success("Successfully converted networks:")
+            for net in results['networks']:
+                st.markdown(f"- **{net['hf_id']}** → `{net['save_path']}` ({net['nodes']} nodes)")
+
+        # Show errors
+        if results['errors']:
+            with st.expander("⚠️ Errors"):
+                for err in results['errors']:
+                    st.error(f"**{err['hf_id']}**: {err['error']}")
+
+
+def _discovery_stats_tab(agent):
+    """Tab showing discovery statistics."""
+
+    st.subheader("Discovery Statistics")
+
+    if not DATABASE_AVAILABLE:
+        st.warning("Database not available. Statistics require database storage.")
+        return
+
+    stats = agent.get_discovery_stats()
+
+    if not stats:
+        st.info("No discovery data yet. Run a discovery search first!")
+        return
+
+    # Status counts
+    st.markdown("### Dataset Status")
+    status_data = stats.get('by_status', {})
+    if status_data:
+        cols = st.columns(len(status_data))
+        for i, (status, count) in enumerate(status_data.items()):
+            with cols[i]:
+                st.metric(status.title(), count)
+
+    # Pending by recommendation
+    st.markdown("### Pending by Recommendation")
+    pending_rec = stats.get('pending_by_recommendation', {})
+    if pending_rec:
+        cols = st.columns(len(pending_rec))
+        for i, (rec, count) in enumerate(pending_rec.items()):
+            with cols[i]:
+                color = {"high": "green", "medium": "orange", "low": "red"}.get(rec, "gray")
+                st.metric(f"{rec.title()} Priority", count)
+
+    # By category
+    st.markdown("### Datasets by Category")
+    cat_data = stats.get('by_category', {})
+    if cat_data:
+        import pandas as pd
+        df = pd.DataFrame([
+            {"Category": cat.replace('_', ' ').title(), "Count": count}
+            for cat, count in cat_data.items()
+        ])
+        st.bar_chart(df.set_index("Category"))
+
+    # Recent runs
+    st.markdown("### Recent Discovery Runs")
+    recent = stats.get('recent_runs', [])
+    if recent:
+        for run in recent:
+            status_emoji = "✅" if run.get('status') == 'completed' else "⚠️"
+            st.markdown(f"""
+            {status_emoji} **{run.get('started_at', 'Unknown')}**
+            - Found: {run.get('total_found', 0)} | High: {run.get('high_potential', 0)} | Medium: {run.get('medium_potential', 0)}
+            """)
+    else:
+        st.info("No discovery runs recorded yet.")
+
 
 def learn_more_interface():
     """Comprehensive educational interface about adaptive organizations and regenerative economics."""

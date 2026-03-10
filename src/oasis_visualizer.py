@@ -536,7 +536,7 @@ def create_sustainability_detail_chart(sustainable_metrics: Dict[str, Any]) -> g
 
     # Update axes
     fig.update_xaxes(title_text="Relative Ascendency (alpha)", range=[0, 1], row=1, col=1)
-    fig.update_yaxes(visible=False, row=1, col=1)
+    fig.update_yaxes(visible=False, showticklabels=False, range=[0, 1], row=1, col=1)
 
     fig.update_xaxes(title_text="Relative Ascendency (alpha)", range=[0, 1], row=1, col=2)
     fig.update_yaxes(title_text="Robustness (R)", row=1, col=2)

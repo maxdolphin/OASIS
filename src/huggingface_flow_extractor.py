@@ -506,6 +506,333 @@ class HuggingFaceFlowExtractor:
         
         raise ValueError("Could not process matrix format")
     
+    def extract_generic_graph_network(self,
+                                      dataset_name: str,
+                                      network_index: int = 0,
+                                      max_nodes: int = 100) -> Dict:
+        """
+        Extract flow matrix from generic graph datasets with edge_index format.
+
+        This handles datasets that follow the PyTorch Geometric format with
+        edge_index, node features, and edge attributes.
+
+        Args:
+            dataset_name: HuggingFace dataset ID
+            network_index: Which graph to extract (for multi-graph datasets)
+            max_nodes: Maximum number of nodes to include
+
+        Returns:
+            Dictionary with flow matrix and metadata
+        """
+        print(f"Loading generic graph dataset: {dataset_name}")
+
+        try:
+            # Try to load with different split strategies
+            dataset = None
+            used_split = None
+
+            for split in ['train', 'test', 'validation', 'full', None]:
+                try:
+                    if split:
+                        dataset = load_dataset(dataset_name, split=split)
+                    else:
+                        dataset = load_dataset(dataset_name)
+                        if hasattr(dataset, 'keys'):
+                            first_split = list(dataset.keys())[0]
+                            dataset = dataset[first_split]
+                    used_split = split
+                    break
+                except Exception:
+                    continue
+
+            if dataset is None:
+                raise ValueError(f"Could not load dataset {dataset_name}")
+
+            # Handle dataset that may be a list of graphs
+            if len(dataset) > network_index:
+                graph_data = dataset[network_index]
+            else:
+                graph_data = dataset[0]
+
+            # Extract based on available structure
+            if 'edge_index' in graph_data:
+                return self._process_edge_index_format(
+                    graph_data, dataset_name, network_index, max_nodes
+                )
+            elif 'adjacency' in graph_data or 'adj' in graph_data:
+                return self._process_adjacency_format(
+                    graph_data, dataset_name, network_index, max_nodes
+                )
+            else:
+                # Try to find edge-like columns in tabular format
+                df = dataset.to_pandas() if hasattr(dataset, 'to_pandas') else None
+                if df is not None:
+                    return self._infer_graph_from_dataframe(
+                        df, dataset_name, max_nodes
+                    )
+
+                raise ValueError("Could not identify graph structure")
+
+        except Exception as e:
+            print(f"Error loading generic graph: {e}")
+            return None
+
+    def _process_edge_index_format(self, graph_data: Dict, dataset_name: str,
+                                    network_index: int, max_nodes: int) -> Dict:
+        """Process datasets with edge_index format (PyTorch Geometric style)."""
+        edges = graph_data['edge_index']
+
+        # Determine number of nodes
+        if 'num_nodes' in graph_data:
+            num_nodes = graph_data['num_nodes']
+        elif 'x' in graph_data:
+            num_nodes = len(graph_data['x'])
+        else:
+            num_nodes = max(max(edges[0]), max(edges[1])) + 1
+
+        # Limit nodes if necessary
+        if num_nodes > max_nodes:
+            num_nodes = max_nodes
+            # Filter edges to only include nodes within limit
+            valid_edges = [(s, d) for s, d in zip(edges[0], edges[1])
+                          if s < max_nodes and d < max_nodes]
+            edges = ([e[0] for e in valid_edges], [e[1] for e in valid_edges])
+
+        # Build flow matrix
+        flow_matrix = np.zeros((num_nodes, num_nodes))
+
+        # Use edge weights if available
+        if 'edge_attr' in graph_data:
+            edge_weights = graph_data['edge_attr']
+            for i, (src, dst) in enumerate(zip(edges[0], edges[1])):
+                if i < len(edge_weights):
+                    weight = edge_weights[i]
+                    if isinstance(weight, (list, np.ndarray)):
+                        weight = weight[0] if len(weight) > 0 else 1.0
+                    flow_matrix[src, dst] = float(weight)
+                else:
+                    flow_matrix[src, dst] = 1.0
+        else:
+            for src, dst in zip(edges[0], edges[1]):
+                flow_matrix[src, dst] = 1.0
+
+        # Generate node labels
+        if 'node_names' in graph_data:
+            nodes = [str(n) for n in graph_data['node_names'][:num_nodes]]
+        else:
+            nodes = [f"Node_{i}" for i in range(num_nodes)]
+
+        # Normalize
+        if flow_matrix.sum() > 0:
+            flow_matrix = flow_matrix / flow_matrix.max() * 100
+
+        return {
+            'organization': f'Graph Network from {dataset_name}',
+            'nodes': nodes,
+            'flows': flow_matrix.tolist(),
+            'metadata': {
+                'source': dataset_name,
+                'network_index': network_index,
+                'total_nodes': num_nodes,
+                'total_edges': len(edges[0]) if edges else 0,
+                'density': float(np.count_nonzero(flow_matrix) / (num_nodes * num_nodes)) if num_nodes > 0 else 0,
+                'format': 'edge_index'
+            }
+        }
+
+    def _process_adjacency_format(self, graph_data: Dict, dataset_name: str,
+                                   network_index: int, max_nodes: int) -> Dict:
+        """Process datasets with adjacency matrix format."""
+        adj_key = 'adjacency' if 'adjacency' in graph_data else 'adj'
+        adj_matrix = np.array(graph_data[adj_key])
+
+        # Limit nodes
+        num_nodes = min(adj_matrix.shape[0], max_nodes)
+        flow_matrix = adj_matrix[:num_nodes, :num_nodes].astype(float)
+
+        # Generate node labels
+        nodes = [f"Node_{i}" for i in range(num_nodes)]
+
+        # Normalize
+        if flow_matrix.sum() > 0:
+            flow_matrix = flow_matrix / flow_matrix.max() * 100
+
+        return {
+            'organization': f'Graph Network from {dataset_name}',
+            'nodes': nodes,
+            'flows': flow_matrix.tolist(),
+            'metadata': {
+                'source': dataset_name,
+                'network_index': network_index,
+                'total_nodes': num_nodes,
+                'total_edges': int(np.count_nonzero(flow_matrix)),
+                'density': float(np.count_nonzero(flow_matrix) / (num_nodes * num_nodes)) if num_nodes > 0 else 0,
+                'format': 'adjacency'
+            }
+        }
+
+    def _infer_graph_from_dataframe(self, df: pd.DataFrame, dataset_name: str,
+                                     max_nodes: int) -> Dict:
+        """Try to infer graph structure from tabular data."""
+        # Look for source/target column pairs
+        source_cols = ['source', 'src', 'from', 'origin', 'node1', 'head']
+        target_cols = ['target', 'dst', 'to', 'destination', 'node2', 'tail']
+
+        source_col = None
+        target_col = None
+
+        for s_col in source_cols:
+            if s_col in df.columns:
+                source_col = s_col
+                break
+
+        for t_col in target_cols:
+            if t_col in df.columns:
+                target_col = t_col
+                break
+
+        if source_col and target_col:
+            return self.extract_tabular_flow_network(
+                dataset_name,
+                source_col=source_col,
+                target_col=target_col,
+                max_nodes=max_nodes
+            )
+
+        raise ValueError("Could not infer graph structure from dataframe")
+
+    def extract_tabular_flow_network(self,
+                                     dataset_name: str,
+                                     source_col: str = None,
+                                     target_col: str = None,
+                                     weight_col: str = None,
+                                     max_nodes: int = 100) -> Dict:
+        """
+        Extract flow matrix from tabular datasets with source/target columns.
+
+        Args:
+            dataset_name: HuggingFace dataset ID
+            source_col: Name of source/origin column
+            target_col: Name of target/destination column
+            weight_col: Name of weight/value column (optional)
+            max_nodes: Maximum number of nodes
+
+        Returns:
+            Dictionary with flow matrix and metadata
+        """
+        print(f"Loading tabular flow dataset: {dataset_name}")
+
+        try:
+            # Load dataset
+            dataset = None
+            for split in ['train', 'test', 'validation', 'full', None]:
+                try:
+                    if split:
+                        dataset = load_dataset(dataset_name, split=split)
+                    else:
+                        dataset = load_dataset(dataset_name)
+                        if hasattr(dataset, 'keys'):
+                            first_split = list(dataset.keys())[0]
+                            dataset = dataset[first_split]
+                    break
+                except Exception:
+                    continue
+
+            if dataset is None:
+                raise ValueError(f"Could not load dataset {dataset_name}")
+
+            df = dataset.to_pandas()
+
+            # Auto-detect columns if not specified
+            if source_col is None:
+                for col in ['source', 'src', 'from', 'origin', 'node1', 'head', 'sender']:
+                    if col in df.columns:
+                        source_col = col
+                        break
+
+            if target_col is None:
+                for col in ['target', 'dst', 'to', 'destination', 'node2', 'tail', 'receiver']:
+                    if col in df.columns:
+                        target_col = col
+                        break
+
+            if source_col is None or target_col is None:
+                raise ValueError(f"Could not identify source/target columns. Available: {list(df.columns)}")
+
+            # Auto-detect weight column
+            if weight_col is None:
+                for col in ['weight', 'value', 'flow', 'amount', 'count', 'volume']:
+                    if col in df.columns:
+                        weight_col = col
+                        break
+
+            # Get unique nodes
+            all_nodes = pd.concat([df[source_col], df[target_col]]).unique()
+
+            # Limit nodes by frequency
+            if len(all_nodes) > max_nodes:
+                # Get top nodes by total connections
+                node_counts = pd.concat([
+                    df[source_col].value_counts(),
+                    df[target_col].value_counts()
+                ]).groupby(level=0).sum()
+                top_nodes = node_counts.nlargest(max_nodes).index.tolist()
+                nodes = top_nodes
+
+                # Filter dataframe
+                df = df[df[source_col].isin(nodes) & df[target_col].isin(nodes)]
+            else:
+                nodes = list(all_nodes)
+
+            # Create node index mapping
+            n = len(nodes)
+            node_to_idx = {node: i for i, node in enumerate(nodes)}
+
+            # Build flow matrix
+            flow_matrix = np.zeros((n, n))
+
+            for _, row in df.iterrows():
+                src = row[source_col]
+                dst = row[target_col]
+
+                if src in node_to_idx and dst in node_to_idx:
+                    i = node_to_idx[src]
+                    j = node_to_idx[dst]
+
+                    if weight_col and weight_col in df.columns:
+                        weight = row[weight_col]
+                        if pd.notna(weight):
+                            flow_matrix[i, j] += float(weight)
+                        else:
+                            flow_matrix[i, j] += 1.0
+                    else:
+                        flow_matrix[i, j] += 1.0
+
+            # Normalize
+            if flow_matrix.sum() > 0:
+                flow_matrix = flow_matrix / flow_matrix.max() * 100
+
+            return {
+                'organization': f'Flow Network from {dataset_name}',
+                'nodes': [str(n) for n in nodes],
+                'flows': flow_matrix.tolist(),
+                'metadata': {
+                    'source': dataset_name,
+                    'source_column': source_col,
+                    'target_column': target_col,
+                    'weight_column': weight_col,
+                    'total_nodes': n,
+                    'total_flow': float(flow_matrix.sum()),
+                    'total_edges': int(np.count_nonzero(flow_matrix)),
+                    'density': float(np.count_nonzero(flow_matrix) / (n * n)) if n > 0 else 0,
+                    'format': 'tabular'
+                }
+            }
+
+        except Exception as e:
+            print(f"Error loading tabular flow dataset: {e}")
+            return None
+
     def _extract_affinity_network(self, dataset, index: int) -> Dict:
         """Helper for protein binding affinity networks."""
         df = dataset.to_pandas()

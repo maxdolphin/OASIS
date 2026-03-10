@@ -92,6 +92,73 @@ class DatabaseManager:
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_network_hash ON networks(network_hash)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_metrics_network ON precomputed_metrics(network_id)')
 
+        # HuggingFace Discovery tables
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS discovered_datasets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+                -- HuggingFace metadata
+                hf_id TEXT UNIQUE NOT NULL,
+                hf_author TEXT,
+                name TEXT,
+                description TEXT,
+                tags TEXT,
+                license TEXT,
+
+                -- Size metrics
+                num_rows INTEGER,
+                download_size_bytes INTEGER,
+
+                -- Discovery metadata
+                discovered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                discovery_keywords TEXT,
+                discovery_category TEXT,
+
+                -- Scoring
+                total_score REAL,
+                structure_score REAL,
+                size_score REAL,
+                quality_score REAL,
+                license_score REAL,
+                feasibility_score REAL,
+                recommendation TEXT,
+                conversion_complexity TEXT,
+
+                -- Approval workflow
+                approval_status TEXT DEFAULT 'pending',
+                approved_by TEXT,
+                approved_at TIMESTAMP,
+                rejection_reason TEXT,
+
+                -- Processing
+                processing_attempts INTEGER DEFAULT 0,
+                last_processing_error TEXT,
+                converted_network_id INTEGER,
+
+                FOREIGN KEY (converted_network_id) REFERENCES networks(id)
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS discovery_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                completed_at TIMESTAMP,
+                status TEXT DEFAULT 'running',
+                keywords_searched TEXT,
+                total_found INTEGER DEFAULT 0,
+                high_potential INTEGER DEFAULT 0,
+                medium_potential INTEGER DEFAULT 0,
+                errors TEXT
+            )
+        ''')
+
+        # Create indexes for discovery tables
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_discovered_hf_id ON discovered_datasets(hf_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_discovered_status ON discovered_datasets(approval_status)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_discovered_score ON discovered_datasets(total_score)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_discovered_category ON discovered_datasets(discovery_category)')
+
         conn.commit()
         logger.debug("Database schema initialized")
 

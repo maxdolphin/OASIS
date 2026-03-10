@@ -206,8 +206,46 @@ class OrganizationalNetworkGenerator:
         
         return G_weighted
     
-    def create_plotly_visualization(self, 
-                                   G: nx.DiGraph, 
+    def _create_curved_edge(self, x0, y0, x1, y1, curvature=0.2, num_points=20):
+        """Generate points for a curved edge using quadratic Bezier curve.
+
+        Args:
+            x0, y0: Start point coordinates
+            x1, y1: End point coordinates
+            curvature: Amount of curve (0 = straight, higher = more curved)
+            num_points: Number of points along the curve (lower = better performance)
+
+        Returns:
+            Tuple of (x_points, y_points, control_point)
+        """
+        # Calculate midpoint
+        mid_x = (x0 + x1) / 2
+        mid_y = (y0 + y1) / 2
+
+        # Calculate perpendicular offset for control point
+        dx = x1 - x0
+        dy = y1 - y0
+        length = np.sqrt(dx**2 + dy**2)
+        if length > 0:
+            # Perpendicular direction
+            perp_x = -dy / length * curvature
+            perp_y = dx / length * curvature
+        else:
+            perp_x, perp_y = 0, 0
+
+        # Control point
+        ctrl_x = mid_x + perp_x
+        ctrl_y = mid_y + perp_y
+
+        # Generate curve points
+        t = np.linspace(0, 1, num_points)
+        curve_x = (1-t)**2 * x0 + 2*(1-t)*t * ctrl_x + t**2 * x1
+        curve_y = (1-t)**2 * y0 + 2*(1-t)*t * ctrl_y + t**2 * y1
+
+        return list(curve_x) + [None], list(curve_y) + [None], (ctrl_x, ctrl_y)
+
+    def create_plotly_visualization(self,
+                                   G: nx.DiGraph,
                                    node_names: Optional[List[str]] = None,
                                    title: str = "Network Visualization") -> go.Figure:
         """
@@ -215,15 +253,34 @@ class OrganizationalNetworkGenerator:
         - Node sizes proportional to total flow (in + out)
         - Directional arrows showing flow direction
         - Edge thickness and color based on flow intensity
-        
+
         Args:
             G: NetworkX directed graph
             node_names: Optional list of node names
             title: Chart title
-            
+
         Returns:
             Plotly figure
         """
+        # Performance settings based on network size
+        num_edges = G.number_of_edges()
+        num_nodes = G.number_of_nodes()
+
+        # Thresholds for performance optimization
+        LARGE_NETWORK_EDGES = 100  # Above this, use performance mode
+        MAX_ARROWS = 50  # Maximum arrows to show
+        MAX_INTERACTIVE_EDGES = 80  # Above this, disable interactive highlighting
+
+        # Adjust curve resolution and features based on size
+        if num_edges > LARGE_NETWORK_EDGES:
+            curve_points = 8  # Fewer points for large networks
+            use_individual_traces = False  # Combine edges into single trace
+            show_all_arrows = False
+        else:
+            curve_points = 20  # Full resolution for small networks
+            use_individual_traces = True
+            show_all_arrows = True
+
         # Calculate layout with better spacing
         # Always prioritize layouts that ensure good node separation
         try:
@@ -281,86 +338,138 @@ class OrganizationalNetworkGenerator:
             max_weight = np.percentile(all_weights_array, 95)  # 95th percentile as maximum
             weight_range = max_weight - min_weight if max_weight != min_weight else 1
         
+        # For large networks, determine which edges get arrows (top by weight)
+        edges_with_weights = [(edge, G.edges[edge].get('weight', 1)) for edge in G.edges()]
+        if not show_all_arrows and len(edges_with_weights) > MAX_ARROWS:
+            # Sort by weight descending and get top edges for arrows
+            sorted_edges = sorted(edges_with_weights, key=lambda x: x[1], reverse=True)
+            arrow_edges = set(e[0] for e in sorted_edges[:MAX_ARROWS])
+        else:
+            arrow_edges = set(G.edges())
+
         # Create edge traces with varying thickness and color
         edge_traces = []
         edge_annotations = []
-        
-        for edge in G.edges():
-            x0, y0 = pos[edge[0]]
-            x1, y1 = pos[edge[1]]
-            weight = G.edges[edge].get('weight', 1)
-            
-            # Normalize weight for visualization with clamping
-            if weight_range > 0:
-                # Clamp weight to the percentile range to avoid extreme values
-                clamped_weight = max(min_weight, min(weight, max_weight))
-                normalized_weight = (clamped_weight - min_weight) / weight_range
-            else:
-                normalized_weight = 0.5
-            
-            # Edge width with better scaling: minimum 1.5, maximum 6 for good visibility range
-            MIN_EDGE_WIDTH = 1.5  # Ensure all edges are visible
-            MAX_EDGE_WIDTH = 6.0  # Reasonable maximum
-            edge_width = MIN_EDGE_WIDTH + (MAX_EDGE_WIDTH - MIN_EDGE_WIDTH) * normalized_weight
-            
-            # Enhanced color scheme with better contrast for different weights
-            if normalized_weight < 0.33:
-                # Light flows: lighter gray/blue
-                color_r, color_g, color_b = 100, 150, 200  # Light blue-gray
-            elif normalized_weight < 0.67:
-                # Medium flows: medium gray
-                color_r, color_g, color_b = 80, 80, 120   # Medium blue-gray  
-            else:
-                # Heavy flows: dark color
-                color_r, color_g, color_b = 50, 50, 80    # Dark blue-gray
-                
-            edge_color = f'rgba({color_r}, {color_g}, {color_b}, 0.35)'  # Very transparent edges
-            
-            # Create more transparent arrow color
-            arrow_color = f'rgba({color_r}, {color_g}, {color_b}, 0.3)'  # Lower opacity for arrows
-            
-            # Create edge line
-            edge_trace = go.Scatter(
-                x=[x0, x1, None], 
-                y=[y0, y1, None],
-                line=dict(
-                    width=edge_width, 
-                    color=edge_color
-                ),
-                hoverinfo='text',
-                hovertext=f'Flow: {weight:.1f}<br>From: Node {edge[0]}<br>To: Node {edge[1]}',
+
+        # For large networks, combine edges into single trace for performance
+        if not use_individual_traces:
+            all_x = []
+            all_y = []
+            for edge in G.edges():
+                x0, y0 = pos[edge[0]]
+                x1, y1 = pos[edge[1]]
+                curve_x, curve_y, ctrl_point = self._create_curved_edge(
+                    x0, y0, x1, y1, curvature=0.15, num_points=curve_points
+                )
+                all_x.extend(curve_x)
+                all_y.extend(curve_y)
+
+                # Add arrow for top edges only
+                if edge in arrow_edges:
+                    weight = G.edges[edge].get('weight', 1)
+                    clamped_weight = max(min_weight, min(weight, max_weight))
+                    normalized_weight = (clamped_weight - min_weight) / weight_range if weight_range > 0 else 0.5
+                    edge_width = 1.5 + 4.5 * normalized_weight
+
+                    if normalized_weight < 0.33:
+                        color_r, color_g, color_b = 120, 170, 220
+                    elif normalized_weight < 0.67:
+                        color_r, color_g, color_b = 90, 130, 180
+                    else:
+                        color_r, color_g, color_b = 60, 90, 140
+                    arrow_color = f'rgba({color_r}, {color_g}, {color_b}, 0.7)'
+
+                    t = 0.75
+                    arrow_x = (1-t)**2 * x0 + 2*(1-t)*t * ctrl_point[0] + t**2 * x1
+                    arrow_y = (1-t)**2 * y0 + 2*(1-t)*t * ctrl_point[1] + t**2 * y1
+                    tangent_x = 2*(1-t)*(ctrl_point[0] - x0) + 2*t*(x1 - ctrl_point[0])
+                    tangent_y = 2*(1-t)*(ctrl_point[1] - y0) + 2*t*(y1 - ctrl_point[1])
+                    tangent_len = np.sqrt(tangent_x**2 + tangent_y**2)
+                    if tangent_len > 0:
+                        tangent_x /= tangent_len
+                        tangent_y /= tangent_len
+                    arrow_end_x = arrow_x + 0.08 * tangent_x
+                    arrow_end_y = arrow_y + 0.08 * tangent_y
+                    edge_annotations.append(dict(
+                        ax=arrow_x, ay=arrow_y, x=arrow_end_x, y=arrow_end_y,
+                        xref='x', yref='y', axref='x', ayref='y',
+                        showarrow=True, arrowhead=3, arrowsize=1.5,
+                        arrowwidth=max(1.5, edge_width * 0.8), arrowcolor=arrow_color,
+                    ))
+
+            # Single combined edge trace for performance
+            edge_traces.append(go.Scatter(
+                x=all_x, y=all_y,
+                line=dict(width=2, color='rgba(90, 130, 180, 0.4)', shape='spline'),
+                hoverinfo='skip',
                 mode='lines',
                 showlegend=False
-            )
-            edge_traces.append(edge_trace)
-            
-            # Add arrow annotation using Plotly's annotation system
-            # Position arrow at 70% along the edge for better visibility
-            arrow_pos = 0.7
-            arrow_x = x0 + arrow_pos * (x1 - x0)
-            arrow_y = y0 + arrow_pos * (y1 - y0)
-            
-            # Create arrow that points from current position toward end
-            # Increased arrow length for better visibility
-            arrow_end_x = arrow_x + 0.15 * (x1 - x0)
-            arrow_end_y = arrow_y + 0.15 * (y1 - y0)
-            
-            arrow_annotation = dict(
-                ax=arrow_x,
-                ay=arrow_y,
-                x=arrow_end_x,
-                y=arrow_end_y,
-                xref='x',
-                yref='y',
-                axref='x',
-                ayref='y',
-                showarrow=True,
-                arrowhead=2,
-                arrowsize=1.2,  # Smaller arrow triangle size
-                arrowwidth=min(2.5, max(1.0, edge_width * 0.7)),  # Proportional to edge width but capped
-                arrowcolor=arrow_color,  # Use more transparent arrow color
-            )
-            edge_annotations.append(arrow_annotation)
+            ))
+        else:
+            # Individual edge traces (for smaller networks)
+            for edge in G.edges():
+                x0, y0 = pos[edge[0]]
+                x1, y1 = pos[edge[1]]
+                weight = G.edges[edge].get('weight', 1)
+
+                # Normalize weight for visualization with clamping
+                if weight_range > 0:
+                    clamped_weight = max(min_weight, min(weight, max_weight))
+                    normalized_weight = (clamped_weight - min_weight) / weight_range
+                else:
+                    normalized_weight = 0.5
+
+                # Edge width with better scaling
+                MIN_EDGE_WIDTH = 1.5
+                MAX_EDGE_WIDTH = 6.0
+                edge_width = MIN_EDGE_WIDTH + (MAX_EDGE_WIDTH - MIN_EDGE_WIDTH) * normalized_weight
+
+                # Enhanced color scheme with gradient feel and better contrast
+                if normalized_weight < 0.33:
+                    color_r, color_g, color_b = 120, 170, 220  # Light blue
+                elif normalized_weight < 0.67:
+                    color_r, color_g, color_b = 90, 130, 180   # Medium blue
+                else:
+                    color_r, color_g, color_b = 60, 90, 140    # Deep blue
+
+                edge_color = f'rgba({color_r}, {color_g}, {color_b}, 0.45)'
+                arrow_color = f'rgba({color_r}, {color_g}, {color_b}, 0.7)'
+
+                # Create curved edge line using Bezier curve
+                curve_x, curve_y, ctrl_point = self._create_curved_edge(
+                    x0, y0, x1, y1, curvature=0.15, num_points=curve_points
+                )
+                edge_trace = go.Scatter(
+                    x=curve_x,
+                    y=curve_y,
+                    line=dict(width=edge_width, color=edge_color, shape='spline'),
+                    hoverinfo='text',
+                    hovertext=f'Flow: {weight:.1f}<br>From: Node {edge[0]}<br>To: Node {edge[1]}',
+                    mode='lines',
+                    showlegend=False
+                )
+                edge_traces.append(edge_trace)
+
+                # Add arrow annotation
+                if edge in arrow_edges:
+                    t = 0.75
+                    arrow_x = (1-t)**2 * x0 + 2*(1-t)*t * ctrl_point[0] + t**2 * x1
+                    arrow_y = (1-t)**2 * y0 + 2*(1-t)*t * ctrl_point[1] + t**2 * y1
+                    tangent_x = 2*(1-t)*(ctrl_point[0] - x0) + 2*t*(x1 - ctrl_point[0])
+                    tangent_y = 2*(1-t)*(ctrl_point[1] - y0) + 2*t*(y1 - ctrl_point[1])
+                    tangent_len = np.sqrt(tangent_x**2 + tangent_y**2)
+                    if tangent_len > 0:
+                        tangent_x /= tangent_len
+                        tangent_y /= tangent_len
+                    arrow_end_x = arrow_x + 0.08 * tangent_x
+                    arrow_end_y = arrow_y + 0.08 * tangent_y
+
+                    edge_annotations.append(dict(
+                        ax=arrow_x, ay=arrow_y, x=arrow_end_x, y=arrow_end_y,
+                        xref='x', yref='y', axref='x', ayref='y',
+                        showarrow=True, arrowhead=3, arrowsize=1.5,
+                        arrowwidth=max(1.5, edge_width * 0.8), arrowcolor=arrow_color,
+                    ))
         
         # Node trace
         node_x = []
@@ -440,17 +549,29 @@ class OrganizationalNetworkGenerator:
                     valign='middle',
                 ))
         
-        # Create node trace with markers only (text will be in annotations with backgrounds)
+        # Create glow effect trace (rendered behind main nodes for visual depth)
+        glow_sizes = [size * 1.4 for size in node_sizes]  # 40% larger than main nodes
+        glow_trace = go.Scatter(
+            x=node_x, y=node_y,
+            mode='markers',
+            hoverinfo='skip',  # No hover on glow
+            marker=dict(
+                size=glow_sizes,
+                color=node_colors,
+                colorscale=custom_colorscale,
+                opacity=0.25,  # Semi-transparent glow
+                line=dict(width=0),  # No border on glow
+                cmin=-1,
+                cmax=1,
+                showscale=False  # Don't show colorbar for glow
+            ),
+            showlegend=False
+        )
+
+        # Create main node trace with markers only (text will be in annotations)
         node_trace = go.Scatter(
             x=node_x, y=node_y,
             mode='markers',  # Markers only, text will be in annotations
-            # text=node_text,  # Removed - using annotations instead
-            # textposition="middle center",  # Removed - using annotations instead
-            # textfont=dict(  # Removed - using annotations instead
-            #     size=14,
-            #     color='white',
-            #     family='Arial, sans-serif'
-            # ),
             hoverinfo='text',
             hovertext=node_info,
             customdata=list(G.nodes()),  # Store node indices for click detection
@@ -473,19 +594,26 @@ class OrganizationalNetworkGenerator:
                 cmax=1
             )
         )
-        
-        # Combine all edge traces and node trace
-        all_traces = edge_traces + [node_trace]
-        
+
+        # Combine all traces: edges -> glow -> nodes (layering order)
+        all_traces = edge_traces + [glow_trace, node_trace]
+
+        # Adjust footer text based on network size
+        if num_edges > LARGE_NETWORK_EDGES:
+            footer_text = f"Node size = Total flow | Color = Flow balance | Showing top {MAX_ARROWS} arrows | Large network: {num_nodes} nodes, {num_edges} edges"
+        else:
+            footer_text = "Node size = Total flow | Color = Flow balance | Edge thickness = Flow volume | Arrows show flow direction | Use dropdown to highlight connections"
+
         # Create figure with arrow and text annotations
         fig = go.Figure(data=all_traces,
                        layout=go.Layout(
                            title=dict(text=title, font=dict(size=16)),
                            showlegend=False,
                            hovermode='closest',
+                           height=700,  # Taller chart for better visibility
                            margin=dict(b=20,l=5,r=5,t=40),
                            annotations=edge_annotations + text_annotations + [dict(
-                               text="Node size = Total flow | Color = Flow balance | Edge thickness = Flow volume | Arrows show flow direction | Use dropdown to highlight connections",
+                               text=footer_text,
                                showarrow=False,
                                xref="paper", yref="paper",
                                x=0.5, y=-0.05,
@@ -497,11 +625,12 @@ class OrganizationalNetworkGenerator:
                            plot_bgcolor='#ffffff',  # White background for maximum contrast with edges
                            paper_bgcolor='white'
                        ))
-        
-        # Add interactive highlighting
-        fig = self._add_interactive_highlighting(fig, G, pos, node_names, all_traces, 
-                                                in_flow, out_flow, total_flow)
-        
+
+        # Add interactive highlighting only for smaller networks (performance)
+        if num_edges <= MAX_INTERACTIVE_EDGES and use_individual_traces:
+            fig = self._add_interactive_highlighting(fig, G, pos, node_names, all_traces,
+                                                    in_flow, out_flow, total_flow)
+
         return fig
     
     def _add_interactive_highlighting(self, fig, G, pos, node_names, all_traces, 
@@ -518,9 +647,10 @@ class OrganizationalNetworkGenerator:
             edge_map[edge[0]]['out'].append(i)
             edge_map[edge[1]]['in'].append(i)
         
-        # Store original edge colors
+        # Store original edge colors (exclude last two traces: glow and node)
+        num_edge_traces = len(fig.data) - 2  # Subtract glow trace and node trace
         original_data = []
-        for trace in fig.data[:-1]:  # All edge traces except the last node trace
+        for trace in fig.data[:num_edge_traces]:  # Only edge traces
             original_data.append({
                 'line_color': trace.line.color if hasattr(trace.line, 'color') else 'gray',
                 'line_width': trace.line.width if hasattr(trace.line, 'width') else 1,

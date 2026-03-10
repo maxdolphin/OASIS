@@ -598,48 +598,60 @@ class UlanowiczCalculator:
     
     def calculate_trophic_depth(self) -> float:
         """
-        Calculate average Trophic Depth of the network.
-        
-        Trophic depth measures the average path length through
-        the network, indicating organizational hierarchy.
-        
+        Calculate average Trophic Depth (hierarchical levels) of the network.
+
+        Trophic depth measures the average number of steps/levels in the
+        network hierarchy, similar to trophic levels in ecology.
+        Uses unweighted path lengths to count actual hierarchical steps.
+
         Returns:
-            Average Trophic Depth value
+            Average Trophic Depth value (typically 1-10 for real networks)
         """
-        # Skip for networks > 30 nodes (too computationally expensive)
-        if self.n_nodes > 30:
-            return 0.0  # Skip calculation for large networks
-        
-        # Create networkx graph for path analysis
+        # Skip for networks > 50 nodes (computationally expensive)
+        if self.n_nodes > 50:
+            return 0.0
+
+        # Create networkx graph for path analysis (unweighted for level counting)
         G = nx.DiGraph()
-        
-        # Add nodes and edges with weights
+
         for i in range(self.n_nodes):
             G.add_node(i)
             for j in range(self.n_nodes):
                 if self.flow_matrix[i, j] > 0:
-                    G.add_edge(i, j, weight=self.flow_matrix[i, j])
-        
+                    G.add_edge(i, j)  # No weight - count hops, not flow magnitude
+
         if G.number_of_edges() == 0:
-            return 0
-        
-        # Calculate average shortest path length
+            return 0.0
+
+        # Calculate average shortest path length (unweighted = number of levels)
         try:
-            avg_path_length = nx.average_shortest_path_length(G, weight='weight')
+            avg_path_length = nx.average_shortest_path_length(G)
             return avg_path_length
         except nx.NetworkXError:
-            # Graph is not connected, calculate for largest component
-            if nx.is_strongly_connected(G):
-                return nx.average_shortest_path_length(G, weight='weight')
-            else:
-                # Use largest strongly connected component
+            # Graph is not strongly connected
+            # Calculate for weakly connected component or return estimate
+            try:
+                # Try largest strongly connected component
                 largest_scc = max(nx.strongly_connected_components(G), key=len, default=set())
                 if len(largest_scc) > 1:
                     subgraph = G.subgraph(largest_scc)
-                    return nx.average_shortest_path_length(subgraph, weight='weight')
-                else:
-                    return 1.0  # Single node or no connections
-    
+                    return nx.average_shortest_path_length(subgraph)
+            except:
+                pass
+
+            # Fallback: estimate from graph diameter or density
+            try:
+                # Use weakly connected component
+                largest_wcc = max(nx.weakly_connected_components(G), key=len, default=set())
+                if len(largest_wcc) > 1:
+                    subgraph = G.subgraph(largest_wcc).to_undirected()
+                    if nx.is_connected(subgraph):
+                        return nx.average_shortest_path_length(subgraph)
+            except:
+                pass
+
+            return 0.0
+
     def calculate_conditional_entropy(self) -> float:
         """
         Calculate Conditional Entropy (Hc).
@@ -684,44 +696,37 @@ class UlanowiczCalculator:
     
     def calculate_finn_cycling_index(self) -> float:
         """
-        Calculate Finn Cycling Index (FCI) - SIMPLIFIED VERSION.
-        
+        Calculate Finn Cycling Index (FCI).
+
         FCI measures the fraction of total system throughput that is involved in cycling.
         This is a key indicator of system regeneration and resource efficiency.
-        
-        NOTE: Due to computational complexity, this now uses a simplified approximation
-        for networks with >10 nodes, and returns None for networks with >15 nodes.
-        
+
+        Uses an O(n²) algorithm that detects:
+        1. Self-loops (diagonal elements)
+        2. Two-node reciprocal cycles (A->B and B->A)
+
+        Since metrics are precomputed and cached, no size threshold is needed.
+
         Returns:
-            Finn Cycling Index value between 0 and 1, or None if skipped
+            Finn Cycling Index value between 0 and 1
         """
-        # Skip entirely for medium to large networks
-        if self.n_nodes > 15:
-            return None
-        
+
         tst = self.calculate_tst()
         if tst == 0:
             return 0
-        
-        # For all networks, just use diagonal approximation (self-loops)
-        # This is a reasonable proxy for cycling in many systems
-        self_loop_flow = np.sum(np.diag(self.flow_matrix))
-        
-        # For very small networks (<=10 nodes), add simple 2-node cycle detection
-        if self.n_nodes <= 10:
-            try:
-                # Check for simple 2-node cycles (A->B->A)
-                for i in range(self.n_nodes):
-                    for j in range(i+1, self.n_nodes):
-                        if self.flow_matrix[i, j] > 0 and self.flow_matrix[j, i] > 0:
-                            # Found a 2-node cycle
-                            min_flow = min(self.flow_matrix[i, j], self.flow_matrix[j, i])
-                            self_loop_flow += min_flow * 0.1  # Conservative weight
-            except:
-                pass
-        
-        # Simple FCI approximation
-        fci = min(self_loop_flow / tst, 1.0) if tst > 0 else 0
+
+        # Start with self-loop flow (diagonal elements)
+        cycling_flow = np.sum(np.diag(self.flow_matrix))
+
+        # Add 2-node reciprocal cycles (A->B->A) - O(n²) but fast
+        # Use vectorized operation for efficiency
+        flow_matrix = self.flow_matrix
+        reciprocal = np.minimum(flow_matrix, flow_matrix.T)
+        np.fill_diagonal(reciprocal, 0)  # Don't double-count self-loops
+        cycling_flow += np.sum(reciprocal) / 2  # Divide by 2 to avoid double counting
+
+        # FCI = cycling flow / total throughput
+        fci = min(cycling_flow / tst, 1.0) if tst > 0 else 0
         return fci
 
     def calculate_autocatalytic_index(self) -> Dict[str, Any]:
