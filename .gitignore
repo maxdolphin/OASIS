@@ -48,6 +48,12 @@ ipython_config.py
 # Streamlit
 .streamlit/secrets.toml
 
+# Claude Code
+.claude/
+
+# Cache
+.cache/
+
 # OS generated files
 .DS_Store
 .DS_Store?

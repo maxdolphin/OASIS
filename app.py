@@ -80,6 +80,14 @@ from oasis_visualizer import (
     create_sustainability_detail_chart,
     create_recommendations_chart
 )
+from docs_registry import DOCS, get_entries_by_category, CATEGORY_ORDER, get_anchor
+from docs_ui import inject_docs_css, info_button, label_with_info, render_documentation_page
+
+
+def _tip(key: str) -> str:
+    """Get tooltip text for a registry key (for st.metric help= parameter)."""
+    entry = DOCS.get(key)
+    return entry.get("tooltip", "") if entry else ""
 
 # Import precomputation service for large network optimization
 try:
@@ -248,33 +256,138 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for better styling
+# Custom CSS for dark mode nature/ecosystem theme
 st.markdown("""
 <style>
+    /* ===== GLOBAL DARK THEME ===== */
     .main-header {
         font-size: 2.5rem;
-        color: #1e7e34;
+        color: #2ecc71;
         text-align: center;
         margin-bottom: 2rem;
+        text-shadow: 0 0 20px rgba(46, 204, 113, 0.3);
     }
+
+    /* Metric cards */
     .metric-card {
-        background-color: #f8f9fa;
+        background-color: #161b22;
         padding: 1rem;
         border-radius: 0.5rem;
-        border-left: 4px solid #28a745;
+        border-left: 4px solid #2ecc71;
         margin: 0.5rem 0;
+        color: #e6edf3;
     }
-    .status-viable {
-        color: #28a745;
-        font-weight: bold;
+
+    /* Status colors */
+    .status-viable { color: #2ecc71; font-weight: bold; }
+    .status-unsustainable { color: #e74c3c; font-weight: bold; }
+    .status-moderate { color: #f5b041; font-weight: bold; }
+
+    /* ===== SIDEBAR ===== */
+    section[data-testid="stSidebar"] {
+        background-color: #161b22;
+        border-right: 1px solid rgba(255,255,255,0.08);
     }
-    .status-unsustainable {
-        color: #dc3545;
-        font-weight: bold;
+    section[data-testid="stSidebar"] .stRadio > label {
+        color: #e6edf3;
     }
-    .status-moderate {
-        color: #f59e0b;
-        font-weight: bold;
+
+    /* ===== EXPANDERS ===== */
+    .streamlit-expanderHeader {
+        background-color: #1c2333;
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 8px;
+        color: #e6edf3;
+    }
+    .streamlit-expanderContent {
+        background-color: #1c2333;
+        border: 1px solid rgba(255,255,255,0.08);
+        border-top: none;
+    }
+
+    /* ===== TABS ===== */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+        background-color: transparent;
+    }
+    .stTabs [data-baseweb="tab"] {
+        background-color: #1c2333;
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 8px 8px 0 0;
+        color: #8b949e;
+        padding: 8px 16px;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: #161b22;
+        border-color: #2ecc71;
+        border-bottom-color: #161b22;
+        color: #2ecc71 !important;
+    }
+
+    /* ===== PROGRESS BARS ===== */
+    .stProgress > div > div > div > div {
+        background-color: #2ecc71;
+    }
+
+    /* ===== BUTTONS ===== */
+    .stButton > button[kind="primary"] {
+        background-color: #2ecc71;
+        border-color: #2ecc71;
+        color: #0e1117;
+    }
+    .stButton > button[kind="primary"]:hover {
+        background-color: #58d68d;
+        border-color: #58d68d;
+    }
+
+    /* ===== DATAFRAMES ===== */
+    .stDataFrame {
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 8px;
+    }
+
+    /* ===== SCROLLBAR ===== */
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: #0e1117; }
+    ::-webkit-scrollbar-thumb { background: #1c2333; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #2d8a4e; }
+
+    /* ===== ALERTS ===== */
+    .stAlert {
+        background-color: #1c2333;
+        border: 1px solid rgba(255,255,255,0.08);
+        color: #e6edf3;
+    }
+
+    /* ===== METRIC WIDGETS ===== */
+    [data-testid="stMetricValue"] {
+        color: #e6edf3;
+    }
+    [data-testid="stMetricLabel"] {
+        color: #8b949e;
+    }
+
+    /* ===== SELECTBOX / INPUTS ===== */
+    .stSelectbox > div > div,
+    .stTextInput > div > div > input,
+    .stNumberInput > div > div > input {
+        background-color: #1c2333;
+        color: #e6edf3;
+        border-color: rgba(255,255,255,0.08);
+    }
+
+    /* ===== GLOWING ACCENTS ===== */
+    .stMetric {
+        transition: transform 0.2s ease;
+    }
+    .stMetric:hover {
+        transform: translateY(-2px);
+    }
+
+    /* ===== PLOTLY CHART CONTAINERS ===== */
+    .stPlotlyChart {
+        border-radius: 8px;
+        overflow: hidden;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -324,7 +437,7 @@ def create_mini_viability_chart(metrics):
         ),
         text=[f"α = {metrics['ascendency_ratio']:.2f}"],
         textposition="bottom center",
-        textfont=dict(size=12, color='black'),
+        textfont=dict(size=12, color='#e6edf3'),
         name='Current Position',
         showlegend=False
     ))
@@ -370,10 +483,11 @@ def create_mini_viability_chart(metrics):
             tickvals=[0, 0.2, 0.4, 0.6, 0.8, 1],
             ticktext=['0', '0.2', '0.4', '0.6', '0.8', '1']
         ),
-        plot_bgcolor='white',
-        paper_bgcolor='white',
+        plot_bgcolor='#161b22',
+        paper_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='#e6edf3'),
     )
-    
+
     return fig
 
 def create_metrics_bar_chart(metrics):
@@ -422,7 +536,10 @@ def create_metrics_bar_chart(metrics):
         title="Core System Metrics",
         yaxis_title="Normalized Value",
         height=300,
-        margin=dict(l=0, r=0, t=40, b=40)
+        margin=dict(l=0, r=0, t=40, b=40),
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='#e6edf3'),
     )
     
     return fig
@@ -464,7 +581,10 @@ def create_flow_distribution_chart(flow_matrix, node_names):
         height=300,
         margin=dict(l=0, r=0, t=40, b=40),
         showlegend=True,
-        legend=dict(orientation="v", x=1, y=0.5)
+        legend=dict(orientation="v", x=1, y=0.5, font=dict(color='#e6edf3')),
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='#e6edf3'),
     )
     
     return fig
@@ -599,10 +719,11 @@ def create_network_mini_view(flow_matrix, node_names, max_nodes=10):
         xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
         yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
         margin=dict(l=0, r=0, t=40, b=0),
-        plot_bgcolor='white',
-        paper_bgcolor='white'
+        plot_bgcolor='#161b22',
+        paper_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='#e6edf3'),
     )
-    
+
     return fig
 
 
@@ -685,8 +806,8 @@ def create_network_chart_v2(flow_matrix, node_names, max_nodes=30):
             color=[total_flow[n] for n in G.nodes()],
             colorscale='Viridis',
             showscale=True,
-            colorbar=dict(title="Total Flow"),
-            line=dict(color='white', width=1)
+            colorbar=dict(title="Total Flow", tickfont=dict(color='#e6edf3')),
+            line=dict(color='#0e1117', width=1)
         ),
         hoverinfo='text'
     )
@@ -698,7 +819,10 @@ def create_network_chart_v2(flow_matrix, node_names, max_nodes=30):
         showlegend=False,
         height=600,
         xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-        yaxis=dict(showgrid=False, zeroline=False, showticklabels=False)
+        yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='#161b22',
+        font=dict(color='#e6edf3'),
     )
 
     return fig
@@ -706,16 +830,24 @@ def create_network_chart_v2(flow_matrix, node_names, max_nodes=30):
 
 def main():
     """Main application function."""
-    
+
+    # Inject contextual documentation CSS (once per session)
+    inject_docs_css()
+
     # Initialize session state for page navigation
     if 'current_page' not in st.session_state:
         st.session_state.current_page = 'main'
     if 'analysis_data' not in st.session_state:
         st.session_state.analysis_data = None
-    
+
     # Show different pages based on current state
     if st.session_state.current_page == 'analysis':
         show_analysis_page()
+    elif st.session_state.current_page == 'docs':
+        render_documentation_page()
+        if st.button("← Back to Main"):
+            st.session_state.current_page = 'main'
+            st.rerun()
     else:
         show_main_page()
 
@@ -726,7 +858,7 @@ def show_main_page():
     st.markdown('<h1 class="main-header">🌱 Adaptive Organization Analysis</h1>', unsafe_allow_html=True)
     st.markdown("""
     <div style="text-align: center; margin-bottom: 2rem;">
-        <p style="font-size: 1.2rem; color: #666;">
+        <p style="font-size: 1.2rem; color: #8b949e;">
         Analyze organizational sustainability using Ulanowicz's ecosystem theory 
         and regenerative economics principles
         </p>
@@ -745,6 +877,7 @@ def show_main_page():
     if DISCOVERY_AVAILABLE:
         mode_list.append("🔍 Discover Datasets")
     mode_list.extend([
+        "📖 Documentation",
         "📚 Learn More",
         "🌱 10 Principles",
         "🔬 Formulas Reference",
@@ -764,6 +897,8 @@ def show_main_page():
         synthetic_data_interface()
     elif analysis_mode == "🔍 Discover Datasets":
         discovery_interface()
+    elif analysis_mode == "📖 Documentation":
+        render_documentation_page()
     elif analysis_mode == "📚 Learn More":
         learn_more_interface()
     elif analysis_mode == "🌱 10 Principles":
@@ -887,6 +1022,36 @@ def sample_data_interface():
     if 'selected_dataset_name' not in st.session_state:
         st.session_state.selected_dataset_name = None
 
+    # CSS for dataset card rows
+    st.markdown("""
+    <style>
+    .ds-card {
+        background: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 8px;
+        padding: 12px 16px;
+        margin-bottom: 2px;
+        transition: border-color 0.2s ease;
+    }
+    .ds-card:hover { border-color: #2ecc71; }
+    .ds-card .ds-name {
+        font-size: 15px; font-weight: 600; color: #e6edf3;
+        margin: 0 0 4px 0; line-height: 1.3;
+    }
+    .ds-card .ds-desc {
+        font-size: 13px; color: #8b949e; margin: 0 0 6px 0;
+        line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .ds-card .ds-stats { display: flex; gap: 8px; flex-wrap: wrap; }
+    .ds-card .ds-tag {
+        font-size: 11px; color: #2ecc71;
+        background: rgba(46, 204, 113, 0.1);
+        border: 1px solid rgba(46, 204, 113, 0.25);
+        border-radius: 4px; padding: 2px 8px; white-space: nowrap;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
     # Create tabs for each category
     tab_samples, tab_ecosystems, tab_reallife, tab_user = st.tabs([
         f"📁 Samples ({len(builtin_datasets)})",
@@ -900,128 +1065,214 @@ def sample_data_interface():
 
     # Helper to clean dataset names (remove emoji prefixes)
     def clean_name(name):
-        # Remove common emoji prefixes
         prefixes = ['📁 ', '🌿 ', '🌍 ', '💾 ', '🧬 ']
         for prefix in prefixes:
             if name.startswith(prefix):
                 name = name[len(prefix):]
         return name
 
+    def _get_node_count(info):
+        """Try to get node count from dataset info."""
+        meta = info.get("metadata", {})
+        # Try metadata fields
+        for key in ('compartments', 'total_nodes', 'actual_nodes', 'nodes'):
+            val = meta.get(key)
+            if val and val != 'N/A':
+                try:
+                    return int(val)
+                except (ValueError, TypeError):
+                    pass
+        # Try loading from file
+        if "path" in info:
+            try:
+                with open(info["path"], 'r') as f:
+                    data = json.load(f)
+                nodes = data.get('nodes', data.get('node_names', []))
+                if isinstance(nodes, list) and nodes:
+                    return len(nodes)
+            except Exception:
+                pass
+        return None
+
+    def render_dataset_row(name, description, tags, button_key):
+        """Render one dataset card row. Returns True if Analyze was clicked."""
+        tags_html = "".join(f'<span class="ds-tag">{t}</span>' for t in tags)
+        col_info, col_btn = st.columns([5, 1])
+        with col_info:
+            st.markdown(f"""
+            <div class="ds-card">
+                <div class="ds-name">{name}</div>
+                <div class="ds-desc" title="{description}">{description}</div>
+                <div class="ds-stats">{tags_html}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with col_btn:
+            st.markdown("<div style='height: 18px'></div>", unsafe_allow_html=True)
+            return st.button("Analyze", key=button_key, type="primary", use_container_width=True)
+
+    # ---- Samples Tab ----
     with tab_samples:
         if builtin_datasets:
-            # Create clean names for display
             sample_names = list(builtin_datasets.keys())
-            display_names = [clean_name(n) for n in sample_names]
+            for i, sample_key in enumerate(sample_names):
+                info = builtin_datasets[sample_key]
+                display_name = clean_name(sample_key)
+                # Get description from dataset file
+                desc = "Built-in sample organization for analysis"
+                try:
+                    with open(info["path"], 'r') as f:
+                        data = json.load(f)
+                    desc = data.get('description', desc)
+                except Exception:
+                    pass
+                tags = ["Sample"]
+                n = _get_node_count(info)
+                if n:
+                    tags.insert(0, f"{n} nodes")
+                if "Combined" in display_name:
+                    tags.append("Multi-flow")
+                elif "Email" in display_name:
+                    tags.append("Email flow")
+                elif "Document" in display_name:
+                    tags.append("Document flow")
+                elif "Balanced" in display_name:
+                    tags.append("Test network")
 
-            selected_idx = st.selectbox(
-                "Select a sample organization:",
-                range(len(sample_names)),
-                format_func=lambda i: display_names[i],
-                key="sample_select"
-            )
-
-            if st.button("📊 Use This Dataset", key="use_sample", type="primary"):
-                selected_dataset = sample_names[selected_idx]
-                dataset_info = builtin_datasets[selected_dataset]
-                st.session_state.selected_category = "Samples"
-                st.session_state.selected_dataset_name = selected_dataset
+                if render_dataset_row(display_name, desc, tags, f"sa_{abs(hash(sample_key)) % 100000}"):
+                    selected_dataset = sample_key
+                    dataset_info = builtin_datasets[sample_key]
+                    st.session_state.selected_category = "Samples"
+                    st.session_state.selected_dataset_name = sample_key
         else:
             st.info("No sample organizations available.")
 
+    # ---- Ecosystems Tab ----
     with tab_ecosystems:
         if ecosystem_datasets:
-            eco_names = list(ecosystem_datasets.keys())
-            display_names = [clean_name(n) for n in eco_names]
-
-            selected_idx = st.selectbox(
-                "Select an ecosystem:",
-                range(len(eco_names)),
-                format_func=lambda i: display_names[i],
-                key="ecosystem_select"
+            eco_filter = st.text_input(
+                "Filter ecosystems",
+                placeholder="Type to filter...",
+                key="eco_filter",
+                label_visibility="collapsed"
             )
+            eco_names = list(ecosystem_datasets.keys())
+            if eco_filter:
+                eco_names = [n for n in eco_names
+                             if eco_filter.lower() in clean_name(n).lower()
+                             or eco_filter.lower() in ecosystem_datasets[n].get("metadata", {}).get("description", "").lower()]
+            if not eco_names:
+                st.caption("No ecosystems match your filter.")
+            for i, eco_key in enumerate(eco_names):
+                info = ecosystem_datasets[eco_key]
+                meta = info.get("metadata", {})
+                display_name = clean_name(eco_key)
+                description = meta.get("description", "Ecosystem network dataset")
+                tags = []
+                n = _get_node_count(info)
+                if n:
+                    tags.append(f"{n} nodes")
+                loc = meta.get("location")
+                if loc and loc != "N/A":
+                    tags.append(loc)
+                src = meta.get("primary_source", meta.get("source", ""))
+                if src:
+                    # Shorten source to author surname + year
+                    short_src = src.split(",")[0].split("(")[0].strip()
+                    if len(short_src) > 25:
+                        short_src = short_src[:22] + "..."
+                    tags.append(short_src)
+                if not tags:
+                    tags.append("Ecosystem")
 
-            # Show preview of selected ecosystem
-            preview_dataset = eco_names[selected_idx]
-            preview_info = ecosystem_datasets[preview_dataset]
-            if "metadata" in preview_info:
-                meta = preview_info["metadata"]
-                with st.container():
-                    st.caption(f"**Source:** {meta.get('primary_source', meta.get('source', 'N/A'))}")
-                    st.caption(f"**Location:** {meta.get('location', 'N/A')} • **Compartments:** {meta.get('compartments', 'N/A')}")
-
-            if st.button("📊 Use This Dataset", key="use_ecosystem", type="primary"):
-                selected_dataset = eco_names[selected_idx]
-                dataset_info = ecosystem_datasets[selected_dataset]
-                st.session_state.selected_category = "Ecosystems"
-                st.session_state.selected_dataset_name = selected_dataset
+                if render_dataset_row(display_name, description, tags, f"ec_{abs(hash(eco_key)) % 100000}"):
+                    selected_dataset = eco_key
+                    dataset_info = ecosystem_datasets[eco_key]
+                    st.session_state.selected_category = "Ecosystems"
+                    st.session_state.selected_dataset_name = eco_key
         else:
             st.info("No ecosystem datasets available.")
 
+    # ---- Real Life Data Tab ----
     with tab_reallife:
         if reallife_datasets:
             real_names = list(reallife_datasets.keys())
-            display_names = [clean_name(n) for n in real_names]
+            for i, real_key in enumerate(real_names):
+                info = reallife_datasets[real_key]
+                meta = info.get("metadata", {})
+                display_name = clean_name(real_key)
+                description = meta.get("description", "Real-world network dataset")
+                tags = []
+                n = _get_node_count(info)
+                if n:
+                    tags.append(f"{n} nodes")
+                flow_type = meta.get("flow_type", meta.get("type", ""))
+                if flow_type and flow_type != "N/A":
+                    tags.append(flow_type)
+                scale = meta.get("scale", "")
+                if scale and scale != "N/A":
+                    tags.append(scale)
+                source = meta.get("source", "")
+                if source and source != "N/A":
+                    tags.append(source)
+                if not tags:
+                    tags.append("Real-world")
 
-            selected_idx = st.selectbox(
-                "Select a real-world dataset:",
-                range(len(real_names)),
-                format_func=lambda i: display_names[i],
-                key="reallife_select"
-            )
-
-            # Show preview
-            preview_dataset = real_names[selected_idx]
-            preview_info = reallife_datasets[preview_dataset]
-            if "metadata" in preview_info:
-                meta = preview_info["metadata"]
-                with st.container():
-                    st.caption(f"**Source:** {meta.get('source', 'N/A')}")
-                    st.caption(f"**Type:** {meta.get('flow_type', meta.get('type', 'N/A'))} • **Scale:** {meta.get('scale', 'N/A')}")
-
-            if st.button("📊 Use This Dataset", key="use_reallife", type="primary"):
-                selected_dataset = real_names[selected_idx]
-                dataset_info = reallife_datasets[selected_dataset]
-                st.session_state.selected_category = "Real Life Data"
-                st.session_state.selected_dataset_name = selected_dataset
+                if render_dataset_row(display_name, description, tags, f"rl_{abs(hash(real_key)) % 100000}"):
+                    selected_dataset = real_key
+                    dataset_info = reallife_datasets[real_key]
+                    st.session_state.selected_category = "Real Life Data"
+                    st.session_state.selected_dataset_name = real_key
         else:
             st.info("No real-world datasets available.")
 
+    # ---- Your Networks Tab ----
     with tab_user:
         if user_datasets:
             user_names = list(user_datasets.keys())
-            display_names = [clean_name(n) for n in user_names]
+            for i, user_key in enumerate(user_names):
+                info = user_datasets[user_key]
+                meta = info.get("metadata", {})
+                display_name = clean_name(user_key)
+                description = meta.get("network_description", "User-generated network")
+                tags = []
+                nodes = meta.get("actual_nodes")
+                edges = meta.get("actual_edges")
+                if nodes:
+                    tags.append(f"{nodes} nodes")
+                if edges:
+                    tags.append(f"{edges} edges")
+                net_type = meta.get("network_type", "")
+                if net_type:
+                    tags.append(net_type)
+                if not tags:
+                    tags.append("Saved network")
 
-            selected_idx = st.selectbox(
-                "Select your saved network:",
-                range(len(user_names)),
-                format_func=lambda i: display_names[i],
-                key="user_select"
-            )
-
-            # Show preview
-            preview_dataset = user_names[selected_idx]
-            preview_info = user_datasets[preview_dataset]
-            if "metadata" in preview_info:
-                meta = preview_info["metadata"]
-                with st.container():
-                    st.caption(f"**Type:** {meta.get('network_description', 'N/A')}")
-                    st.caption(f"**Nodes:** {meta.get('actual_nodes', 'N/A')} • **Edges:** {meta.get('actual_edges', 'N/A')}")
-
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button("📊 Use This Dataset", key="use_user", type="primary"):
-                    selected_dataset = user_names[selected_idx]
-                    dataset_info = user_datasets[selected_dataset]
-                    st.session_state.selected_category = "Your Networks"
-                    st.session_state.selected_dataset_name = selected_dataset
-            with col2:
-                if st.button("🗑️ Delete", key="delete_user", type="secondary"):
-                    try:
-                        os.remove(user_datasets[user_names[selected_idx]]["path"])
-                        st.success("✅ Network deleted!")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"❌ Failed to delete: {str(e)}")
+                col_info, col_btn, col_del = st.columns([5, 1, 1])
+                tags_html = "".join(f'<span class="ds-tag">{t}</span>' for t in tags)
+                with col_info:
+                    st.markdown(f"""
+                    <div class="ds-card">
+                        <div class="ds-name">{display_name}</div>
+                        <div class="ds-desc" title="{description}">{description}</div>
+                        <div class="ds-stats">{tags_html}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                with col_btn:
+                    st.markdown("<div style='height: 18px'></div>", unsafe_allow_html=True)
+                    if st.button("Analyze", key=f"us_{abs(hash(user_key)) % 100000}", type="primary", use_container_width=True):
+                        selected_dataset = user_key
+                        dataset_info = user_datasets[user_key]
+                        st.session_state.selected_category = "Your Networks"
+                        st.session_state.selected_dataset_name = user_key
+                with col_del:
+                    st.markdown("<div style='height: 18px'></div>", unsafe_allow_html=True)
+                    if st.button("Delete", key=f"del_{abs(hash(user_key)) % 100000}", type="secondary", use_container_width=True):
+                        try:
+                            os.remove(info["path"])
+                            st.success("Deleted!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Failed: {str(e)}")
         else:
             st.info("No saved networks yet. Use the Network Generator to create and save networks!")
 
@@ -1033,14 +1284,48 @@ def sample_data_interface():
 
     # Show active selection
     if st.session_state.selected_dataset_name and st.session_state.selected_dataset_name in all_datasets:
-        st.success(f"**Selected:** {clean_name(st.session_state.selected_dataset_name)} ({st.session_state.selected_category})")
         selected_dataset = st.session_state.selected_dataset_name
         dataset_info = all_datasets[selected_dataset]
 
     # If no dataset selected yet, return early
     if dataset_info is None:
-        st.info("👆 Select a dataset from one of the categories above, then click 'Use This Dataset'")
+        st.caption("Select a dataset from one of the categories above to begin analysis.")
         return
+
+    # --- Direct navigation for analyzable datasets ---
+    # If user just clicked "Analyze" on a card, try to go straight to analysis
+    def _try_direct_analyze(ds_info, ds_name):
+        """Attempt to load dataset and navigate directly to analysis. Returns True if navigated."""
+        if ds_info["type"] == "reallife":
+            return False  # Reference-only, needs info display
+        if "path" not in ds_info:
+            return False
+        try:
+            with open(ds_info["path"], 'r') as f:
+                data = json.load(f)
+            if data.get('flows') == "NOT_AVAILABLE":
+                return False  # Validation-only
+            flow_matrix_data = np.array(data['flows'])
+            node_names_data = data['nodes']
+            org_name_data = data.get('organization', clean_name(ds_name).split(' - ')[0])
+            st.session_state.analysis_data = {
+                'flow_matrix': flow_matrix_data,
+                'node_names': node_names_data,
+                'org_name': org_name_data,
+                'source': 'sample_data'
+            }
+            st.session_state.current_page = 'analysis'
+            st.rerun()
+            return True
+        except Exception:
+            return False
+
+    # If a fresh selection was just made (button click this render), try direct analysis
+    if selected_dataset is not None and dataset_info is not None:
+        _try_direct_analyze(dataset_info, selected_dataset)
+
+    # If we're still here, the dataset needs info display (reference/validation/error)
+    st.success(f"**Selected:** {clean_name(st.session_state.selected_dataset_name)} ({st.session_state.selected_category})")
     
     # Show metadata based on dataset type
     if dataset_info["type"] == "ecosystem" and "metadata" in dataset_info:
@@ -1889,9 +2174,9 @@ def show_analysis_page():
 
     # Show current network in sidebar
     st.sidebar.markdown(f"""
-    <div style="background: #f0f7f0; padding: 10px; border-radius: 6px; border-left: 4px solid #2d8a3e; margin: 10px 0;">
-        <p style="margin: 0; font-size: 0.75rem; color: #666;">Analyzing:</p>
-        <p style="margin: 2px 0 0 0; font-weight: 600; color: #1a5f2a; font-size: 0.9rem;">{org_name}</p>
+    <div style="background: rgba(46, 204, 113, 0.08); padding: 10px; border-radius: 6px; border-left: 4px solid #2ecc71; margin: 10px 0;">
+        <p style="margin: 0; font-size: 0.75rem; color: #8b949e;">Analyzing:</p>
+        <p style="margin: 2px 0 0 0; font-weight: 600; color: #2ecc71; font-size: 0.9rem;">{org_name}</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -1905,7 +2190,7 @@ def show_analysis_page():
         st.session_state.current_analysis_section = "🎯 Core Metrics"
     
     # Radio button for section selection
-    section_options = ["🎯 Core Metrics", "🔄 Network Analysis", "📊 Visualizations", "🌿 OASIS Health", "📋 Detailed Report"]
+    section_options = ["🎯 Core Metrics", "🔄 Network Analysis", "📊 Visualizations", "🌿 OASIS Health", "📋 Detailed Report", "📖 Documentation"]
     new_section = st.sidebar.radio(
         "Choose Analysis View:",
         section_options,
@@ -1947,6 +2232,8 @@ def show_analysis_page():
         display_oasis_health(calculator, extended_metrics, flow_matrix, node_names, org_name)
     elif analysis_section == "📋 Detailed Report":
         display_detailed_report(calculator, extended_metrics, assessments, org_name)
+    elif analysis_section == "📖 Documentation":
+        render_documentation_page()
 
 def run_intelligent_analysis(flow_matrix, node_names, processing_mode="FULL"):
     """Run intelligent analysis with adaptive processing based on dataset size."""
@@ -2452,6 +2739,7 @@ def display_visualizations_enhanced(G, flow_matrix, node_names, metrics, org_nam
                 title="In-Degree Distribution",
                 labels={"x": "Number of Incoming Connections", "y": "Count of Nodes"}
             )
+            fig_in.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#e6edf3'))
             st.plotly_chart(fig_in, use_container_width=True)
         
         with col2:
@@ -2462,15 +2750,16 @@ def display_visualizations_enhanced(G, flow_matrix, node_names, metrics, org_nam
                 title="Out-Degree Distribution",
                 labels={"x": "Number of Outgoing Connections", "y": "Count of Nodes"}
             )
+            fig_out.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#e6edf3'))
             st.plotly_chart(fig_out, use_container_width=True)
     
     # Network Flow Heatmap second
-    st.subheader("🔥 Network Flow Heatmap")
+    st.markdown(f"### 🔥 Network Flow Heatmap {info_button('viz_heatmap')}", unsafe_allow_html=True)
     flow_fig = create_flow_heatmap(flow_matrix, node_names)
     st.plotly_chart(flow_fig, use_container_width=True)
-    
+
     # Sankey Diagram - Directed Flow Visualization
-    st.subheader("🔀 Directed Network Flow Diagram")
+    st.markdown(f"### 🔀 Directed Network Flow Diagram {info_button('viz_sankey')}", unsafe_allow_html=True)
     st.markdown("*Interactive Sankey diagram showing the direction and strength of flows between nodes*")
     
     # Add performance settings for large networks
@@ -2513,12 +2802,12 @@ def display_visualizations_enhanced(G, flow_matrix, node_names, metrics, org_nam
         st.error(f"Error creating Sankey diagram: {str(e)}")
     
     # Window of Viability
-    st.subheader("🎯 Window of Viability")
+    st.markdown(f"### 🎯 Window of Viability {info_button('viz_window_of_viability')}", unsafe_allow_html=True)
     robustness_fig = create_robustness_curve(metrics)
     st.plotly_chart(robustness_fig, use_container_width=True)
-    
+
     # Multi-Metric Comparison (moved from visual summary cards)
-    st.subheader("📊 Multi-Metric Comparison")
+    st.markdown(f"### 📊 Multi-Metric Comparison {info_button('viz_radar')}", unsafe_allow_html=True)
     st.markdown("*Radar chart comparing all key metrics against optimal ranges*")
     radar_fig = create_radar_chart(metrics)
     st.plotly_chart(radar_fig, use_container_width=True)
@@ -2589,17 +2878,17 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
         st.subheader("🎯 Key Performance Indicators")
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("Relative Ascendency", f"{metrics['relative_ascendency']:.2f}")
+            st.metric("Relative Ascendency", f"{metrics['relative_ascendency']:.2f}", help=_tip("relative_ascendency"))
             st.caption("α = A/C [dimensionless]")
         with col2:
-            st.metric("Robustness", f"{metrics['robustness']:.2f}")
+            st.metric("Robustness", f"{metrics['robustness']:.2f}", help=_tip("robustness"))
             st.caption("R = -α·log(α) [nats]")
         with col3:
             viable = "✅ YES" if metrics['is_viable'] else "❌ NO"
-            st.metric("Viable System", viable)
+            st.metric("Viable System", viable, help=_tip("viable_system"))
             st.caption("α ∈ [0.2, 0.6]")
         with col4:
-            st.metric("Network Efficiency", f"{metrics['network_efficiency']:.2f}")
+            st.metric("Network Efficiency", f"{metrics['network_efficiency']:.2f}", help=_tip("network_efficiency"))
             st.caption("η = Eeff/Emax [0-1]")
     
     with tab3:
@@ -2609,30 +2898,30 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
             
             col1, col2, col3, col4 = st.columns(4)
             with col1:
-                st.metric("Total Flow", format_large_number(np.sum(flow_matrix)))
+                st.metric("Total Flow", format_large_number(np.sum(flow_matrix)), help=_tip("total_flow"))
                 st.caption("ΣTij [flow units]")
-                st.metric("Active Connections", np.count_nonzero(flow_matrix))
+                st.metric("Active Connections", np.count_nonzero(flow_matrix), help=_tip("active_connections"))
                 st.caption("N_links [count]")
             with col2:
                 avg_flow = np.mean(flow_matrix[flow_matrix > 0]) if np.any(flow_matrix > 0) else 0
                 median_flow = np.median(flow_matrix[flow_matrix > 0]) if np.any(flow_matrix > 0) else 0
-                st.metric("Avg Flow", format_large_number(avg_flow))
+                st.metric("Avg Flow", format_large_number(avg_flow), help=_tip("avg_flow"))
                 st.caption("μ(Tij>0) [flow units]")
-                st.metric("Median Flow", format_large_number(median_flow))
+                st.metric("Median Flow", format_large_number(median_flow), help=_tip("median_flow"))
                 st.caption("Med(Tij>0) [flow units]")
             with col3:
                 max_flow = np.max(flow_matrix) if flow_matrix.size > 0 else 0
                 min_flow = np.min(flow_matrix[flow_matrix > 0]) if np.any(flow_matrix > 0) else 0
-                st.metric("Max Flow", format_large_number(max_flow))
+                st.metric("Max Flow", format_large_number(max_flow), help=_tip("max_flow"))
                 st.caption("Max(Tij) [flow units]")
-                st.metric("Min Flow (>0)", format_large_number(min_flow))
+                st.metric("Min Flow (>0)", format_large_number(min_flow), help=_tip("min_flow"))
                 st.caption("Min(Tij>0) [flow units]")
             with col4:
                 flow_std = np.std(flow_matrix[flow_matrix > 0]) if np.any(flow_matrix > 0) else 0
                 flow_cv = flow_std / avg_flow if avg_flow > 0 else 0
-                st.metric("Flow Std Dev", format_large_number(flow_std))
+                st.metric("Flow Std Dev", format_large_number(flow_std), help=_tip("flow_std_dev"))
                 st.caption("σ(Tij) [flow units]")
-                st.metric("Coeff. of Variation", f"{flow_cv:.2f}")
+                st.metric("Coeff. of Variation", f"{flow_cv:.2f}", help=_tip("coeff_variation"))
                 st.caption("CV = σ/μ [dimensionless]")
         
         # Network Structure & Topology
@@ -2641,24 +2930,24 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
             
             col1, col2, col3, col4 = st.columns(4)
             with col1:
-                st.metric("Nodes", len(node_names))
+                st.metric("Nodes", len(node_names), help=_tip("nodes"))
                 st.caption("N [count]")
-                st.metric("Edges", metrics.get('num_edges', 0))
+                st.metric("Edges", metrics.get('num_edges', 0), help=_tip("edges"))
                 st.caption("L [count]")
             with col2:
-                st.metric("Network Density", f"{metrics.get('network_density', 0):.2f}")
+                st.metric("Network Density", f"{metrics.get('network_density', 0):.2f}", help=_tip("network_density"))
                 st.caption("ρ = L/N² [0-1]")
-                st.metric("Connectance", f"{metrics.get('connectance', 0):.2f}")
+                st.metric("Connectance", f"{metrics.get('connectance', 0):.2f}", help=_tip("connectance"))
                 st.caption("C = L/(N*(N-1)) [0-1]")
             with col3:
-                st.metric("Avg Path Length", f"{metrics.get('average_path_length', 0):.2f}")
+                st.metric("Avg Path Length", f"{metrics.get('average_path_length', 0):.2f}", help=_tip("avg_path_length"))
                 st.caption("⟨l⟩ [steps]")
-                st.metric("Clustering Coeff.", f"{metrics.get('clustering_coefficient', 0):.2f}")
+                st.metric("Clustering Coeff.", f"{metrics.get('clustering_coefficient', 0):.2f}", help=_tip("clustering_coefficient"))
                 st.caption("CC [0-1]")
             with col4:
-                st.metric("Centralization", f"{metrics.get('degree_centralization', 0):.2f}")
+                st.metric("Centralization", f"{metrics.get('degree_centralization', 0):.2f}", help=_tip("degree_centralization"))
                 st.caption("C_deg [0-1]")
-                st.metric("Link Density", f"{metrics.get('link_density', 0):.2f}")
+                st.metric("Link Density", f"{metrics.get('link_density', 0):.2f}", help=_tip("link_density"))
                 st.caption("LD = L/N [links/node]")
         
         # Ulanowicz Core Metrics (computation flow)
@@ -2667,7 +2956,7 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
             
             # Step 1: TST (foundation)
             st.markdown("#### Step 1: Total System Throughput")
-            st.metric("Total System Throughput (TST)", format_large_number(metrics['total_system_throughput']))
+            st.metric("Total System Throughput (TST)", format_large_number(metrics['total_system_throughput']), help=_tip("tst"))
             st.caption("TST = ΣTij = Sum of all flows in the network [flow units]")
             st.info("ℹ️ Note: External flows (imports/exports/respiration) require additional data beyond the flow matrix")
             
@@ -2675,51 +2964,51 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
             st.markdown("#### Step 2: Information Metrics")
             col1, col2, col3, col4 = st.columns(4)
             with col1:
-                st.metric("AMI", f"{metrics['average_mutual_information']:.2f}")
+                st.metric("AMI", f"{metrics['average_mutual_information']:.2f}", help=_tip("ami"))
                 st.caption("I = Organized info [nats]")
             with col2:
-                st.metric("Flow Diversity", f"{metrics['flow_diversity']:.2f}")
+                st.metric("Flow Diversity", f"{metrics['flow_diversity']:.2f}", help=_tip("flow_diversity"))
                 st.caption("H = Total info [nats]")
             with col3:
-                st.metric("Conditional Entropy", f"{metrics.get('conditional_entropy', 0):.2f}")
+                st.metric("Conditional Entropy", f"{metrics.get('conditional_entropy', 0):.2f}", help=_tip("conditional_entropy"))
                 st.caption("Hc = H - I [nats]")
             with col4:
-                st.metric("Redundancy", f"{metrics.get('redundancy', 0):.2f}")
+                st.metric("Redundancy", f"{metrics.get('redundancy', 0):.2f}", help=_tip("redundancy"))
                 st.caption("Φ/C [dimensionless]")
             
             # Step 3: Ascendency and Capacity
             st.markdown("#### Step 3: Ascendency & Development Capacity")
             col1, col2, col3, col4 = st.columns(4)
             with col1:
-                st.metric("Ascendency", format_large_number(metrics['ascendency']))
+                st.metric("Ascendency", format_large_number(metrics['ascendency']), help=_tip("ascendency"))
                 st.caption("A = TST * I [flow·nats]")
             with col2:
-                st.metric("Overhead", format_large_number(metrics['overhead']))
+                st.metric("Overhead", format_large_number(metrics['overhead']), help=_tip("overhead"))
                 st.caption("Φ = TST * Hc [flow·nats]")
             with col3:
-                st.metric("Capacity", format_large_number(metrics['development_capacity']))
+                st.metric("Capacity", format_large_number(metrics['development_capacity']), help=_tip("capacity"))
                 st.caption("C = TST * H [flow·nats]")
             with col4:
-                st.metric("Realized Capacity", f"{metrics.get('realized_capacity', metrics['ascendency']/metrics['development_capacity']*100):.1f}%")
+                st.metric("Realized Capacity", f"{metrics.get('realized_capacity', metrics['ascendency']/metrics['development_capacity']*100):.1f}%", help=_tip("relative_ascendency"))
                 st.caption("A/C * 100 [%]")
             
             # Step 4: Relative metrics
             st.markdown("#### Step 4: Relative Metrics & Robustness")
             col1, col2, col3, col4 = st.columns(4)
             with col1:
-                st.metric("Rel. Ascendency", f"{metrics['relative_ascendency']:.2f}")
+                st.metric("Rel. Ascendency", f"{metrics['relative_ascendency']:.2f}", help=_tip("relative_ascendency"))
                 st.caption("α = A/C [0-1]")
             with col2:
-                st.metric("Rel. Overhead", f"{metrics['overhead_ratio']:.2f}")
+                st.metric("Rel. Overhead", f"{metrics['overhead_ratio']:.2f}", help=_tip("redundancy"))
                 st.caption("Φ/C [0-1]")
             with col3:
-                st.metric("Robustness", f"{metrics['robustness']:.2f}")
+                st.metric("Robustness", f"{metrics['robustness']:.2f}", help=_tip("robustness"))
                 st.caption("R = -α·log(α) [nats]")
             with col4:
                 # Calculate distance from optima
                 alpha = metrics['relative_ascendency']
                 dist_empirical = abs(alpha - 0.37)
-                st.metric("Distance from Optimum", f"{dist_empirical:.2f}")
+                st.metric("Distance from Optimum", f"{dist_empirical:.2f}", help=_tip("distance_from_optimum"))
                 st.caption("|α - 0.37| [dimensionless]")
     
         # Regenerative Economics (10 Principles)
@@ -2732,50 +3021,50 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
     with col1:
         in_out = metrics.get('in_out_balance', None)
         if in_out is not None and in_out > 0:
-            st.metric("1. In-Out Balance", f"{in_out:.2f}")
+            st.metric("1. In-Out Balance", f"{in_out:.2f}", help=_tip("regen_in_out_balance"))
             st.caption("Z/Y [ratio]")
         else:
-            st.metric("1. In-Out Balance", "N/A")
+            st.metric("1. In-Out Balance", "N/A", help=_tip("regen_in_out_balance"))
             st.caption("Requires external flows")
     with col2:
-        st.metric("2. Sufficient Size", format_large_number(metrics['total_system_throughput']))
+        st.metric("2. Sufficient Size", format_large_number(metrics['total_system_throughput']), help=_tip("regen_sufficient_size"))
         st.caption("TST [flow units]")
     with col3:
         hier_level = metrics.get('hierarchical_levels', metrics.get('trophic_depth', 0))
-        st.metric("3. Hierarchy", f"{hier_level:.1f}")
+        st.metric("3. Hierarchy", f"{hier_level:.1f}", help=_tip("regen_hierarchy"))
         st.caption("TL [levels]")
     with col4:
-        st.metric("4. Material Basis", format_large_number(np.sum(flow_matrix)))
+        st.metric("4. Material Basis", format_large_number(np.sum(flow_matrix)), help=_tip("regen_material_basis"))
         st.caption("ΣTij [flow units]")
     with col5:
-        st.metric("5. Mutuality", f"{metrics.get('clustering_coefficient', 0):.2f}")
+        st.metric("5. Mutuality", f"{metrics.get('clustering_coefficient', 0):.2f}", help=_tip("regen_mutuality"))
         st.caption("CC [0-1]")
     
     # Principles 6-10: Process
     st.markdown("#### Process Principles")
     col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
-        st.metric("6. Diversity", f"{metrics['flow_diversity']:.2f}")
+        st.metric("6. Diversity", f"{metrics['flow_diversity']:.2f}", help=_tip("regen_diversity"))
         st.caption("H [nats]")
     with col2:
         fci = metrics.get('finn_cycling_index')
         if fci is None:
-            st.metric("7. Circulation", "N/A")
+            st.metric("7. Circulation", "N/A", help=_tip("regen_circulation"))
             st.caption("FCI (skipped)")
         elif fci > 0:
-            st.metric("7. Circulation", f"{fci:.2f}")
+            st.metric("7. Circulation", f"{fci:.2f}", help=_tip("regen_circulation"))
             st.caption("FCI [0-1]")
         else:
-            st.metric("7. Circulation", "Low/None")
+            st.metric("7. Circulation", "Low/None", help=_tip("regen_circulation"))
             st.caption("FCI ~ 0 (no cycles detected)")
     with col3:
-        st.metric("8. Reserve Cap.", f"{metrics['overhead_ratio']:.2f}")
+        st.metric("8. Reserve Cap.", f"{metrics['overhead_ratio']:.2f}", help=_tip("regen_reserve_capacity"))
         st.caption("Φ/C [0-1]")
     with col4:
-        st.metric("9. Efficiency", f"{metrics['network_efficiency']:.2f}")
+        st.metric("9. Efficiency", f"{metrics['network_efficiency']:.2f}", help=_tip("regen_efficiency"))
         st.caption("η [0-1]")
     with col5:
-        st.metric("10. Balance", f"{metrics['robustness']:.2f}")
+        st.metric("10. Balance", f"{metrics['robustness']:.2f}", help=_tip("regen_balance"))
         st.caption("R [nats]")
     
     # Sustainability Assessment
@@ -2812,20 +3101,20 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
     st.markdown("#### Window of Viability Bounds")
     col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
-        st.metric("Lower Bound", format_large_number(lower))
+        st.metric("Lower Bound", format_large_number(lower), help=_tip("window_of_viability"))
         st.caption("A_min = 0.2C [flow·nats]")
     with col2:
-        st.metric("Current Ascendency", format_large_number(ascendency))
+        st.metric("Current Ascendency", format_large_number(ascendency), help=_tip("ascendency"))
         pos_pct = (ascendency - lower) / (upper - lower) * 100 if upper > lower else 50
         st.caption(f"A [flow·nats] ({pos_pct:.0f}%)")
     with col3:
-        st.metric("Optimal Zone", "0.35-0.40")
+        st.metric("Optimal Zone", "0.35-0.40", help=_tip("window_of_viability"))
         st.caption("α_opt [dimensionless]")
     with col4:
-        st.metric("Upper Bound", format_large_number(upper))
+        st.metric("Upper Bound", format_large_number(upper), help=_tip("window_of_viability"))
         st.caption("A_max = 0.6C [flow·nats]")
     with col5:
-        st.metric("Current α", f"{alpha:.2f}")
+        st.metric("Current α", f"{alpha:.2f}", help=_tip("relative_ascendency"))
         if 0.35 <= alpha <= 0.40:
             st.caption("α = A/C ✅ Optimal")
         elif 0.2 <= alpha <= 0.6:
@@ -2842,16 +3131,16 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
     st.markdown("#### Flow-based Metrics")
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric("Structural Info", f"{metrics.get('structural_information', 0):.2f}")
+        st.metric("Structural Info", f"{metrics.get('structural_information', 0):.2f}", help=_tip("structural_information"))
         st.caption("SI [nats]")
     with col2:
-        st.metric("Effective Links", f"{metrics.get('effective_link_density', 0):.2f}")
+        st.metric("Effective Links", f"{metrics.get('effective_link_density', 0):.2f}", help=_tip("effective_link_density"))
         st.caption("ELD [links/node]")
     with col3:
-        st.metric("Trophic Depth", f"{metrics.get('trophic_depth', 0):.2f}")
+        st.metric("Trophic Depth", f"{metrics.get('trophic_depth', 0):.2f}", help=_tip("trophic_depth"))
         st.caption("TD [levels]")
     with col4:
-        st.metric("Regen. Capacity", f"{metrics.get('regenerative_capacity', 0):.2f}")
+        st.metric("Regen. Capacity", f"{metrics.get('regenerative_capacity', 0):.2f}", help=_tip("regenerative_capacity"))
         st.caption("RC [0-1]")
     
     # Balance indicators
@@ -2859,7 +3148,7 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
     col1, col2, col3 = st.columns(3)
     with col1:
         ratio = metrics.get('ascendency_ratio', metrics.get('relative_ascendency', 0))
-        st.metric("Organization", f"{ratio:.2f}")
+        st.metric("Organization", f"{ratio:.2f}", help=_tip("organization_ratio"))
         if ratio < 0.2:
             st.caption("α = A/C [0-1] 🔴 Chaotic")
         elif ratio > 0.6:
@@ -2870,7 +3159,7 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
             st.caption("α = A/C [0-1] 🟡 Acceptable")
     with col2:
         overhead_ratio = metrics.get('overhead_ratio', 0)
-        st.metric("Flexibility", f"{overhead_ratio:.2f}")
+        st.metric("Flexibility", f"{overhead_ratio:.2f}", help=_tip("flexibility_ratio"))
         if overhead_ratio < 0.4:
             st.caption("Φ/C [0-1] 🟡 Low reserve")
         elif overhead_ratio > 0.65:
@@ -2879,7 +3168,7 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
             st.caption("Φ/C [0-1] 🟢 Good balance")
     with col3:
         balance = ratio / (overhead_ratio + 0.001)
-        st.metric("Eff/Red Balance", f"{balance:.2f}")
+        st.metric("Eff/Red Balance", f"{balance:.2f}", help=_tip("eff_red_balance"))
         if 0.5 <= balance <= 2:
             st.caption("(α)/(Φ/C) [ratio] 🟢 Balanced")
         elif balance < 0.5:
@@ -2912,19 +3201,19 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
     # Core roles metrics
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric("Number of Roles", f"{metrics.get('number_of_roles', 0):.2f}")
+        st.metric("Number of Roles", f"{metrics.get('number_of_roles', 0):.2f}", help=_tip("num_roles"))
         st.caption("R = exp(AMI) [roles]")
-        
+
     with col2:
-        st.metric("Effective Nodes", f"{metrics.get('effective_nodes', 0):.2f}")
+        st.metric("Effective Nodes", f"{metrics.get('effective_nodes', 0):.2f}", help=_tip("effective_nodes"))
         st.caption("N = weighted nodes [nodes]")
-        
+
     with col3:
-        st.metric("Effective Flows", f"{metrics.get('effective_flows', 0):.2f}")
+        st.metric("Effective Flows", f"{metrics.get('effective_flows', 0):.2f}", help=_tip("effective_flows"))
         st.caption("F = weighted flows [flows]")
-        
+
     with col4:
-        st.metric("Effective Connectivity", f"{metrics.get('effective_connectivity', 0):.2f}")
+        st.metric("Effective Connectivity", f"{metrics.get('effective_connectivity', 0):.2f}", help=_tip("effective_connectivity"))
         st.caption("C = F/N [flows/node]")
     
     # Interpretation metrics
@@ -2933,20 +3222,20 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
     
     with col1:
         roles_per_node = metrics.get('roles_per_node', 0)
-        st.metric("Roles per Node", f"{roles_per_node:.2f}")
+        st.metric("Roles per Node", f"{roles_per_node:.2f}", help=_tip("roles_per_node"))
         st.caption("R/N [roles/node]")
-        
+
     with col2:
         spec_index = metrics.get('specialization_index', 0)
-        st.metric("Specialization Index", f"{spec_index:.2f}")
+        st.metric("Specialization Index", f"{spec_index:.2f}", help=_tip("specialization_index"))
         st.caption("R/N_actual [dimensionless]")
-        
+
     with col3:
         # Compare actual vs effective
         actual_nodes = len(node_names)
         eff_nodes = metrics.get('effective_nodes', 0)
         node_ratio = eff_nodes / actual_nodes if actual_nodes > 0 else 0
-        st.metric("Node Utilization", f"{node_ratio:.2%}")
+        st.metric("Node Utilization", f"{node_ratio:.2%}", help=_tip("node_utilization"))
         st.caption("N_eff/N_actual [%]")
         
     with col4:
@@ -2984,7 +3273,10 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
             title="Actual vs Effective Network Components",
             barmode='group',
             height=300,
-            showlegend=True
+            showlegend=True,
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            font=dict(color='#e6edf3'),
         )
         st.plotly_chart(fig, use_container_width=True)
     
@@ -3037,20 +3329,20 @@ def display_core_metrics_simplified(metrics):
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        st.metric("Relative Ascendency", f"{metrics['relative_ascendency']:.2f}")
+        st.metric("Relative Ascendency", f"{metrics['relative_ascendency']:.2f}", help=_tip("relative_ascendency"))
         st.caption("Organization level (α)")
-    
+
     with col2:
-        st.metric("Robustness", f"{metrics['robustness']:.2f}")
+        st.metric("Robustness", f"{metrics['robustness']:.2f}", help=_tip("robustness"))
         st.caption("Resilience to shocks")
-    
+
     with col3:
         viable = "✅ YES" if metrics['is_viable'] else "❌ NO"
-        st.metric("Viable System", viable)
+        st.metric("Viable System", viable, help=_tip("viable_system"))
         st.caption("Within sustainability bounds")
-    
+
     with col4:
-        st.metric("Network Efficiency", f"{metrics['network_efficiency']:.2f}")
+        st.metric("Network Efficiency", f"{metrics['network_efficiency']:.2f}", help=_tip("network_efficiency"))
         st.caption("Resource utilization")
     
     # Sustainability assessment
@@ -3123,23 +3415,23 @@ def display_ulanowicz_indicators(metrics):
     col1, col2 = st.columns(2)
     
     with col1:
-        st.metric("Total System Throughput (TST)", format_large_number(metrics['total_system_throughput']))
+        st.metric("Total System Throughput (TST)", format_large_number(metrics['total_system_throughput']), help=_tip("tst"))
         st.caption("Total flow/activity in the network")
 
-        st.metric("Average Mutual Information (AMI)", f"{metrics['average_mutual_information']:.2f}")
+        st.metric("Average Mutual Information (AMI)", f"{metrics['average_mutual_information']:.2f}", help=_tip("ami"))
         st.caption("Degree of organization in flow patterns")
 
-        st.metric("Ascendency (A)", format_large_number(metrics['ascendency']))
+        st.metric("Ascendency (A)", format_large_number(metrics['ascendency']), help=_tip("ascendency"))
         st.caption("Organized power (TST * AMI)")
 
     with col2:
-        st.metric("Development Capacity (C)", format_large_number(metrics['development_capacity']))
+        st.metric("Development Capacity (C)", format_large_number(metrics['development_capacity']), help=_tip("capacity"))
         st.caption("Maximum possible organization")
 
-        st.metric("Overhead/Reserve (Φ)", format_large_number(metrics['overhead']))
+        st.metric("Overhead/Reserve (Φ)", format_large_number(metrics['overhead']), help=_tip("overhead"))
         st.caption("Unutilized capacity (C - A)")
-        
-        st.metric("Flow Diversity (H)", f"{metrics['flow_diversity']:.2f}")
+
+        st.metric("Flow Diversity (H)", f"{metrics['flow_diversity']:.2f}", help=_tip("flow_diversity"))
         st.caption("Shannon entropy of flows")
     
     # Fundamental relationship
@@ -3172,19 +3464,19 @@ def display_ulanowicz_indicators(metrics):
     
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.metric("Ascendency Ratio (α = A/C)", f"{metrics['ascendency_ratio']:.2f}")
+        st.metric("Ascendency Ratio (α = A/C)", f"{metrics['ascendency_ratio']:.2f}", help=_tip("relative_ascendency"))
         st.progress(metrics['ascendency_ratio'])
         st.caption("Degree of organization")
-    
+
     with col2:
-        st.metric("Overhead Ratio (Φ/C)", f"{metrics['overhead_ratio']:.2f}")
+        st.metric("Overhead Ratio (Φ/C)", f"{metrics['overhead_ratio']:.2f}", help=_tip("redundancy"))
         st.progress(metrics['overhead_ratio'])
         st.caption("Reserve capacity")
-    
+
     with col3:
         # Efficiency vs Redundancy balance
         balance = metrics['ascendency_ratio'] / (metrics['overhead_ratio'] + 0.001)
-        st.metric("Efficiency/Redundancy", f"{balance:.2f}")
+        st.metric("Efficiency/Redundancy", f"{balance:.2f}", help=_tip("eff_red_balance"))
         if 0.5 <= balance <= 2:
             st.caption("✅ Good balance")
         else:
@@ -3304,10 +3596,10 @@ def create_sankey_diagram(flow_matrix, node_names, max_nodes=50, threshold_perce
         flow_threshold = np.percentile(flows_flat, 100 * (1 - MAX_SANKEY_LINKS / n_edges))
         st.info(f"📊 Dense network ({n_edges} flows). Showing top {MAX_SANKEY_LINKS} flows for performance.")
     
-    # Define consistent color scheme
-    strong_flow_color = 'rgba(220, 38, 127, 0.5)'   # Pink/Red for strong flows
-    medium_flow_color = 'rgba(254, 196, 79, 0.5)'   # Orange for medium flows  
-    weak_flow_color = 'rgba(100, 181, 246, 0.5)'    # Light blue for weak flows
+    # Define consistent color scheme (nature palette for dark mode)
+    strong_flow_color = 'rgba(212, 168, 67, 0.5)'    # Gold for strong flows
+    medium_flow_color = 'rgba(72, 201, 176, 0.5)'    # Teal for medium flows
+    weak_flow_color = 'rgba(93, 173, 226, 0.5)'      # Light blue for weak flows
     
     # Filter small flows for performance - but be very permissive
     if threshold_percentile > 0 and n_nodes > 20:  # Only filter for larger networks
@@ -3366,10 +3658,10 @@ def create_sankey_diagram(flow_matrix, node_names, max_nodes=50, threshold_perce
     max_throughput = max(node_throughput) if max(node_throughput) > 0 else 1
     node_colors = []
     
-    # Define node color scheme (darker for better text contrast)
-    strong_node_color = '#dc2877'  # Solid pink/red
-    medium_node_color = '#feb34f'  # Solid orange
-    weak_node_color = '#64b5f6'     # Solid light blue
+    # Define node color scheme (nature palette for dark mode)
+    strong_node_color = '#d4a843'  # Gold
+    medium_node_color = '#48c9b0'  # Teal
+    weak_node_color = '#5dade2'    # Light blue
     
     # Format node labels with bold styling
     formatted_labels = [f"<b>{name}</b>" for name in node_names]
@@ -3409,12 +3701,12 @@ def create_sankey_diagram(flow_matrix, node_names, max_nodes=50, threshold_perce
     node_dict = {
         'pad': pad_size,
         'thickness': node_thickness,
-        'line': dict(color="white", width=border_width),
+        'line': dict(color="#0e1117", width=border_width),
         'label': formatted_labels,
         'color': node_colors,
         'customdata': node_throughput,
-        'hovertemplate': '<b style="color:black; font-size:14px">%{label}</b><br>' +
-                        '<span style="color:black">Total Throughput: %{customdata:.1f}</span><extra></extra>',
+        'hovertemplate': '<b style="color:#e6edf3; font-size:14px">%{label}</b><br>' +
+                        '<span style="color:#e6edf3">Total Throughput: %{customdata:.1f}</span><extra></extra>',
     }
     
     # Add explicit positioning for better vertical centering
@@ -3456,10 +3748,10 @@ def create_sankey_diagram(flow_matrix, node_names, max_nodes=50, threshold_perce
             # Add flow direction arrows implicitly through gradient
             label=link_labels,
             hovertemplate='<b style="font-size:14px">%{label}</b><br>' +
-                         '<span style="color:black">Flow Strength: %{value:.2f}</span><extra></extra>'
+                         '<span style="color:#e6edf3">Flow Strength: %{value:.2f}</span><extra></extra>'
         ),
         textfont=dict(
-            color="black",  # Black text for maximum contrast
+            color="#e6edf3",
             size=14,  # Larger font size
             family="Arial, sans-serif"  # Clear, readable font
         )
@@ -3470,33 +3762,33 @@ def create_sankey_diagram(flow_matrix, node_names, max_nodes=50, threshold_perce
             'text': "<b>Directed Network Flow Diagram</b>",
             'x': 0.5,
             'xanchor': 'center',
-            'font': {'size': 20, 'color': '#2c3e50', 'family': 'Arial, sans-serif'},
+            'font': {'size': 20, 'color': '#e6edf3', 'family': 'Arial, sans-serif'},
             'y': 0.95,  # Move title higher
             'yanchor': 'top'
         },
-        font={'size': 14, 'color': 'black', 'family': 'Arial, sans-serif'},  # Larger default font
-        height=700,  # Increased height for better vertical centering
-        margin=dict(t=100, b=100, l=40, r=40),  # Equal top and bottom margins for centering
-        paper_bgcolor='rgba(250,250,250,1)',  # Light background for contrast
-        plot_bgcolor='rgba(250,250,250,1)',
+        font={'size': 14, 'color': '#e6edf3', 'family': 'Arial, sans-serif'},
+        height=700,
+        margin=dict(t=100, b=100, l=40, r=40),
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='#161b22',
         hoverlabel=dict(
-            bgcolor="white",
+            bgcolor="#1c2333",
             font_size=13,
             font_family="Arial, sans-serif",
-            font_color="black"
+            font_color="#e6edf3"
         )
     )
     
     # Add legend for flow strength
     fig.add_annotation(
-        text="<b>Flow Strength:</b> <span style='color:#dc2877'>■ Strong</span> | " +
-             "<span style='color:#feb34f'>■ Medium</span> | " +
-             "<span style='color:#64b5f6'>■ Weak</span>",
+        text="<b>Flow Strength:</b> <span style='color:#d4a843'>■ Strong</span> | " +
+             "<span style='color:#48c9b0'>■ Medium</span> | " +
+             "<span style='color:#5dade2'>■ Weak</span>",
         xref="paper", yref="paper",
         x=0.5, y=0.02,  # Moved legend up from -0.05 to 0.02
         xanchor='center',
         showarrow=False,
-        font=dict(size=12, color="black")
+        font=dict(size=12, color="#8b949e")
     )
     
     return fig
@@ -3541,7 +3833,7 @@ def create_robustness_curve(metrics):
     
     # Robustness curve (normalized and scaled)
     fig.add_trace(go.Scatter(x=efficiency_range, y=scaled_robustness, mode='lines',
-                            name='Theoretical Robustness Curve', line=dict(width=3, color='blue', dash='dot')))
+                            name='Theoretical Robustness Curve', line=dict(width=3, color='#2ecc71', dash='dot')))
     
     # Current organization position (actual calculated robustness)
     fig.add_trace(go.Scatter(x=[current_efficiency], y=[current_robustness], mode='markers',
@@ -3555,7 +3847,7 @@ def create_robustness_curve(metrics):
     else:
         empirical_optimal_robustness = 0
     fig.add_trace(go.Scatter(x=[empirical_optimal_efficiency], y=[empirical_optimal_robustness], mode='markers',
-                            marker=dict(size=12, color='green', symbol='star'), name='Empirical Optimum',
+                            marker=dict(size=12, color='#f5b041', symbol='star'), name='Empirical Optimum',
                             hovertemplate='Empirical Optimum<br>Efficiency: %{x:.2f}<br>Where ecosystems cluster: %{y:.2f}<extra></extra>'))
     
     # Geometric center of window of vitality (Ulanowicz reference)
@@ -3584,10 +3876,13 @@ def create_robustness_curve(metrics):
         title='System Robustness vs Network Efficiency<br><sub>Your Organization\'s Position Relative to Theoretical Optimum</sub>',
         xaxis_title='Network Efficiency (α = A/C) - Relative Ascendency',
         yaxis_title='Robustness - Ability to Handle Disturbances',
-        template='plotly_white',
+        template='plotly_dark',
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='#e6edf3'),
         height=500
     )
-    
+
     return fig
 
 def create_flow_heatmap(flow_matrix, node_names, max_size=100):
@@ -3662,16 +3957,22 @@ def create_flow_heatmap(flow_matrix, node_names, max_size=100):
             title='Network Flow Matrix (Aggregated)' if n_nodes > max_size else 'Network Flow Matrix',
             xaxis=dict(title='To', tickangle=90, showticklabels=False),
             yaxis=dict(title='From', showticklabels=False),
-            height=600
+            height=600,
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='#161b22',
+            font=dict(color='#e6edf3'),
         )
     else:
         fig.update_layout(
             title='Network Flow Matrix',
             xaxis=dict(title='To Node', tickangle=45),
             yaxis=dict(title='From Node'),
-            height=max(400, min(800, 20 * len(node_names)))
+            height=max(400, min(800, 20 * len(node_names))),
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='#161b22',
+            font=dict(color='#e6edf3'),
         )
-    
+
     return fig
 
 
@@ -3697,22 +3998,22 @@ def display_network_analysis(calculator, metrics, flow_matrix, node_names):
     
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric("Nodes", network_metrics['basic']['num_nodes'])
+        st.metric("Nodes", network_metrics['basic']['num_nodes'], help=_tip("nodes"))
         st.caption("N [count]")
-        st.metric("Edges", network_metrics['basic']['num_edges'])
+        st.metric("Edges", network_metrics['basic']['num_edges'], help=_tip("edges"))
         st.caption("L [count]")
     with col2:
-        st.metric("Density", f"{network_metrics['basic']['density']:.2f}")
+        st.metric("Density", f"{network_metrics['basic']['density']:.2f}", help=_tip("network_density"))
         st.caption("ρ = L/(N*(N-1)) [0-1]")
-        st.metric("Components", network_metrics['basic']['num_components'])
+        st.metric("Components", network_metrics['basic']['num_components'], help=_tip("communities"))
         st.caption("Weakly connected")
     with col3:
-        st.metric("Clustering", f"{network_metrics['small_world']['clustering_coefficient']:.2f}")
+        st.metric("Clustering", f"{network_metrics['small_world']['clustering_coefficient']:.2f}", help=_tip("clustering_coefficient"))
         st.caption("CC [0-1]")
-        st.metric("Path Length", f"{network_metrics['small_world']['average_path_length']:.2f}")
+        st.metric("Path Length", f"{network_metrics['small_world']['average_path_length']:.2f}", help=_tip("avg_path_length"))
         st.caption("⟨l⟩ [steps]")
     with col4:
-        st.metric("Small World σ", f"{network_metrics['small_world']['small_world_sigma']:.2f}")
+        st.metric("Small World σ", f"{network_metrics['small_world']['small_world_sigma']:.2f}", help=_tip("small_world_sigma"))
         st.caption("σ > 1 = small world")
         is_sw = "✅ Yes" if network_metrics['small_world']['is_small_world'] else "❌ No"
         st.metric("Is Small World?", is_sw)
@@ -3762,20 +4063,20 @@ def display_network_analysis(calculator, metrics, flow_matrix, node_names):
     louvain = communities.get('louvain', {})
     
     with col1:
-        st.metric("Communities", louvain.get('num_communities', 0))
+        st.metric("Communities", louvain.get('num_communities', 0), help=_tip("communities"))
         st.caption("Louvain algorithm")
     with col2:
-        st.metric("Modularity", f"{louvain.get('modularity', 0):.2f}")
+        st.metric("Modularity", f"{louvain.get('modularity', 0):.2f}", help=_tip("modularity"))
         st.caption("Q ∈ [-0.5, 1]")
     with col3:
         # Assortativity
         assort = network_metrics['assortativity']
-        st.metric("Degree Assortativity", f"{assort['degree_assortativity']:.2f}")
+        st.metric("Degree Assortativity", f"{assort['degree_assortativity']:.2f}", help=_tip("degree_assortativity"))
         st.caption("r ∈ [-1, 1]")
     with col4:
         # Rich club
         rc = network_metrics['rich_club']
-        st.metric("Rich Club", f"{rc['rich_club_coefficient']:.2f}")
+        st.metric("Rich Club", f"{rc['rich_club_coefficient']:.2f}", help=_tip("rich_club"))
         st.caption(f"k = {rc['threshold_k']}")
     
     # Display community membership if available
@@ -3808,16 +4109,16 @@ def display_network_analysis(calculator, metrics, flow_matrix, node_names):
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        st.metric("Random Failure", f"{robustness['random_failure_robustness']:.2f}")
+        st.metric("Random Failure", f"{robustness['random_failure_robustness']:.2f}", help=_tip("random_failure_robustness"))
         st.caption("Robustness [0-1]")
     with col2:
-        st.metric("Targeted Attack", f"{robustness['targeted_attack_robustness']:.2f}")
+        st.metric("Targeted Attack", f"{robustness['targeted_attack_robustness']:.2f}", help=_tip("targeted_attack_robustness"))
         st.caption("Hub removal [0-1]")
     with col3:
-        st.metric("Percolation", f"{robustness['percolation_threshold']:.2f}")
+        st.metric("Percolation", f"{robustness['percolation_threshold']:.2f}", help=_tip("percolation_threshold"))
         st.caption("Critical threshold")
     with col4:
-        st.metric("Path Redundancy", f"{robustness['path_redundancy']:.2f}")
+        st.metric("Path Redundancy", f"{robustness['path_redundancy']:.2f}", help=_tip("path_redundancy"))
         st.caption("Alternative paths")
     
     # Vulnerability assessment
@@ -3844,16 +4145,16 @@ def display_network_analysis(calculator, metrics, flow_matrix, node_names):
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        st.metric("Flow Gini", f"{flow_metrics['flow_gini_coefficient']:.2f}")
+        st.metric("Flow Gini", f"{flow_metrics['flow_gini_coefficient']:.2f}", help=_tip("flow_gini"))
         st.caption("Inequality [0-1]")
     with col2:
-        st.metric("Flow Heterogeneity", f"{flow_metrics['flow_heterogeneity']:.2f}")
+        st.metric("Flow Heterogeneity", f"{flow_metrics['flow_heterogeneity']:.2f}", help=_tip("flow_heterogeneity"))
         st.caption("CV of flows")
     with col3:
-        st.metric("Throughput Eff.", f"{flow_metrics['throughput_efficiency']:.2f}")
+        st.metric("Throughput Eff.", f"{flow_metrics['throughput_efficiency']:.2f}", help=_tip("throughput_efficiency"))
         st.caption("Actual/Max [0-1]")
     with col4:
-        st.metric("Reciprocity", f"{flow_metrics['flow_reciprocity']:.2f}")
+        st.metric("Reciprocity", f"{flow_metrics['flow_reciprocity']:.2f}", help=_tip("flow_reciprocity"))
         st.caption("Bidirectional [0-1]")
     
     # Node Rankings
@@ -3982,18 +4283,20 @@ def create_radar_chart(metrics):
                 tickmode='linear',
                 tick0=0,
                 dtick=0.2,
-                gridcolor='rgba(0,0,0,0.1)',
+                gridcolor='rgba(255,255,255,0.1)',
                 gridwidth=2,
                 showticklabels=True,
-                tickfont=dict(size=14)
+                tickfont=dict(size=14, color='#8b949e')
             ),
             angularaxis=dict(
-                gridcolor='rgba(0,0,0,0.1)',
+                gridcolor='rgba(255,255,255,0.1)',
                 gridwidth=2,
-                tickfont=dict(size=16)
+                tickfont=dict(size=16, color='#e6edf3')
             ),
-            bgcolor='rgba(255,255,255,0)'
+            bgcolor='#161b22'
         ),
+        paper_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='#e6edf3'),
         showlegend=True,
         legend=dict(
             yanchor="top",
@@ -4001,11 +4304,11 @@ def create_radar_chart(metrics):
             xanchor="center",
             x=0.5,
             orientation="h",
-            font=dict(size=16)
+            font=dict(size=16, color='#e6edf3')
         ),
         title=dict(
             text="System Health Radar",
-            font=dict(size=24, color='#333'),
+            font=dict(size=24, color='#e6edf3'),
             x=0.5,
             xanchor='center'
         ),
@@ -4035,7 +4338,7 @@ def display_visual_summary_cards(metrics, assessments):
     with col1:
         efficiency = metrics.get('network_efficiency', 0)
         color, icon = get_status_color(efficiency, (0.3, 0.5), (0.2, 0.6))
-        color_hex = {'green': '28a745', 'orange': 'ffc107', 'red': 'dc3545'}[color]
+        color_hex = {'green': '2ecc71', 'orange': 'f5b041', 'red': 'e74c3c'}[color]
         st.markdown(f"""
         <div style="background: linear-gradient(135deg, #{color_hex}22 0%, transparent 100%); 
                     padding: 20px; border-radius: 10px; border-left: 4px solid #{color_hex};">
@@ -4048,7 +4351,7 @@ def display_visual_summary_cards(metrics, assessments):
     with col2:
         robustness = metrics.get('robustness', 0)
         color, icon = get_status_color(robustness, (0.25, 1.0), (0.15, 1.0))
-        color_hex = {'green': '28a745', 'orange': 'ffc107', 'red': 'dc3545'}[color]
+        color_hex = {'green': '2ecc71', 'orange': 'f5b041', 'red': 'e74c3c'}[color]
         st.markdown(f"""
         <div style="background: linear-gradient(135deg, #{color_hex}22 0%, transparent 100%); 
                     padding: 20px; border-radius: 10px; border-left: 4px solid #{color_hex};">
@@ -4063,7 +4366,7 @@ def display_visual_summary_cards(metrics, assessments):
         viability_window = metrics.get('viability_window_position', 0)
         color = "green" if viable else "red"
         icon = "✅" if viable else "❌"
-        color_hex = {'green': '28a745', 'red': 'dc3545'}[color]
+        color_hex = {'green': '2ecc71', 'red': 'e74c3c'}[color]
         st.markdown(f"""
         <div style="background: linear-gradient(135deg, #{color_hex}22 0%, transparent 100%); 
                     padding: 20px; border-radius: 10px; border-left: 4px solid #{color_hex};">
@@ -4076,7 +4379,7 @@ def display_visual_summary_cards(metrics, assessments):
     with col4:
         roles = metrics.get('number_of_roles', 0)
         color, icon = get_status_color(roles, (2, 5), (1.5, 6))
-        color_hex = {'green': '28a745', 'orange': 'ffc107', 'red': 'dc3545'}[color]
+        color_hex = {'green': '2ecc71', 'orange': 'f5b041', 'red': 'e74c3c'}[color]
         st.markdown(f"""
         <div style="background: linear-gradient(135deg, #{color_hex}22 0%, transparent 100%); 
                     padding: 20px; border-radius: 10px; border-left: 4px solid #{color_hex};">
@@ -4119,7 +4422,7 @@ def display_oasis_health(calculator, metrics, flow_matrix, node_names, org_name)
     and measures undergirding systemic economic health" (Global Transitions 1, 15-27).
     """
 
-    st.header("🌿 OASIS Organizational Health Assessment")
+    st.markdown(f'## 🌿 OASIS Organizational Health Assessment {info_button("oasis_overall")}', unsafe_allow_html=True)
     st.markdown("""
     *Evaluating organizational sustainability across 5 dimensions based on
     [Fath et al. (2019)](https://doi.org/10.1016/j.glt.2019.06.002)
@@ -4150,7 +4453,7 @@ def display_oasis_health(calculator, metrics, flow_matrix, node_names, org_name)
         st.markdown("### Overall Score")
 
         # Color based on status
-        status_colors = {'HEALTHY': '#27ae60', 'WARNING': '#f39c12', 'CRITICAL': '#e74c3c'}
+        status_colors = {'HEALTHY': '#2ecc71', 'WARNING': '#f5b041', 'CRITICAL': '#e74c3c'}
         status_icons = {'HEALTHY': '✅', 'WARNING': '⚠️', 'CRITICAL': '❌'}
         color = status_colors.get(overall_status, '#3498db')
         icon = status_icons.get(overall_status, '📊')
@@ -4251,7 +4554,7 @@ def display_oasis_health(calculator, metrics, flow_matrix, node_names, org_name)
     # OPEN Dimension
     with st.expander(f"🌐 **OPEN** - Ability to Interconnect ({scores['open']:.0f}/100) - {dimension_status['open']}",
                      expanded=scores['open'] < 50):
-        st.markdown(f"**{interpretations['open']}**")
+        st.markdown(f"**{interpretations['open']}** {info_button('oasis_open')}", unsafe_allow_html=True)
 
         col1, col2 = st.columns([2, 1])
         with col1:
@@ -4260,16 +4563,16 @@ def display_oasis_health(calculator, metrics, flow_matrix, node_names, org_name)
 
             metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
             with metric_col1:
-                st.metric("Connectance", f"{open_metrics.get('connectance', 0):.2f}")
+                st.metric("Connectance", f"{open_metrics.get('connectance', 0):.2f}", help=_tip("connectance"))
                 st.caption("Network connectivity [0-1]")
             with metric_col2:
-                st.metric("Flow Diversity", f"{open_metrics.get('flow_diversity', 0):.2f}")
+                st.metric("Flow Diversity", f"{open_metrics.get('flow_diversity', 0):.2f}", help=_tip("flow_diversity"))
                 st.caption("H [nats]")
             with metric_col3:
-                st.metric("Clustering", f"{open_metrics.get('clustering_coefficient', 0):.2f}")
+                st.metric("Clustering", f"{open_metrics.get('clustering_coefficient', 0):.2f}", help=_tip("clustering_coefficient"))
                 st.caption("Local connectivity [0-1]")
             with metric_col4:
-                st.metric("Betweenness", f"{open_metrics.get('avg_betweenness', 0):.2f}")
+                st.metric("Betweenness", f"{open_metrics.get('avg_betweenness', 0):.2f}", help=_tip("betweenness_centrality"))
                 st.caption("Bridge/broker role [0-1]")
 
             st.markdown("#### Fath et al. Principles")
@@ -4284,7 +4587,7 @@ def display_oasis_health(calculator, metrics, flow_matrix, node_names, org_name)
     # AUTONOMOUS Dimension
     with st.expander(f"🧠 **AUTONOMOUS** - Ability to Learn & Encode ({scores['autonomous']:.0f}/100) - {dimension_status['autonomous']}",
                      expanded=scores['autonomous'] < 40):
-        st.markdown(f"**{interpretations['autonomous']}**")
+        st.markdown(f"**{interpretations['autonomous']}** {info_button('oasis_autonomous')}", unsafe_allow_html=True)
 
         col1, col2 = st.columns([2, 1])
         with col1:
@@ -4295,18 +4598,18 @@ def display_oasis_health(calculator, metrics, flow_matrix, node_names, org_name)
             with metric_col1:
                 fci = auto_metrics.get('finn_cycling_index', 0)
                 if fci is None:
-                    st.metric("Finn Cycling Index", "N/A")
+                    st.metric("Finn Cycling Index", "N/A", help=_tip("finn_cycling_index"))
                 else:
-                    st.metric("Finn Cycling Index", f"{fci:.2f}")
+                    st.metric("Finn Cycling Index", f"{fci:.2f}", help=_tip("finn_cycling_index"))
                 st.caption("Resource cycling [0-1]")
             with metric_col2:
-                st.metric("Reciprocity", f"{auto_metrics.get('flow_reciprocity', 0):.2f}")
+                st.metric("Reciprocity", f"{auto_metrics.get('flow_reciprocity', 0):.2f}", help=_tip("oasis_reciprocity"))
                 st.caption("Bidirectional flows [0-1]")
             with metric_col3:
-                st.metric("AMI", f"{auto_metrics.get('ami', 0):.2f}")
+                st.metric("AMI", f"{auto_metrics.get('ami', 0):.2f}", help=_tip("ami"))
                 st.caption("Information organization [nats]")
             with metric_col4:
-                st.metric("Autocatalytic", f"{auto_metrics.get('autocatalytic_index', 0):.2f}")
+                st.metric("Autocatalytic", f"{auto_metrics.get('autocatalytic_index', 0):.2f}", help=_tip("autocatalytic_index"))
                 st.caption("Self-reinforcing cycles [0-1]")
 
             st.markdown("#### Fath et al. Principles")
@@ -4320,7 +4623,7 @@ def display_oasis_health(calculator, metrics, flow_matrix, node_names, org_name)
     # SYMBIOTIC Dimension
     with st.expander(f"🤝 **SYMBIOTIC** - Integration & Balance ({scores['symbiotic']:.0f}/100) - {dimension_status['symbiotic']}",
                      expanded=scores['symbiotic'] < 55):
-        st.markdown(f"**{interpretations['symbiotic']}**")
+        st.markdown(f"**{interpretations['symbiotic']}** {info_button('oasis_symbiotic')}", unsafe_allow_html=True)
 
         col1, col2 = st.columns([2, 1])
         with col1:
@@ -4329,16 +4632,16 @@ def display_oasis_health(calculator, metrics, flow_matrix, node_names, org_name)
 
             metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
             with metric_col1:
-                st.metric("Flow Equality", f"{symb_metrics.get('equality', 0):.2f}")
+                st.metric("Flow Equality", f"{symb_metrics.get('equality', 0):.2f}", help=_tip("flow_gini"))
                 st.caption("1 - Gini [0-1]")
             with metric_col2:
-                st.metric("Modularity", f"{symb_metrics.get('modularity', 0):.2f}")
+                st.metric("Modularity", f"{symb_metrics.get('modularity', 0):.2f}", help=_tip("modularity"))
                 st.caption("Community structure [0-1]")
             with metric_col3:
-                st.metric("Node Utilization", f"{symb_metrics.get('node_utilization', 0):.2%}")
+                st.metric("Node Utilization", f"{symb_metrics.get('node_utilization', 0):.2%}", help=_tip("node_utilization"))
                 st.caption("Effective/Actual nodes")
             with metric_col4:
-                st.metric("Mutualism", f"{symb_metrics.get('mutualism_ratio', 0):.2f}")
+                st.metric("Mutualism", f"{symb_metrics.get('mutualism_ratio', 0):.2f}", help=_tip("oasis_mutualism"))
                 st.caption("Reciprocal relationships [0-1]")
 
             st.markdown("#### Fath et al. Principles")
@@ -4352,7 +4655,7 @@ def display_oasis_health(calculator, metrics, flow_matrix, node_names, org_name)
     # INTELLIGENT Dimension
     with st.expander(f"💡 **INTELLIGENT** - Leverage Diverse Intelligence ({scores['intelligent']:.0f}/100) - {dimension_status['intelligent']}",
                      expanded=scores['intelligent'] < 45):
-        st.markdown(f"**{interpretations['intelligent']}**")
+        st.markdown(f"**{interpretations['intelligent']}** {info_button('oasis_intelligent')}", unsafe_allow_html=True)
 
         col1, col2 = st.columns([2, 1])
         with col1:
@@ -4361,16 +4664,16 @@ def display_oasis_health(calculator, metrics, flow_matrix, node_names, org_name)
 
             metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
             with metric_col1:
-                st.metric("Number of Roles", f"{intel_metrics.get('number_of_roles', 0):.2f}")
+                st.metric("Number of Roles", f"{intel_metrics.get('number_of_roles', 0):.2f}", help=_tip("num_roles"))
                 st.caption("Functional differentiation")
             with metric_col2:
-                st.metric("Functional Diversity", f"{intel_metrics.get('functional_diversity', 0):.2f}")
+                st.metric("Functional Diversity", f"{intel_metrics.get('functional_diversity', 0):.2f}", help=_tip("flow_diversity"))
                 st.caption("log(R) [nats]")
             with metric_col3:
-                st.metric("Roles per Node", f"{intel_metrics.get('roles_per_node', 0):.2f}")
+                st.metric("Roles per Node", f"{intel_metrics.get('roles_per_node', 0):.2f}", help=_tip("roles_per_node"))
                 st.caption("Specialization spread")
             with metric_col4:
-                st.metric("Cond. Entropy", f"{intel_metrics.get('conditional_entropy', 0):.2f}")
+                st.metric("Cond. Entropy", f"{intel_metrics.get('conditional_entropy', 0):.2f}", help=_tip("conditional_entropy"))
                 st.caption("System flexibility [nats]")
 
             st.markdown("#### Fath et al. Principles")
@@ -4384,7 +4687,7 @@ def display_oasis_health(calculator, metrics, flow_matrix, node_names, org_name)
     # SUSTAINABLE Dimension (Primary - Window of Vitality)
     with st.expander(f"🌱 **SUSTAINABLE** - Balance Order & Freedom ({scores['sustainable']:.0f}/100) - {dimension_status['sustainable']}",
                      expanded=True):
-        st.markdown(f"**{interpretations['sustainable']}**")
+        st.markdown(f"**{interpretations['sustainable']}** {info_button('oasis_sustainable')}", unsafe_allow_html=True)
 
         sust_metrics = details['sustainable']['metrics']
 
@@ -4400,26 +4703,26 @@ def display_oasis_health(calculator, metrics, flow_matrix, node_names, org_name)
             metric_col1, metric_col2, metric_col3 = st.columns(3)
             with metric_col1:
                 alpha = sust_metrics.get('relative_ascendency', 0)
-                st.metric("Relative Ascendency (α)", f"{alpha:.2f}")
+                st.metric("Relative Ascendency (α)", f"{alpha:.2f}", help=_tip("relative_ascendency"))
                 st.caption("Optimal: 0.37")
             with metric_col2:
-                st.metric("Robustness (R)", f"{sust_metrics.get('robustness', 0):.2f}")
+                st.metric("Robustness (R)", f"{sust_metrics.get('robustness', 0):.2f}", help=_tip("robustness"))
                 st.caption("Max: 0.368")
             with metric_col3:
                 is_viable = sust_metrics.get('is_viable', False)
                 viable_text = "✅ In Window" if is_viable else "❌ Outside"
-                st.metric("Window Status", viable_text)
+                st.metric("Window Status", viable_text, help=_tip("oasis_window_status"))
                 st.caption("Range: 0.2-0.6")
 
             metric_col4, metric_col5, metric_col6 = st.columns(3)
             with metric_col4:
-                st.metric("Regenerative Cap.", f"{sust_metrics.get('regenerative_capacity', 0):.2f}")
+                st.metric("Regenerative Cap.", f"{sust_metrics.get('regenerative_capacity', 0):.2f}", help=_tip("regenerative_capacity"))
                 st.caption("Self-renewal ability")
             with metric_col5:
-                st.metric("α Optimality", f"{sust_metrics.get('alpha_optimality', 0):.2f}")
+                st.metric("α Optimality", f"{sust_metrics.get('alpha_optimality', 0):.2f}", help=_tip("oasis_alpha_optimality"))
                 st.caption("Distance from 0.37")
             with metric_col6:
-                st.metric("Fitness", f"{sust_metrics.get('fitness_for_evolution', 0):.2f}")
+                st.metric("Fitness", f"{sust_metrics.get('fitness_for_evolution', 0):.2f}", help=_tip("fitness"))
                 st.caption("Evolutionary fitness")
 
         with col2:
@@ -4446,8 +4749,8 @@ def display_oasis_health(calculator, metrics, flow_matrix, node_names, org_name)
         priority_colors = {
             'CRITICAL': ('🔴', '#e74c3c'),
             'HIGH': ('🟠', '#e67e22'),
-            'MEDIUM': ('🟡', '#f39c12'),
-            'LOW': ('🔵', '#3498db')
+            'MEDIUM': ('🟡', '#f5b041'),
+            'LOW': ('🔵', '#5dade2')
         }
 
         for rec in recommendations:
@@ -4508,58 +4811,146 @@ def display_oasis_health(calculator, metrics, flow_matrix, node_names, org_name)
 
 def display_detailed_report(calculator, metrics, assessments, org_name):
     """Display scientific analysis report with embedded visualizations."""
-    
+
     st.header("📚 Analysis Report")
     st.markdown("*Comprehensive visual assessment with charts, methodology, results, and recommendations*")
-    
+
     # Add visual summary cards at the top
     display_visual_summary_cards(metrics, assessments)
-    
-    # Single report format with integrated executive summary
-    tab1, = st.tabs(["📖 Report"])
-    
-    with tab1:
-        # Generate publication-quality report
-        report_generator = PublicationReportGenerator(
-            calculator=calculator,
-            metrics=metrics,
-            assessments=assessments,
-            org_name=org_name,
-            flow_matrix=calculator.flow_matrix,
-            node_names=calculator.node_names
+
+    # Generate publication-quality report
+    report_generator = PublicationReportGenerator(
+        calculator=calculator,
+        metrics=metrics,
+        assessments=assessments,
+        org_name=org_name,
+        flow_matrix=calculator.flow_matrix,
+        node_names=calculator.node_names
+    )
+
+    # ── Download buttons — prominent at top ────────────────────────────
+    st.markdown("### Download Report")
+    full_report = report_generator.generate_full_report()
+
+    # Create LaTeX generator for PDF export
+    latex_generator = LaTeXReportGenerator(
+        calculator=calculator,
+        metrics=metrics,
+        assessments=assessments,
+        org_name=org_name,
+        flow_matrix=calculator.flow_matrix,
+        node_names=calculator.node_names
+    )
+
+    dl_col1, dl_col2, dl_col3, dl_col4 = st.columns(4)
+    with dl_col1:
+        # Professional PDF generation
+        try:
+            from src.pdf_generator import generate_pdf_report, create_simple_pdf
+
+            # Collect charts for PDF embedding
+            pdf_charts = {
+                "System Robustness Curve": create_robustness_curve(metrics),
+                "Core Metrics Analysis": create_metrics_bar_chart(metrics),
+                "Flow Distribution": create_flow_distribution_chart(
+                    calculator.flow_matrix, calculator.node_names),
+            }
+
+            pdf_content = generate_pdf_report(
+                report_generator, calculator, metrics, pdf_charts)
+
+            if pdf_content:
+                st.download_button(
+                    label="📕 PDF Report",
+                    data=pdf_content,
+                    file_name=f"{org_name.replace(' ', '_')}_analysis_report.pdf",
+                    mime="application/pdf",
+                    help="Download professional PDF report with charts and tables",
+                    use_container_width=True,
+                )
+            else:
+                st.download_button(
+                    label="📄 Text Report",
+                    data=full_report,
+                    file_name=f"{org_name.replace(' ', '_')}_analysis_report.txt",
+                    mime="text/plain",
+                    help="PDF unavailable — download text report",
+                    use_container_width=True,
+                )
+        except Exception:
+            st.download_button(
+                label="📄 Text Report",
+                data=full_report,
+                file_name=f"{org_name.replace(' ', '_')}_analysis_report.txt",
+                mime="text/plain",
+                help="PDF unavailable — download text report",
+                use_container_width=True,
+            )
+    with dl_col2:
+        st.download_button(
+            label="📝 Markdown",
+            data=full_report.replace("====", "----"),
+            file_name=f"{org_name.replace(' ', '_')}_analysis_report.md",
+            mime="text/markdown",
+            help="Markdown format for editing",
+            use_container_width=True,
         )
-        
-        # Start directly with Abstract (no Executive Summary)
+    with dl_col3:
+        latex_content = latex_generator.generate_latex_document()
+        st.download_button(
+            label="📐 LaTeX Source",
+            data=latex_content,
+            file_name=f"{org_name.replace(' ', '_')}_analysis_report.tex",
+            mime="text/x-tex",
+            help="LaTeX source for professional typesetting",
+            use_container_width=True,
+        )
+    with dl_col4:
+        st.download_button(
+            label="📄 Text Report",
+            data=full_report,
+            file_name=f"{org_name.replace(' ', '_')}_analysis_report.txt",
+            mime="text/plain",
+            help="Complete analysis in text format",
+            use_container_width=True,
+        )
+
+    st.markdown("---")
+
+    # ── Report content (collapsible sections) ──────────────────────────
+    tab1, = st.tabs(["📖 Report"])
+
+    with tab1:
         with st.expander("📄 **ABSTRACT**", expanded=True):
             st.text(report_generator.generate_abstract())
-        
+
         with st.expander("📚 **1. INTRODUCTION**", expanded=True):
             st.text(report_generator.generate_introduction())
-        
+
         with st.expander("🔬 **2. METHODOLOGY**", expanded=True):
             st.text(report_generator.generate_methodology())
-        
+
         with st.expander("📊 **3. RESULTS**", expanded=True):
             # Key Performance Indicators at the top
             st.markdown("### Key Performance Indicators")
             col1, col2, col3, col4 = st.columns(4)
-            
+
             with col1:
                 status_color = "🟢" if metrics['is_viable'] else "🔴"
                 st.metric(
-                    "Viability Status", 
+                    "Viability Status",
                     f"{status_color} {'Viable' if metrics['is_viable'] else 'Non-Viable'}",
                     f"α = {metrics['ascendency_ratio']:.2f}"
                 )
-            
+
             with col2:
                 rob_status = "High" if metrics['robustness'] > 0.2 else "Moderate" if metrics['robustness'] > 0.15 else "Low"
                 st.metric(
-                    "Robustness", 
+                    "Robustness",
                     f"{metrics['robustness']:.2f}",
                     rob_status
                 )
-            
+
             with col3:
                 eff_status = "Optimal" if 0.2 <= metrics['network_efficiency'] <= 0.6 else "Sub-optimal"
                 st.metric(
@@ -4567,183 +4958,45 @@ def display_detailed_report(calculator, metrics, assessments, org_name):
                     f"{metrics['network_efficiency']:.2f}",
                     eff_status
                 )
-            
+
             with col4:
                 st.metric(
                     "Total Throughput",
                     format_large_number(metrics['total_system_throughput']),
                     f"{len(calculator.node_names)} nodes"
                 )
-            
+
             st.markdown("---")
-            
+
             # Visual results with charts
-            
-            # First: Show the robustness curve (full width)
             st.markdown("### System Robustness vs Network Efficiency")
             robustness_fig = create_robustness_curve(metrics)
             st.plotly_chart(robustness_fig, use_container_width=True)
-            
-            # Second row: Two column layout for other charts
+
             st.markdown("### Core Metrics Analysis")
             col1, col2 = st.columns(2)
-            
             with col1:
-                # Core metrics bar chart
                 fig_metrics = create_metrics_bar_chart(metrics)
                 st.plotly_chart(fig_metrics, use_container_width=True)
-            
             with col2:
-                # Flow distribution pie chart
                 fig_flow = create_flow_distribution_chart(calculator.flow_matrix, calculator.node_names)
                 st.plotly_chart(fig_flow, use_container_width=True)
-            
-            # Text results below charts
+
             st.markdown("---")
             st.markdown("### Detailed Analysis")
             st.text(report_generator.generate_results())
-        
+
         with st.expander("💭 **4. DISCUSSION**", expanded=True):
             st.text(report_generator.generate_discussion())
-        
+
         with st.expander("✅ **5. CONCLUSIONS & RECOMMENDATIONS**", expanded=True):
             st.text(report_generator.generate_conclusions())
-        
+
         with st.expander("📚 **REFERENCES**", expanded=True):
             st.text(report_generator.generate_references())
-        
+
         with st.expander("📋 **APPENDIX: Detailed Data**", expanded=True):
             st.text(report_generator.generate_appendix())
-        
-        # Download full report
-        st.subheader("💾 Download Complete Report")
-        full_report = report_generator.generate_full_report()
-        
-        # Create LaTeX generator for PDF export
-        latex_generator = LaTeXReportGenerator(
-            calculator=calculator,
-            metrics=metrics,
-            assessments=assessments,
-            org_name=org_name,
-            flow_matrix=calculator.flow_matrix,
-            node_names=calculator.node_names
-        )
-        
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.download_button(
-                label="📄 Text Report",
-                data=full_report,
-                file_name=f"{org_name.replace(' ', '_')}_analysis_report.txt",
-                mime="text/plain",
-                help="Complete analysis in text format"
-            )
-        
-        with col2:
-            st.download_button(
-                label="📝 Markdown",
-                data=full_report.replace("====", "----"),
-                file_name=f"{org_name.replace(' ', '_')}_analysis_report.md",
-                mime="text/markdown",
-                help="Markdown format for editing"
-            )
-        
-        with col3:
-            # Direct PDF generation
-            try:
-                from src.pdf_generator import generate_pdf_report, create_simple_pdf
-                
-                # Try to generate PDF with charts
-                charts = {
-                    "Viability Window": create_viability_chart(metrics),
-                    "Key Metrics": create_metrics_bar_chart(metrics)
-                }
-                
-                # First try HTML-based PDF with charts
-                pdf_content = generate_pdf_report(report_generator, calculator, metrics, charts)
-                
-                # If HTML-based fails, try simple text PDF
-                if pdf_content and pdf_content.startswith(b'<!DOCTYPE'):
-                    # HTML was returned, try simple PDF
-                    full_report = report_generator.generate_full_report()
-                    pdf_content = create_simple_pdf(full_report, org_name)
-                
-                if pdf_content:
-                    st.download_button(
-                        label="📕 PDF Report",
-                        data=pdf_content,
-                        file_name=f"{org_name.replace(' ', '_')}_analysis_report.pdf",
-                        mime="application/pdf",
-                        help="Download professional PDF report"
-                    )
-                else:
-                    # Fallback to HTML download
-                    st.download_button(
-                        label="📄 HTML Report",
-                        data=generate_pdf_report(report_generator, calculator, metrics, charts),
-                        file_name=f"{org_name.replace(' ', '_')}_analysis_report.html",
-                        mime="text/html",
-                        help="Download HTML report (open and print to PDF)"
-                    )
-            except Exception as e:
-                # Fallback to text download
-                st.download_button(
-                    label="📝 Text Report",
-                    data=full_report,
-                    file_name=f"{org_name.replace(' ', '_')}_analysis_report.txt",
-                    mime="text/plain",
-                    help="Download text report"
-                )
-        
-        with col4:
-            # LaTeX source for those who want it
-            latex_content = latex_generator.generate_latex_document()
-            st.download_button(
-                label="📐 LaTeX Source",
-                data=latex_content,
-                file_name=f"{org_name.replace(' ', '_')}_analysis_report.tex",
-                mime="text/x-tex",
-                help="LaTeX source for professional typesetting"
-            )
-        
-        # Executive summary download separately
-        st.markdown("---")
-        exec_summary = f"""EXECUTIVE SUMMARY - {org_name}
-{'='*50}
-
-VIABILITY STATUS: {'✅ Viable' if metrics['is_viable'] else '⚠️ Non-Viable'}
-Relative Ascendency (α): {metrics['ascendency_ratio']:.2f}
-
-KEY METRICS:
-- Robustness: {metrics['robustness']:.2f} ({report_generator._categorize_robustness()})
-- Network Efficiency: {metrics['network_efficiency']:.2f} ({report_generator._categorize_efficiency()})
-- Regenerative Capacity: {metrics['regenerative_capacity']:.2f}
-
-NETWORK STRUCTURE:
-- Nodes: {len(calculator.node_names)}
-- Active Connections: {np.count_nonzero(calculator.flow_matrix)}
-- Total System Throughput: {metrics['total_system_throughput']:.1f}
-
-KEY FINDINGS:
-• The organization operates {'within' if metrics['is_viable'] else 'outside'} the window of viability
-• System exhibits {report_generator._categorize_efficiency().lower()} efficiency and {report_generator._categorize_robustness().lower()} robustness
-• Network density: {np.count_nonzero(calculator.flow_matrix)/(len(calculator.node_names)**2):.2f}
-
-PRIMARY RECOMMENDATION:
-{'Maintain current balance while monitoring for changes' if metrics['is_viable'] else 
-'Increase organizational structure and coordination' if metrics['ascendency_ratio'] < metrics['viability_lower_bound'] else
-'Reduce constraints and increase flexibility'}
-
-Generated: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}
-"""
-        
-        st.download_button(
-            label="📊 Download Executive Summary",
-            data=exec_summary,
-            file_name=f"{org_name.replace(' ', '_')}_executive_summary.txt",
-            mime="text/plain",
-            help="Executive summary only"
-        )
     
     # Data export section
     with st.expander("🔢 Export Raw Data", expanded=False):
@@ -5285,25 +5538,27 @@ def learn_more_interface():
     st.markdown("""
     <style>
     .metric-card {
-        background-color: #f0f2f6;
+        background-color: #161b22;
         border-radius: 10px;
         padding: 20px;
         margin: 10px 0;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        color: #e6edf3;
     }
     .highlight-box {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        background: linear-gradient(135deg, #1a5f35 0%, #2d8a4e 100%);
         color: white;
         padding: 15px;
         border-radius: 8px;
         margin: 15px 0;
     }
     .formula-box {
-        background-color: #f9f9f9;
-        border-left: 4px solid #667eea;
+        background-color: #1c2333;
+        border-left: 4px solid #2ecc71;
         padding: 10px 15px;
         margin: 10px 0;
         font-family: 'Courier New', monospace;
+        color: #e6edf3;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -7089,7 +7344,7 @@ def learn_more_interface():
         
         ### Final Thoughts
         
-        <div class="metric-card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+        <div class="metric-card" style="background: linear-gradient(135deg, #1a5f35 0%, #2d8a4e 100%); color: white;">
         <h3>🌟 Your Adaptive Journey Begins Now</h3>
         
         Remember:<br><br>
@@ -8074,7 +8329,7 @@ def show_app_version():
     """Display app version information."""
     st.markdown("---")
     st.markdown("""
-    <div style="text-align: center; color: #666; font-size: 0.9rem; margin-top: 2rem;">
+    <div style="text-align: center; color: #8b949e; font-size: 0.9rem; margin-top: 2rem;">
         <strong>Adaptive Organization Analysis System</strong><br>
         Version 2.1.1 - Formula Validation & Accuracy
     </div>

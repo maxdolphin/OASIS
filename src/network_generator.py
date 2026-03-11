@@ -587,9 +587,10 @@ class OrganizationalNetworkGenerator:
                     len=0.5,
                     y=0.5,
                     thickness=15,
-                    tickfont=dict(size=11)
+                    tickfont=dict(size=11, color='#e6edf3'),
+                    titlefont=dict(color='#e6edf3')
                 ),
-                line=dict(width=3, color='white'),  # Thicker white border for contrast
+                line=dict(width=3, color='#0e1117'),
                 cmin=-1,
                 cmax=1
             )
@@ -618,12 +619,12 @@ class OrganizationalNetworkGenerator:
                                xref="paper", yref="paper",
                                x=0.5, y=-0.05,
                                xanchor="center", yanchor="bottom",
-                               font=dict(color="#666", size=10)
+                               font=dict(color="#8b949e", size=10)
                            )],
                            xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
                            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-                           plot_bgcolor='#ffffff',  # White background for maximum contrast with edges
-                           paper_bgcolor='white'
+                           plot_bgcolor='#161b22',
+                           paper_bgcolor='rgba(0,0,0,0)'
                        ))
 
         # Add interactive highlighting only for smaller networks (performance)
@@ -735,10 +736,10 @@ class OrganizationalNetworkGenerator:
                     xanchor='left',
                     y=0.98,
                     yanchor='top',
-                    bgcolor='#e0f2fe',  # Light blue background
-                    bordercolor='#1e3a8a',  # Dark blue border
+                    bgcolor='#1c2333',
+                    bordercolor='#2ecc71',
                     borderwidth=2,
-                    font=dict(size=13, color='#1e3a8a', family='Arial, sans-serif'),
+                    font=dict(size=13, color='#e6edf3', family='Arial, sans-serif'),
                     active=0  # Start with "Clear Selection" active
                 )
             ]
@@ -751,9 +752,9 @@ class OrganizationalNetworkGenerator:
             x=0.35, y=0.98,
             xanchor="left", yanchor="top",
             showarrow=False,
-            font=dict(size=12, color="#1e3a8a"),
-            bgcolor="rgba(255, 245, 157, 0.9)",  # Light yellow background for visibility
-            bordercolor="#1e3a8a",
+            font=dict(size=12, color="#2ecc71"),
+            bgcolor="rgba(46, 204, 113, 0.15)",
+            bordercolor="#2ecc71",
             borderwidth=1,
             borderpad=4
         )

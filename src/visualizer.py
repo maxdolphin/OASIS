@@ -262,7 +262,10 @@ class SustainabilityVisualizer:
         fig.update_layout(
             title_text="Extended Regenerative Economics Analysis Dashboard",
             showlegend=True,
-            height=1200
+            height=1200,
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            font=dict(color='#e6edf3')
         )
         
         # Update axes labels
@@ -468,7 +471,11 @@ class SustainabilityVisualizer:
             title='System Robustness vs Network Efficiency',
             xaxis_title='Network Efficiency (A/C)',
             yaxis_title='Robustness',
-            showlegend=True
+            showlegend=True,
+            template='plotly_dark',
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            font=dict(color='#e6edf3')
         )
         
         return fig
@@ -501,11 +508,11 @@ class SustainabilityVisualizer:
                     # Color based on flow strength
                     intensity = flow_matrix[i][j] / max_flow
                     if intensity > 0.7:
-                        link_colors.append('rgba(255, 65, 54, 0.6)')  # Red for strong flows
+                        link_colors.append('rgba(212, 168, 67, 0.6)')  # Red for strong flows
                     elif intensity > 0.3:
-                        link_colors.append('rgba(255, 193, 7, 0.6)')  # Yellow for medium flows
+                        link_colors.append('rgba(72, 201, 176, 0.6)')  # Yellow for medium flows
                     else:
-                        link_colors.append('rgba(102, 126, 234, 0.6)')  # Blue for weak flows
+                        link_colors.append('rgba(93, 173, 226, 0.6)')  # Blue for weak flows
         
         # Create node colors based on total throughput
         node_throughput = [sum(flow_matrix[i, :]) + sum(flow_matrix[:, i]) for i in range(len(flow_matrix))]
@@ -514,18 +521,18 @@ class SustainabilityVisualizer:
         for throughput in node_throughput:
             intensity = throughput / max_throughput
             if intensity > 0.7:
-                node_colors.append('rgba(255, 65, 54, 0.8)')
+                node_colors.append('rgba(212, 168, 67, 0.8)')
             elif intensity > 0.3:
-                node_colors.append('rgba(255, 193, 7, 0.8)')
+                node_colors.append('rgba(72, 201, 176, 0.8)')
             else:
-                node_colors.append('rgba(102, 126, 234, 0.8)')
+                node_colors.append('rgba(93, 173, 226, 0.8)')
         
         # Create Sankey diagram
         fig = go.Figure(data=[go.Sankey(
             node=dict(
                 pad=15,
                 thickness=20,
-                line=dict(color="black", width=0.5),
+                line=dict(color="#0e1117", width=0.5),
                 label=node_names,
                 color=node_colors,
                 hovertemplate='%{label}<br>Total Throughput: %{value:.1f}<extra></extra>'
@@ -544,9 +551,9 @@ class SustainabilityVisualizer:
                 'text': "Network Flow Sankey Diagram",
                 'x': 0.5,
                 'xanchor': 'center',
-                'font': {'size': 20}
+                'font': {'size': 20, 'color': '#e6edf3'}
             },
-            font={'size': 12},
+            font={'size': 12, 'color': '#e6edf3'},
             height=600,
             paper_bgcolor='rgba(0,0,0,0)',
             plot_bgcolor='rgba(0,0,0,0)'

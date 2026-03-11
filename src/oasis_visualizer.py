@@ -18,17 +18,17 @@ from typing import Dict, List, Any, Optional
 
 # Color scheme for OASIS dimensions
 OASIS_COLORS = {
-    'open': '#3498db',        # Blue - connectivity/openness
-    'autonomous': '#9b59b6',  # Purple - learning/cycling
-    'symbiotic': '#2ecc71',   # Green - cooperation/balance
-    'intelligent': '#f39c12', # Orange - intelligence/roles
-    'sustainable': '#1abc9c'  # Teal - sustainability/vitality
+    'open': '#5dade2',        # Blue - connectivity/openness
+    'autonomous': '#bb8fce',  # Purple - learning/cycling
+    'symbiotic': '#58d68d',   # Green - cooperation/balance
+    'intelligent': '#f5b041', # Orange - intelligence/roles
+    'sustainable': '#48c9b0'  # Teal - sustainability/vitality
 }
 
 # Status colors
 STATUS_COLORS = {
-    'HEALTHY': '#27ae60',
-    'WARNING': '#f39c12',
+    'HEALTHY': '#2ecc71',
+    'WARNING': '#f5b041',
     'CRITICAL': '#e74c3c'
 }
 
@@ -113,27 +113,28 @@ def create_oasis_radar_chart(oasis_scores: Dict[str, float],
                 range=[0, 100],
                 tickfont=dict(size=10),
                 tickvals=[0, 25, 50, 75, 100],
-                gridcolor='lightgray'
+                gridcolor='rgba(255,255,255,0.1)'
             ),
             angularaxis=dict(
                 tickfont=dict(size=12, weight='bold'),
-                gridcolor='lightgray'
+                gridcolor='rgba(255,255,255,0.1)'
             ),
-            bgcolor='white'
+            bgcolor='#161b22'
         ),
         showlegend=True,
         legend=dict(
             x=1.1,
             y=0.5,
-            font=dict(size=10)
+            font=dict(size=10, color='#e6edf3')
         ),
         title=dict(
             text=title,
-            font=dict(size=16, weight='bold'),
+            font=dict(size=16, weight='bold', color='#e6edf3'),
             x=0.5
         ),
         height=500,
-        margin=dict(l=80, r=150, t=80, b=80)
+        margin=dict(l=80, r=150, t=80, b=80),
+        paper_bgcolor='rgba(0,0,0,0)'
     )
 
     return fig
@@ -175,17 +176,17 @@ def create_dimension_gauge(score: float, dimension: str,
     fig = go.Figure(go.Indicator(
         mode="gauge+number",
         value=score,
-        number=dict(suffix="/100", font=dict(size=24)),
-        title=dict(text=display_name, font=dict(size=14, weight='bold')),
+        number=dict(suffix="/100", font=dict(size=24, color='#e6edf3')),
+        title=dict(text=display_name, font=dict(size=14, weight='bold', color='#e6edf3')),
         gauge=dict(
             axis=dict(
                 range=[0, 100],
                 tickwidth=1,
-                tickcolor="darkgray",
+                tickcolor="#8b949e",
                 tickvals=[0, 25, 50, 75, 100]
             ),
             bar=dict(color=bar_color, thickness=0.75),
-            bgcolor="white",
+            bgcolor="#161b22",
             borderwidth=2,
             bordercolor="gray",
             steps=[
@@ -205,7 +206,7 @@ def create_dimension_gauge(score: float, dimension: str,
     fig.update_layout(
         height=200,
         margin=dict(l=20, r=20, t=50, b=20),
-        paper_bgcolor='white'
+        paper_bgcolor='rgba(0,0,0,0)'
     )
 
     return fig
@@ -266,7 +267,7 @@ def create_all_dimension_gauges(oasis_profile: Dict[str, Any]) -> go.Figure:
     fig.update_layout(
         height=250,
         margin=dict(l=20, r=20, t=50, b=20),
-        paper_bgcolor='white'
+        paper_bgcolor='rgba(0,0,0,0)'
     )
 
     return fig
@@ -312,13 +313,16 @@ def create_contribution_chart(dimension: str, metrics: Dict[str, float],
     fig.update_layout(
         title=dict(
             text=f'{dimension.upper()} Score Breakdown',
-            font=dict(size=14)
+            font=dict(size=14, color='#e6edf3')
         ),
         xaxis_title='Contribution to Score',
         yaxis_title='',
         height=250,
         margin=dict(l=120, r=20, t=50, b=40),
-        xaxis=dict(range=[0, max(contributions) * 1.2] if contributions else [0, 100])
+        xaxis=dict(range=[0, max(contributions) * 1.2] if contributions else [0, 100]),
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='#e6edf3')
     )
 
     return fig
@@ -343,21 +347,21 @@ def create_overall_score_indicator(overall_score: float,
         value=overall_score,
         number=dict(
             suffix="/100",
-            font=dict(size=40, weight='bold')
+            font=dict(size=40, weight='bold', color='#e6edf3')
         ),
         title=dict(
             text=f"Overall OASIS Health: {overall_status}",
-            font=dict(size=18, weight='bold')
+            font=dict(size=18, weight='bold', color='#e6edf3')
         ),
         gauge=dict(
             axis=dict(
                 range=[0, 100],
                 tickwidth=2,
-                tickcolor="darkgray",
+                tickcolor="#8b949e",
                 tickvals=[0, 20, 40, 60, 80, 100]
             ),
             bar=dict(color=color, thickness=0.8),
-            bgcolor="white",
+            bgcolor="#161b22",
             borderwidth=3,
             bordercolor="gray",
             steps=[
@@ -371,7 +375,7 @@ def create_overall_score_indicator(overall_score: float,
     fig.update_layout(
         height=300,
         margin=dict(l=30, r=30, t=80, b=30),
-        paper_bgcolor='white'
+        paper_bgcolor='rgba(0,0,0,0)'
     )
 
     return fig
@@ -411,7 +415,7 @@ def create_dimension_comparison_bar(oasis_scores: Dict[str, float]) -> go.Figure
     fig.update_layout(
         title=dict(
             text="OASIS Dimension Scores",
-            font=dict(size=16, weight='bold')
+            font=dict(size=16, weight='bold', color='#e6edf3')
         ),
         xaxis=dict(
             title="Score",
@@ -420,7 +424,10 @@ def create_dimension_comparison_bar(oasis_scores: Dict[str, float]) -> go.Figure
         ),
         yaxis=dict(title=""),
         height=300,
-        margin=dict(l=120, r=50, t=60, b=40)
+        margin=dict(l=120, r=50, t=60, b=40),
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='#e6edf3')
     )
 
     return fig
@@ -452,9 +459,9 @@ def create_sustainability_detail_chart(sustainable_metrics: Dict[str, Any]) -> g
     fig.add_shape(
         type="rect",
         x0=0.2, x1=0.6, y0=0, y1=1,
-        fillcolor="lightgreen",
+        fillcolor="rgba(46, 204, 113, 0.2)",
         opacity=0.3,
-        line=dict(color="green", width=2),
+        line=dict(color="#2ecc71", width=2),
         row=1, col=1
     )
 
@@ -544,7 +551,9 @@ def create_sustainability_detail_chart(sustainable_metrics: Dict[str, Any]) -> g
     fig.update_layout(
         height=350,
         margin=dict(l=60, r=30, t=60, b=50),
-        showlegend=False
+        showlegend=False,
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)'
     )
 
     return fig
@@ -591,7 +600,7 @@ def create_recommendations_chart(recommendations: List[Dict[str, Any]]) -> go.Fi
     fig = go.Figure(go.Table(
         header=dict(
             values=['Priority', 'Dimension', 'Issue'],
-            fill_color='#2c3e50',
+            fill_color='#1a5f35',
             font=dict(color='white', size=12),
             align='left'
         ),
@@ -599,11 +608,11 @@ def create_recommendations_chart(recommendations: List[Dict[str, Any]]) -> go.Fi
             values=[priorities, dimensions, issues],
             fill_color=[
                 [priority_colors.get(p, '#ecf0f1') for p in priorities],
-                ['white'] * len(recommendations),
-                ['white'] * len(recommendations)
+                ['#161b22'] * len(recommendations),
+                ['#161b22'] * len(recommendations)
             ],
-            font=dict(color=['white' if p in ['CRITICAL', 'HIGH'] else 'black' for p in priorities] +
-                           ['black'] * len(recommendations) * 2, size=11),
+            font=dict(color=['white' if p in ['CRITICAL', 'HIGH'] else '#e6edf3' for p in priorities] +
+                           ['#e6edf3'] * len(recommendations) * 2, size=11),
             align='left',
             height=30
         )
@@ -612,10 +621,11 @@ def create_recommendations_chart(recommendations: List[Dict[str, Any]]) -> go.Fi
     fig.update_layout(
         title=dict(
             text="Recommended Actions",
-            font=dict(size=14, weight='bold')
+            font=dict(size=14, weight='bold', color='#e6edf3')
         ),
         height=50 + len(recommendations) * 35,
-        margin=dict(l=20, r=20, t=50, b=20)
+        margin=dict(l=20, r=20, t=50, b=20),
+        paper_bgcolor='rgba(0,0,0,0)'
     )
 
     return fig
@@ -711,7 +721,9 @@ def create_oasis_summary_dashboard(oasis_profile: Dict[str, Any],
         margin=dict(l=50, r=50, t=60, b=50),
         polar=dict(
             radialaxis=dict(range=[0, 100], tickvals=[0, 50, 100])
-        )
+        ),
+        paper_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='#e6edf3')
     )
 
     # Update bar chart y-axis
