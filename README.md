@@ -1,155 +1,154 @@
-# 🌱 Adaptive Organization Analysis
+# OASIS - Organizational Adaptive Sustainability Intelligence System
 
-**A comprehensive system for analyzing organizational sustainability using Ulanowicz's ecosystem theory and regenerative economics principles.**
+**Analyze organizational sustainability through the lens of ecosystem theory, using Ulanowicz's information-theoretic framework and the OASIS health assessment model.**
 
 [![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
-[![Streamlit](https://img.shields.io/badge/streamlit-1.48+-red.svg)](https://streamlit.io/)
+[![Streamlit](https://img.shields.io/badge/streamlit-1.45+-red.svg)](https://streamlit.io/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-## 🎯 Overview
+## Overview
 
-This project implements the **Ulanowicz-Fath regenerative economics framework** to analyze organizational communication networks and assess sustainability. It provides tools to:
+OASIS treats organizations as living ecosystems — networks of information, resource, and communication flows between departments, teams, or entities. By applying Robert Ulanowicz's information-theoretic measures from network ecology, it quantifies organizational health across five dimensions: **Open, Autonomous, Symbiotic, Intelligent, and Sustainable**.
 
-- 📊 **Analyze organizational flow networks** (email, documents, communications)
-- 🌱 **Calculate regenerative economics indicators** (robustness, efficiency, resilience)  
-- 🎯 **Visualize position in the window of viability** with interactive sustainability curves
-- 📈 **Generate comprehensive reports** with actionable recommendations
-- ⚡ **Create synthetic organizational data** for testing and research
+The system provides:
 
-## ✨ Key Features
+- **Network flow analysis** using Ulanowicz metrics (TST, AMI, Ascendency, Robustness)
+- **OASIS health assessment** with five-dimension scoring and actionable recommendations
+- **Professional PDF reports** structured to Big Four audit-firm standards
+- **Interactive dark-mode dashboard** with nature/ecosystem visual theme
+- **Real-world dataset library** (airports, supply chains, energy grids, trade networks)
+- **Synthetic data generation** for testing and research
 
-### 🔬 **Complete Ulanowicz Implementation**
-- Total System Throughput (TST)
-- Average Mutual Information (AMI)
-- Ascendency (A), Development Capacity (C), Overhead (Φ)
-- Window of Viability analysis
+## What's New in v2.0.0
 
-### 🌱 **Extended Regenerative Economics**
-- Flow Diversity & Structural Information
-- Robustness & Network Efficiency
-- Regenerative Capacity & Resilience measures
-- Trophic Depth & Redundancy analysis
+- **Dark mode UI** — Full nature/ecosystem color palette (forest green, gold, teal) across all components
+- **Professional PDF reports** — Cover page, table of contents, embedded charts, headers/footers via reportlab
+- **Publication-quality report narratives** — Restructured to Big Four audit-firm standards with narrative findings
+- **Interactive documentation system** — In-app tooltips and reference documentation for all metrics
+- **OASIS health model** — Five-dimension organizational health scoring with traffic-light indicators
+- **SQLite metrics database** — Precomputed metrics for faster analysis of saved networks
+- **HuggingFace dataset discovery** — AI agent for finding relevant network datasets
+- **Ecosystem sample datasets** — US airports, Bitcoin transactions, pharma, manufacturing networks
 
-### 🌐 **Interactive Web Application**
-- **Streamlit-based dashboard** with professional UI
-- **File upload support** (JSON, CSV)
-- **Synthetic data generator** with configurable parameters
-- **Real-time analysis** and visualization
-- **Export capabilities** (reports, data, visualizations)
+## Quick Start
 
-### 📊 **Advanced Visualizations**
-- **🎯 Sustainability Curve**: Shows organization position on theoretical curve with window of viability
-- **💪 Robustness Analysis**: Efficiency vs. robustness relationship with optimal points
-- **🔥 Network Heatmaps**: Department-to-department flow visualization
-- All charts interactive with Plotly (zoom, pan, hover tooltips)
-
-## 🚀 Quick Start
-
-### **Method 1: Web Application (Recommended)**
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/Adaptive_Organization.git
-cd Adaptive_Organization
+git clone https://github.com/maxdolphin/OASIS.git
+cd OASIS
 
 # Install dependencies
 pip install -r docs/requirements.txt
 
-# Launch web app
-./run_webapp.sh
-# OR
+# Launch the app
 streamlit run app.py
 ```
 
-**Open your browser to http://localhost:8501**
+Open your browser to **http://localhost:8501**
 
-### **Method 2: Command Line Interface**
-```bash
-# Analyze sample organization
-python3 src/main.py --example --detailed
+### Python API
 
-# Analyze your data
-python3 src/main.py --input your_data.json --output analysis.html --detailed
-
-# Generate synthetic data
-python3 data/synthetic_organizations/generate_synthetic_data.py --org-name "MyCompany"
-```
-
-### **Method 3: Python API**
 ```python
 import numpy as np
 from src.ulanowicz_calculator import UlanowiczCalculator
-from src.visualizer import SustainabilityVisualizer
 
-# Your organizational flow matrix
 flow_matrix = np.array([
     [0, 8, 6, 4],
-    [5, 0, 7, 3], 
+    [5, 0, 7, 3],
     [4, 6, 0, 5],
     [3, 4, 5, 0]
 ])
 departments = ['Sales', 'Marketing', 'Operations', 'Support']
 
-# Calculate sustainability metrics
 calc = UlanowiczCalculator(flow_matrix, departments)
 metrics = calc.get_extended_metrics()
 
 print(f"Robustness: {metrics['robustness']:.3f}")
 print(f"Viable: {'YES' if metrics['is_viable'] else 'NO'}")
-
-# Generate visualizations
-viz = SustainabilityVisualizer(calc)
-viz.save_visualization('analysis.html', 'html')
 ```
 
-## 📊 Example Results
+## Key Features
 
-### **TechFlow Innovations (Sample Organization)**
-- **Robustness**: 0.587 (HIGH - Strong robustness)
-- **Network Efficiency**: 0.066 (Low - Needs streamlining)  
-- **Regenerative Capacity**: 0.409 (HIGH - Strong potential)
-- **Status**: "Too chaotic" - Needs more organizational structure
-- **Recommendation**: Increase coordination, reduce redundant pathways
+### Ulanowicz Metrics
+- Total System Throughput (TST), Average Mutual Information (AMI)
+- Ascendency (A), Development Capacity (C), Overhead (Phi)
+- Robustness, Window of Viability analysis
+- Flow Diversity, Redundancy, Regenerative Capacity
+- Trophic Depth, Network Efficiency, Structural Information
 
-## 📁 Project Structure
+### OASIS Health Assessment
+Each organization is scored across five ecosystem-inspired dimensions:
+- **Open** — Connectivity and exchange capacity
+- **Autonomous** — Self-governance and adaptive capacity
+- **Symbiotic** — Mutualistic relationships and cooperation
+- **Intelligent** — Information processing and flow efficiency
+- **Sustainable** — Long-term viability and resilience
+
+### Visualizations
+- Robustness curve with Window of Viability
+- Sankey flow diagrams and network heatmaps
+- OASIS radar chart and dimension gauges
+- Network topology graphs
+- All charts interactive (Plotly) with dark theme
+
+### Professional Reporting
+- PDF export with cover page, ToC, and embedded charts
+- Narrative findings structured per Big Four audit conventions
+- OASIS dimension assessments with framework alignment (ESRS, GRI, TCFD)
+- Prioritized recommendations (Immediate / Short-term / Medium-term)
+
+### Data Sources
+- Upload your own data (JSON or CSV flow matrices)
+- Generate synthetic organizations with configurable parameters
+- Built-in ecosystem samples: US airports, Bitcoin, pharma, manufacturing
+- Real-world datasets: energy grids, supply chains, financial networks, trade flows
+- HuggingFace dataset discovery agent
+
+## Project Structure
 
 ```
-Adaptive_Organization/
-├── 🌐 app.py                          # Streamlit web application
-├── 🚀 run_webapp.sh                   # Quick launcher script
-├── 📊 src/                            # Core implementation
-│   ├── ulanowicz_calculator.py        # All sustainability calculations
-│   ├── visualizer.py                  # Visualization system
-│   └── main.py                        # CLI application
-├── 📈 data/synthetic_organizations/   # Synthetic datasets
-│   ├── email_flows/                   # Email communication matrices
-│   ├── document_flows/                # Document sharing patterns
-│   ├── combined_flows/                # Weighted combined flows
-│   ├── organizational_structures/     # Company hierarchies
-│   └── generate_synthetic_data.py     # Data generation script
-├── 📚 docs/                           # Documentation & examples
-│   ├── example_usage.py               # Basic usage examples
-│   ├── extended_example.py            # Comprehensive demo
-│   └── requirements.txt               # Dependencies
-└── 📋 Documentation files             # Guides and summaries
+OASIS/
+├── app.py                          # Streamlit web application
+├── .streamlit/config.toml          # Dark theme configuration
+├── src/
+│   ├── ulanowicz_calculator.py     # Core Ulanowicz metrics
+│   ├── oasis_calculator.py         # OASIS health assessment
+│   ├── oasis_visualizer.py         # OASIS charts and gauges
+│   ├── oasis_report.py             # OASIS narrative report
+│   ├── visualizer.py               # Network visualizations
+│   ├── network_generator.py        # Synthetic data generation
+│   ├── pdf_generator.py            # Professional PDF export
+│   ├── publication_report.py       # Publication-quality narratives
+│   ├── docs_registry.py            # Documentation content registry
+│   ├── docs_ui.py                  # In-app documentation UI
+│   ├── database/                   # SQLite metrics storage
+│   └── services/                   # Validation and metrics services
+├── data/
+│   ├── ecosystem_samples/          # Real-world network datasets
+│   ├── user_saved_networks/        # Saved analysis networks
+│   └── synthetic_organizations/    # Generated test data
+├── papers/                         # Scientific references
+├── docs/                           # Documentation and requirements
+└── tests/                          # Test suite
 ```
 
-## 🔧 Installation & Requirements
+## Theoretical Foundation
 
-### **System Requirements**
-- Python 3.8 or higher
-- 8GB RAM recommended for large organizations  
-- Modern web browser for Streamlit interface
+Based on the work of:
 
-### **Dependencies**
-```bash
-pip install streamlit numpy pandas plotly matplotlib networkx scipy
-```
+- **Robert E. Ulanowicz** — Ecosystem sustainability theory, Ascendency concept, Window of Viability
+- **Brian D. Fath & Robert E. Ulanowicz** — "Measuring Regenerative Economics: 10 principles and measures undergirding systemic economic health" (2019)
+- **Bernard C. Patten** — Network environ analysis, indirect effects in ecosystems
+- **Stuart Kauffman** — Self-organization, edge of chaos in complex systems
 
-All dependencies are listed in `docs/requirements.txt` and will be installed automatically when using the setup scripts.
+### Key Concepts
+- **Window of Viability**: Sustainable systems operate between 20-60% efficiency ratio (A/C)
+- **Robustness**: Optimal balance at approximately 37% efficiency, following R = -a * log(a)
+- **Ascendency vs Overhead**: The tension between organized efficiency and adaptive reserve capacity
 
-## 📊 Data Formats
+## Data Formats
 
-### **JSON Format**
+### JSON
 ```json
 {
   "organization": "My Company",
@@ -163,7 +162,7 @@ All dependencies are listed in `docs/requirements.txt` and will be installed aut
 }
 ```
 
-### **CSV Format**
+### CSV
 ```csv
 ,Sales,Marketing,Operations,Support
 Sales,0.0,8.0,6.0,4.0
@@ -172,144 +171,34 @@ Operations,4.0,6.0,0.0,5.0
 Support,3.0,4.0,5.0,0.0
 ```
 
-## 🎓 Theoretical Foundation
+## Requirements
 
-This implementation is based on:
+- Python 3.8+
+- 8GB RAM recommended for large networks
 
-- **Robert E. Ulanowicz** - Ecosystem Sustainability Theory, Ascendency concept
-- **Brian D. Fath & Robert E. Ulanowicz** - "Measuring Regenerative Economics: 10 principles and measures undergirding systemic economic health" (2019)
-- **Network Ecology** - Information theory applications to complex systems
-- **Systems Theory** - Complex adaptive systems, resilience, and robustness
+Install all dependencies:
+```bash
+pip install -r docs/requirements.txt
+```
 
-### **Key Concepts**
-- **Window of Viability**: Sustainable systems operate between 20-60% efficiency ratio
-- **Robustness**: Optimal balance occurs around 37% efficiency (A/C ratio)
-- **Regenerative Capacity**: System's ability to self-renew and adapt to change
-- **Flow Networks**: Organizations as networks of information and resource flows
+## Contributing
 
-## 🎨 Visualization Gallery
+Contributions welcome — report bugs, suggest features, improve documentation, or add analysis methods via GitHub issues and pull requests.
 
-### **🎯 Sustainability Curve**
-- Shows your organization's position on the theoretical sustainability curve
-- Window of viability boundaries clearly marked
-- Reference organizations for benchmarking
-- Interactive exploration with detailed tooltips
+## License
 
-### **💪 Robustness Analysis**  
-- Efficiency vs. robustness relationship
-- Optimal point identification
-- Window of viability highlighting
+MIT License — see [LICENSE](LICENSE) for details.
 
-### **🔥 Network Flow Analysis**
-- Department-to-department communication heatmaps
-- Flow intensity visualization
-- Network structure analysis
-
-## 💼 Use Cases
-
-### **Business Applications**
-- **Organizational Design**: Optimize department structure and communication flows
-- **Change Management**: Assess impact of restructuring on system sustainability  
-- **Performance Analysis**: Identify bottlenecks and inefficiencies
-- **Merger & Acquisition**: Evaluate organizational compatibility and integration challenges
-
-### **Research Applications**
-- **Systems Thinking**: Demonstrate network effects in organizations
-- **Sustainability Science**: Apply ecological principles to human systems
-- **Management Science**: Quantify organizational health and resilience
-- **Complexity Studies**: Analyze emergent properties in social networks
-
-### **Educational Applications**
-- **MBA Programs**: Teach systems thinking and organizational theory
-- **Executive Education**: Demonstrate regenerative business principles
-- **Consulting Training**: Provide tools for organizational analysis
-- **Research Methods**: Quantitative approaches to organizational study
-
-## 📈 Sample Organizations Included
-
-- **TechFlow Innovations**: 45-employee technology company (10 departments)
-- **Balanced Test Organization**: Small balanced system for learning
-- **Email vs. Document Flows**: Separate analysis of communication types
-- **Synthetic Data Generator**: Create custom organizations with realistic patterns
-
-## 📚 Documentation
-
-### Core Documentation
-- **[Flow Datasets Documentation](docs/flow_datasets_documentation.md)** - Comprehensive guide to large-scale real-world datasets
-- **[Flow Datasets Requirements](requirements_and_ideas/flow_datasets_requirements.md)** - Technical requirements and specifications
-- **[Webapp Guide](WEBAPP_GUIDE.md)** - Complete application usage guide
-- **[Project Summary](PROJECT_SUMMARY.md)** - High-level system overview
-
-### 🚀 Real-World Datasets - Ready for Immediate Analysis
-The system includes **9 fully processed, ready-to-use** flow datasets from multiple domains:
-
-#### ⚡ Energy Flow Networks (2 datasets)
-- **✅ European Power Grid Network** - 10 nodes, continental energy distribution (9,832 MW total flow)
-- **✅ Smart Grid Real-Time Monitoring** - Smart grid monitoring system
-
-#### 🏭 Supply Chain Networks (2 datasets)  
-- **✅ DataCo Smart Supply Chain** - 12 nodes, multi-tier supply network (suppliers→retail)
-- **✅ Logistics and Supply Chain Network** - Modern distribution system
-
-#### 💰 Financial Flow Networks (2 datasets)
-- **✅ PaySim Mobile Money Network** - 16 nodes, banking ecosystem with payment flows
-- **✅ Banking Transaction Network** - Financial transaction system
-
-#### 🌍 Trade & Material Networks (3 datasets)
-- **✅ OECD Input-Output Network** - 15 economic sectors, international flows
-- **✅ EU Material Flow Network** - 20 EU countries, material resource flows  
-- **✅ WTO Global Trade Network** - 20 countries, international trade flows
-
-**No conversion needed** - All datasets processed and ready for immediate Ulanowicz analysis!
-
-### Validation & Research
-- **[Validation Notebooks](validation/)** - Jupyter notebooks validating calculations
-- **[Prawns-Alligator Analysis](validation/prawns_alligator_validation.ipynb)** - Ecosystem validation
-- **[Research Papers](papers/)** - Scientific literature and references
-
-### Technical Resources
-- **[API Documentation](src/)** - Core calculation modules
-- **[Requirements](docs/requirements.txt)** - System dependencies
-- **[Contributing Guidelines](CONTRIBUTING.md)** - Development participation
-
-Access these datasets through the **"🌍 Real Life Data"** section in the application's sample data interface.
-
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to:
-
-- 🐛 Report bugs and issues
-- 💡 Suggest new features
-- 📚 Improve documentation  
-- 🔬 Add new analysis methods
-- 🎨 Enhance visualizations
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - **Robert E. Ulanowicz** for the foundational ecosystem theory
-- **Brian D. Fath** for extending the framework to economics
-- **Streamlit team** for the excellent web framework
+- **Brian D. Fath** for extending the framework to regenerative economics
+- **Streamlit** for the web framework
 - **Plotly** for interactive visualizations
-- **Scientific Python community** for the computational tools
-
-## 📧 Contact
-
-For questions, suggestions, or collaboration opportunities, please open an issue on GitHub.
 
 ---
 
-## 🎯 Get Started Now!
-
 ```bash
-git clone https://github.com/yourusername/Adaptive_Organization.git
-cd Adaptive_Organization
-./run_webapp.sh
+git clone https://github.com/maxdolphin/OASIS.git
+cd OASIS && streamlit run app.py
 ```
-
-**🌐 Open http://localhost:8501 and start analyzing organizational sustainability!** 🌱
-
-[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](http://localhost:8501)
