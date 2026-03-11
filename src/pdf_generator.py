@@ -257,18 +257,58 @@ def _build_reportlab_pdf(report_generator, calculator, metrics, charts=None):
         PageTemplate(id='content', frames=[content_frame], onPage=_draw_header_footer),
     ])
 
+    # ── Light-theme color sequence for PDF charts ───────────────────────
+    _PDF_COLORS = [
+        '#1a5f35', '#2d8a4e', '#3498db', '#e67e22', '#9b59b6',
+        '#1abc9c', '#c0392b', '#2c3e50', '#d4a843', '#7f8c8d',
+    ]
+
     # ── Helper to convert Plotly fig to reportlab Image ──────────────────
     def _chart_image(fig, width=CONTENT_W, height=280):
         """Convert a Plotly figure to a reportlab Image flowable."""
         try:
-            # Use light theme for PDF with generous margins to avoid axis clipping
+            import copy
             fig_copy = go.Figure(fig)
+
+            # Force light theme layout
             fig_copy.update_layout(
+                template='plotly_white',
                 paper_bgcolor='white',
                 plot_bgcolor='#fafafa',
                 font=dict(color='#333333'),
                 margin=dict(l=70, r=30, t=60, b=50),
+                legend=dict(font=dict(color='#333333')),
             )
+
+            # Override trace-level colors for light background readability
+            for i, trace in enumerate(fig_copy.data):
+                color = _PDF_COLORS[i % len(_PDF_COLORS)]
+                if trace.type == 'pie':
+                    # Pie charts: assign full color sequence and dark text
+                    trace.marker = dict(
+                        colors=_PDF_COLORS[:len(trace.labels)] if trace.labels else _PDF_COLORS,
+                        line=dict(color='white', width=2),
+                    )
+                    trace.textfont = dict(color='#333333')
+                    trace.outsidetextfont = dict(color='#333333')
+                elif trace.type == 'heatmap':
+                    trace.colorscale = 'Greens'
+                elif trace.type in ('bar', 'scatter', 'scatterpolar'):
+                    # Keep existing colors if they are already light-friendly,
+                    # otherwise only fix text/font colors
+                    if hasattr(trace, 'textfont'):
+                        trace.textfont = dict(color='#333333')
+
+            # Fix axis colors for light background
+            fig_copy.update_xaxes(
+                color='#333333', gridcolor='#e0e0e0',
+                linecolor='#999999', zerolinecolor='#cccccc',
+            )
+            fig_copy.update_yaxes(
+                color='#333333', gridcolor='#e0e0e0',
+                linecolor='#999999', zerolinecolor='#cccccc',
+            )
+
             # Render at higher pixel resolution for sharpness
             render_w = max(int(width * 2), 900)
             render_h = max(int(height * 2), 500)
