@@ -38,7 +38,7 @@ Thank you for your interest in contributing to the Adaptive Organization Analysi
 ### **Development Setup**
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/Adaptive_Organization.git
+git clone https://github.com/ExentriqLtd/Exentriq-Adaptive-Organization-Analysis.git
 cd Adaptive_Organization
 
 # Create virtual environment

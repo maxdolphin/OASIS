@@ -5,6 +5,37 @@ All notable changes to the Adaptive Organization Analysis project will be docume
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-03-13
+
+### Added
+- **Dark mode UI** with nature/ecosystem color palette (forest green, gold, teal)
+- **OASIS health assessment model** — five-dimension organizational scoring (Open, Autonomous, Symbiotic, Intelligent, Sustainable)
+- **Professional PDF report generator** using reportlab with cover page, table of contents, embedded charts, headers/footers
+- **Publication-quality report narratives** structured to Big Four audit-firm standards
+- **Interactive documentation system** with in-app tooltips and metric reference
+- **SQLite metrics database** with precomputed metrics for faster re-analysis
+- **HuggingFace dataset discovery agent** for finding relevant network datasets
+- **Ecosystem sample datasets** — US airports, Bitcoin transactions, pharma R&D, manufacturing networks
+- **Streamlit theme configuration** (`.streamlit/config.toml`)
+- **Sustainability reporting auditor agent** for report quality assurance
+
+### Changed
+- All Plotly charts updated for dark backgrounds with legible text and nature palette
+- Report content restructured from bullet-heavy academic style to narrative audit-firm format
+- Robustness curve: blue dotted line changed to green, star marker changed to orange
+- PDF charts force light theme for print readability
+- README rewritten with OASIS branding and updated project structure
+- `docs/requirements.txt` updated with all dependencies (streamlit, reportlab, kaleido)
+
+### Fixed
+- Orphaned headings in PDF (added `keepWithNext` to heading styles)
+- Chart axis clipping in PDF exports (added generous margins)
+- Unicode characters causing black squares in PDF (replaced with ASCII equivalents)
+- Table splitting across pages causing IndexError (switched to `ROWBACKGROUNDS`)
+- Placeholder URLs in documentation files
+
+---
+
 ## [1.0.0] - 2024-08-12
 
 ### 🎉 **Initial Release**

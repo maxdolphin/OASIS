@@ -22,7 +22,7 @@ streamlit run app.py
 
 Once launched, the app will be available at:
 - **Local URL**: http://localhost:8501
-- **Network URL**: http://192.168.178.170:8501 (accessible from other devices on your network)
+- **Network URL**: Shown in the terminal output (accessible from other devices on your network)
 
 ## ✨ **Web App Features**
 
