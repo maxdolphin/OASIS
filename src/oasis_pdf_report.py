@@ -283,14 +283,15 @@ class OASISPDFReport:
             self.risk = _ri.build_risk_view(self.metrics, self.profile)
             self.roadmap = _ri.build_action_roadmap(self.recommendations, self.profile)
             self.esg = _ri.build_esg_crosswalk(self.profile, self.metrics)
-            # Inject WoV chart into chart_images so existing chart pipeline renders it
+            # Render the WoV chart once, kept separate from self.charts so the Results
+            # "Visualizations" loop does not render it a second time.
             try:
-                self.charts.setdefault(
-                    'window_viability',
-                    _ri.render_window_of_viability_png(
-                        self.benchmark['alpha'], self.benchmark['robustness']))
+                self._wov_chart_png = _ri.render_window_of_viability_png(
+                    self.benchmark['alpha'], self.benchmark['robustness'])
             except Exception:
-                pass
+                self._wov_chart_png = None
+        else:
+            self._wov_chart_png = None
 
     # ------------------------------------------------------------------
     # CSS STYLESHEET
@@ -344,6 +345,35 @@ class OASISPDFReport:
             text-align: justify;
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
+            counter-reset: section figure table;
+        }}
+
+        /* --- AUTOMATIC SECTION / FIGURE / TABLE NUMBERING ------- */
+        /* Numbered main sections (appendices opt out via .appendix). */
+        h1:not(.appendix) {{
+            counter-increment: section;
+            counter-reset: subsection;
+        }}
+        h1:not(.appendix)::before {{
+            content: counter(section) ". ";
+        }}
+        h2:not(.appendix) {{
+            counter-increment: subsection;
+        }}
+        h2:not(.appendix)::before {{
+            content: counter(section) "." counter(subsection) "\\00a0\\00a0";
+        }}
+        table caption {{
+            counter-increment: table;
+        }}
+        table caption::before {{
+            content: "Table " counter(table) ". ";
+        }}
+        .figure-caption {{
+            counter-increment: figure;
+        }}
+        .figure-caption::before {{
+            content: "Figure " counter(figure) ". ";
         }}
 
         /* --- COVER PAGE ------------------------------------------ */
@@ -923,7 +953,7 @@ class OASISPDFReport:
         return f"""
         <div class="page-break"></div>
 
-        <h1>1. Executive Summary</h1>
+        <h1>Executive Summary</h1>
 
         <div class="callout">
             <div class="callout-title">Overall OASIS Health Score</div>
@@ -942,12 +972,12 @@ class OASISPDFReport:
             </div>
         </div>
 
-        <h2>1.1 Dimension Scores at a Glance</h2>
+        <h2>Dimension Scores at a Glance</h2>
         <div class="kpi-row">
             {kpi_cards}
         </div>
 
-        <h2>1.2 Key Findings</h2>
+        <h2>Key Findings</h2>
         <p>
             The OASIS assessment of <strong>{_escape(self.org_name)}</strong> reveals an
             overall health score of <strong>{overall:.0f}/100</strong>,
@@ -1028,7 +1058,7 @@ class OASISPDFReport:
 
         return f"""
         <div class="page-break"></div>
-        <h1>2. Benchmarking &amp; Position</h1>
+        <h1>Benchmarking &amp; Position</h1>
         <p>
             The organization's relative ascendency is
             <strong>&alpha; = {b['alpha']:.3f}</strong>, placing it {pos_text}
@@ -1036,8 +1066,8 @@ class OASISPDFReport:
             &alpha; &asymp; {b['optimum']:.2f}). Distance to the robustness optimum is
             <strong>{b['distance_to_optimum']:.3f}</strong>.
         </p>
-        {self._build_results_charts_single('window_viability', 'Figure. Window of Viability with the organization positioned on the robustness curve.')}
-        <h2>2.1 Ecological Reference Points</h2>
+        {self._build_wov_figure()}
+        <h2>Ecological Reference Points</h2>
         <p class="text-small text-muted">
             Published ecosystem values are shown as scientific reference points for the
             viability scale&mdash;not as organizational targets.
@@ -1047,19 +1077,20 @@ class OASISPDFReport:
                 <th style="text-align:right;">Relative Ascendency (&alpha;)</th>
                 <th>Source</th></tr></thead>
             <tbody>{anchor_rows}</tbody>
-            <caption>Table 2. Published reference networks (relative ascendency).</caption>
+            <caption>Published reference networks (relative ascendency).</caption>
         </table>
         """
 
-    def _build_results_charts_single(self, chart_name: str, caption: str) -> str:
-        """Render a single named chart (if present) as a figure block."""
-        img_bytes = self.charts.get(chart_name)
-        if not img_bytes:
+    def _build_wov_figure(self) -> str:
+        """Render the Window-of-Viability chart as a figure block (Benchmarking)."""
+        if not self._wov_chart_png:
             return ""
-        b64 = base64.b64encode(img_bytes).decode('utf-8')
+        b64 = base64.b64encode(self._wov_chart_png).decode('utf-8')
+        caption = ('Window of Viability with the organization positioned on the '
+                   'robustness curve.')
         return f"""
         <div class="figure">
-            <img src="data:image/png;base64,{b64}" alt="{chart_name}">
+            <img src="data:image/png;base64,{b64}" alt="window_viability">
             <div class="figure-caption">{caption}</div>
         </div>
         """
@@ -1081,7 +1112,7 @@ class OASISPDFReport:
             </div>"""
         return f"""
         <div class="page-break"></div>
-        <h1>3. Risk &amp; Resilience Analysis</h1>
+        <h1>Risk &amp; Resilience Analysis</h1>
         <p>
             Overall fragility classification: <strong>{_escape(r['fragility'])}</strong>.
             Adaptive reserve indicators &mdash; overhead ratio
@@ -1113,10 +1144,10 @@ class OASISPDFReport:
 
         return f"""
         <div class="page-break"></div>
-        <h1>4. Prioritized Action Roadmap</h1>
-        {horizon_html('4.1 Immediate (0&ndash;3 months)', self.roadmap['immediate'])}
-        {horizon_html('4.2 Short-Term (3&ndash;9 months)', self.roadmap['short_term'])}
-        {horizon_html('4.3 Medium-Term (9&ndash;18 months)', self.roadmap['medium_term'])}
+        <h1>Prioritized Action Roadmap</h1>
+        {horizon_html('Immediate (0&ndash;3 months)', self.roadmap['immediate'])}
+        {horizon_html('Short-Term (3&ndash;9 months)', self.roadmap['short_term'])}
+        {horizon_html('Medium-Term (9&ndash;18 months)', self.roadmap['medium_term'])}
         """
 
     def _build_esg_mapping(self) -> str:
@@ -1133,7 +1164,7 @@ class OASISPDFReport:
             </tr>"""
         return f"""
         <div class="page-break"></div>
-        <h1>7. ESG Framework Mapping</h1>
+        <h1>ESG Framework Mapping</h1>
         <p class="text-small text-muted">
             Indicative crosswalk linking OASIS findings to recognized disclosure
             frameworks. Provided for navigation and context only; not a compliance
@@ -1142,7 +1173,7 @@ class OASISPDFReport:
         <table>
             <thead><tr><th>OASIS Finding</th><th>GRI</th><th>ESRS / CSRD</th><th>TCFD</th></tr></thead>
             <tbody>{rows}</tbody>
-            <caption>Table 7. Indicative OASIS-to-ESG framework crosswalk.</caption>
+            <caption>Indicative OASIS-to-ESG framework crosswalk.</caption>
         </table>
         """
 
@@ -1151,9 +1182,9 @@ class OASISPDFReport:
         return f"""
         <div class="page-break"></div>
 
-        <h1>2. Methodology</h1>
+        <h1>Methodology</h1>
 
-        <h2>2.1 Theoretical Framework</h2>
+        <h2>Theoretical Framework</h2>
         <p>
             The OASIS (Open, Autonomous, Symbiotic, Intelligent, Sustainable) assessment
             framework integrates Ulanowicz's ecosystem network analysis with Fath et al.'s
@@ -1162,7 +1193,7 @@ class OASISPDFReport:
             represent resource, information, or influence flows.
         </p>
 
-        <h2>2.2 Information-Theoretic Foundations</h2>
+        <h2>Information-Theoretic Foundations</h2>
         <p>
             System health is quantified through information-theoretic measures derived from
             the flow matrix <em>F</em>. The core decomposition follows Ulanowicz (1986):
@@ -1175,7 +1206,7 @@ class OASISPDFReport:
             where &alpha; = A / C (relative ascendency)
         </div>
 
-        <h2>2.3 OASIS Dimension Mapping</h2>
+        <h2>OASIS Dimension Mapping</h2>
         <table>
             <thead>
                 <tr>
@@ -1211,10 +1242,10 @@ class OASISPDFReport:
                     <td>Robustness, Window of Viability, Alpha Optimality</td>
                 </tr>
             </tbody>
-            <caption>Table 1. OASIS dimensions mapped to Fath et al. (2019) regenerative economics principles.</caption>
+            <caption>OASIS dimensions mapped to Fath et al. (2019) regenerative economics principles.</caption>
         </table>
 
-        <h2>2.4 Scoring Methodology</h2>
+        <h2>Scoring Methodology</h2>
         <p>
             Each dimension is scored on a 0&ndash;100 scale using weighted combinations of
             normalized underlying metrics. Dimension weights default to equal (20% each) and
@@ -1255,13 +1286,13 @@ class OASISPDFReport:
             </tr>"""
 
         return f"""
-        <h2>3.1 Core Network Metrics</h2>
+        <h2>Core Network Metrics</h2>
         <table>
             <thead>
                 <tr><th>Metric</th><th style="text-align:right;">Value</th><th>Unit</th></tr>
             </thead>
             <tbody>{tbody}</tbody>
-            <caption>Table 2. Core Ulanowicz network analysis metrics.</caption>
+            <caption>Core Ulanowicz network analysis metrics.</caption>
         </table>
         """
 
@@ -1341,7 +1372,7 @@ class OASISPDFReport:
         cards_html += "</div>"
 
         return f"""
-        <h2>3.3 OASIS Health Assessment</h2>
+        <h2>OASIS Health Assessment</h2>
         <p>
             The five OASIS dimensions provide a multifaceted view of organizational health,
             each mapped to specific Fath et al. (2019) regenerative economics principles.
@@ -1354,21 +1385,21 @@ class OASISPDFReport:
         if not self.charts:
             return ""
 
-        html = "<h2>3.4 Visualizations</h2>"
+        html = "<h2>Visualizations</h2>"
 
         chart_captions = {
-            'radar': 'Figure 1. OASIS dimension radar chart showing health profile across all five dimensions.',
-            'sustainability_curve': 'Figure 2. Sustainability curve with organization position relative to the Window of Viability.',
-            'flow_network': 'Figure 3. Network flow visualization showing inter-unit resource and information flows.',
-            'dimension_bars': 'Figure 4. Comparative bar chart of OASIS dimension scores with status thresholds.',
-            'window_viability': 'Figure 5. Window of Viability analysis showing robustness as a function of relative ascendency.',
-            'heatmap': 'Figure 6. Flow matrix heatmap showing intensity of pairwise flows.',
+            'radar': 'OASIS dimension radar chart showing health profile across all five dimensions.',
+            'sustainability_curve': 'Sustainability curve with organization position relative to the Window of Viability.',
+            'flow_network': 'Network flow visualization showing inter-unit resource and information flows.',
+            'dimension_bars': 'Comparative bar chart of OASIS dimension scores with status thresholds.',
+            'window_viability': 'Window of Viability analysis showing robustness as a function of relative ascendency.',
+            'heatmap': 'Flow matrix heatmap showing intensity of pairwise flows.',
         }
 
         for chart_name, img_bytes in self.charts.items():
             if img_bytes:
                 b64 = base64.b64encode(img_bytes).decode('utf-8')
-                caption = chart_captions.get(chart_name, f'Figure. {chart_name}')
+                caption = chart_captions.get(chart_name, chart_name)
                 html += f"""
                 <div class="figure">
                     <img src="data:image/png;base64,{b64}" alt="{chart_name}">
@@ -1383,11 +1414,11 @@ class OASISPDFReport:
         return f"""
         <div class="page-break"></div>
 
-        <h1>3. Results</h1>
+        <h1>Results</h1>
 
         {self._build_results_core_metrics()}
 
-        <h2>3.2 Network Flow Analysis</h2>
+        <h2>Network Flow Analysis</h2>
         <p>
             The flow matrix reveals the directed exchange patterns between organizational
             units. Total System Throughput (TST) of
@@ -1435,9 +1466,9 @@ class OASISPDFReport:
         return f"""
         <div class="page-break"></div>
 
-        <h1>4. Discussion &amp; Recommendations</h1>
+        <h1>Discussion &amp; Recommendations</h1>
 
-        <h2>4.1 Interpretation of Findings</h2>
+        <h2>Interpretation of Findings</h2>
         <p>
             The OASIS assessment provides a multidimensional view of organizational health
             grounded in network theory and information-theoretic principles. The overall
@@ -1445,10 +1476,10 @@ class OASISPDFReport:
             the weighted balance across all five dimensions.
         </p>
 
-        <h2>4.2 Strategic Recommendations</h2>
+        <h2>Strategic Recommendations</h2>
         {recs_html}
 
-        <h2>4.3 Limitations</h2>
+        <h2>Limitations</h2>
         <p>
             This analysis represents a point-in-time snapshot. Longitudinal analysis is
             recommended to track organizational evolution. The meaning of flows (information,
@@ -1462,7 +1493,7 @@ class OASISPDFReport:
         return f"""
         <div class="page-break"></div>
 
-        <h1>5. References</h1>
+        <h1>References</h1>
 
         <div class="reference">
             Fath, B. D., Fiscus, D. A., Goerner, S. J., Berea, A., &amp; Ulanowicz, R. E.
@@ -1523,17 +1554,17 @@ class OASISPDFReport:
         return f"""
         <div class="page-break"></div>
 
-        <h1>Appendix A: Scoring Weights</h1>
+        <h1 class="appendix">Appendix A: Scoring Weights</h1>
 
         <table>
             <thead>
                 <tr><th>Dimension</th><th>Metric</th><th style="text-align:right;">Weight</th></tr>
             </thead>
             <tbody>{weight_rows}</tbody>
-            <caption>Table A1. Metric weights used in OASIS dimension scoring.</caption>
+            <caption>Metric weights used in OASIS dimension scoring.</caption>
         </table>
 
-        <h2>Dimension Weight in Overall Score</h2>
+        <h2 class="appendix">Dimension Weight in Overall Score</h2>
         <table>
             <thead>
                 <tr><th>Dimension</th><th style="text-align:right;">Weight</th></tr>
@@ -1545,7 +1576,34 @@ class OASISPDFReport:
                 <tr><td>INTELLIGENT</td><td class="numeric">{self.profile['weights'].get('intelligent', 0.20)*100:.0f}%</td></tr>
                 <tr><td>SUSTAINABLE</td><td class="numeric">{self.profile['weights'].get('sustainable', 0.20)*100:.0f}%</td></tr>
             </tbody>
-            <caption>Table A2. Dimension weights for overall OASIS score (default: equal weighting).</caption>
+            <caption>Dimension weights for overall OASIS score (default: equal weighting).</caption>
+        </table>
+        {self._build_glossary()}
+        """
+
+    def _build_glossary(self) -> str:
+        """Appendix B: glossary of core metrics (analyst reference)."""
+        glossary_terms = [
+            ('Total System Throughput (TST)', 'Sum of all flows; overall activity scale.'),
+            ('Average Mutual Information (AMI)', 'Average constraint/organization per unit flow.'),
+            ('Ascendency (A)', 'Organized power: TST &times; AMI.'),
+            ('Development Capacity (C)', 'Upper bound on ascendency: TST &times; flow diversity.'),
+            ('Overhead (&Phi;)', 'Reserve capacity C &minus; A; supports resilience.'),
+            ('Relative Ascendency (&alpha;)', 'A / C; efficiency-vs-resilience balance.'),
+            ('Robustness (R)', '&minus;&alpha;&middot;ln(&alpha;); maximized near &alpha; &asymp; 0.37.'),
+            ('Window of Viability', 'Empirical sustainable band &alpha; &isin; [0.2, 0.6].'),
+        ]
+        glossary_rows = "".join(
+            f"<tr><td>{t}</td><td>{d}</td></tr>"
+            for t, d in glossary_terms
+        )
+        return f"""
+        <div class="page-break"></div>
+        <h1 class="appendix">Appendix B: Metric Glossary</h1>
+        <table>
+            <thead><tr><th>Metric</th><th>Definition</th></tr></thead>
+            <tbody>{glossary_rows}</tbody>
+            <caption>Glossary of core metrics.</caption>
         </table>
         """
 
