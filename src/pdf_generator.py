@@ -465,8 +465,12 @@ def _build_reportlab_pdf(report_generator, calculator, metrics, charts=None):
         ("   3.5 Resilience Metrics", ""),
         ("   3.6 Flow Distribution", ""),
         ("4. OASIS Health Assessment", ""),
-        ("5. Discussion", ""),
-        ("6. Conclusions & Recommendations", ""),
+        ("5. Benchmarking & Position", ""),
+        ("6. Risk & Resilience Analysis", ""),
+        ("7. Prioritized Action Roadmap", ""),
+        ("8. ESG Framework Mapping", ""),
+        ("9. Discussion", ""),
+        ("10. Conclusions & Recommendations", ""),
         ("References", ""),
         ("Appendix", ""),
     ]
@@ -967,9 +971,168 @@ def _build_reportlab_pdf(report_generator, calculator, metrics, charts=None):
     story.append(PageBreak())
 
     # ════════════════════════════════════════════════════════════════════
-    # 5. DISCUSSION
+    # 5-8. DETAILED ECOSYSTEMIC ANALYSIS
+    # (benchmarking, risk & resilience, action roadmap, ESG mapping)
+    # Built from src/report_intelligence.py on metrics already computed.
     # ════════════════════════════════════════════════════════════════════
-    story.append(Paragraph("5. Discussion", s_h1))
+    _ri = None
+    try:
+        import report_intelligence as _ri
+        from oasis_calculator import OASISCalculator as _OC
+    except Exception:
+        try:
+            from src import report_intelligence as _ri
+            from src.oasis_calculator import OASISCalculator as _OC
+        except Exception:
+            _ri = None
+
+    if _ri is not None:
+        try:
+            _oasis = _OC(calculator)
+            _profile = _oasis.get_oasis_profile()
+            _recs = _oasis.get_recommendations()
+            _bench = _ri.build_benchmark_view(metrics, _profile)
+            _risk = _ri.build_risk_view(metrics, _profile)
+            _roadmap = _ri.build_action_roadmap(_recs, _profile)
+            _esg = _ri.build_esg_crosswalk(_profile, metrics)
+
+            def _sec_rule():
+                story.append(HRFlowable(
+                    width='100%', thickness=1, color=_hex_to_rgb(FOREST_GREEN),
+                    spaceBefore=0, spaceAfter=8))
+
+            # ---- 5. Benchmarking & Position ----
+            story.append(Paragraph("5. Benchmarking &amp; Position", s_h1))
+            _sec_rule()
+            _pos = {
+                'within': 'within the Window of Viability',
+                'above': 'above the viability band (tending rigid / over-organized)',
+                'below': 'below the viability band (tending chaotic / under-organized)',
+            }.get(_bench['position'], 'undetermined')
+            story.append(Paragraph(
+                f"The organization's relative ascendency is "
+                f"<b>&alpha; = {_bench['alpha']:.3f}</b>, placing it {_pos} "
+                f"(viable band {_bench['lower']}&ndash;{_bench['upper']}; robustness "
+                f"optimum &alpha; &asymp; {_bench['optimum']:.2f}). Distance to the "
+                f"robustness optimum is <b>{_bench['distance_to_optimum']:.3f}</b>.",
+                s_body))
+            story.append(Paragraph(
+                "Published ecosystem values below are scientific reference points for "
+                "the viability scale&mdash;not organizational targets.", s_body_italic))
+            _anchor_data = [['Reference Network', 'Relative Ascendency (α)', 'Source']]
+            for _a in _bench['reference_anchors']:
+                _anchor_data.append([
+                    Paragraph(_a['label'], cell_b),
+                    Paragraph(f"{_a['relative_ascendency']:.3f}", cell_s),
+                    Paragraph(_a.get('source', ''), cell_s)])
+            if len(_anchor_data) > 1:
+                _at = Table(_anchor_data, colWidths=[
+                    CONTENT_W * 0.40, CONTENT_W * 0.30, CONTENT_W * 0.30])
+                _at.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), _hex_to_rgb(TABLE_HEADER_BG)),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('TOPPADDING', (0, 0), (-1, -1), 5),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 6),
+                    ('GRID', (0, 0), (-1, -1), 0.3, _hex_to_rgb('#cccccc')),
+                    ('ROWBACKGROUNDS', (0, 1), (-1, -1),
+                     [colors.white, _hex_to_rgb(TABLE_ALT_ROW)]),
+                ]))
+                story.append(_at)
+                story.append(Paragraph(
+                    "<i>Table 5. Published reference networks (relative ascendency). "
+                    "Shown as scientific reference points, not targets.</i>", s_caption))
+            story.append(PageBreak())
+
+            # ---- 6. Risk & Resilience Analysis ----
+            story.append(Paragraph("6. Risk &amp; Resilience Analysis", s_h1))
+            _sec_rule()
+            story.append(Paragraph(
+                f"Overall fragility classification: <b>{_risk['fragility']}</b>. "
+                f"Adaptive reserve indicators &mdash; overhead ratio "
+                f"{_risk['overhead_ratio'] * 100:.1f}%, redundancy "
+                f"{_risk['redundancy']:.3f}.", s_body))
+            for _it in _risk['items']:
+                _sc = _get_status_color(_it['severity'])
+                story.append(Paragraph(
+                    f"<font color=\"{_sc}\"><b>{_it['severity']}</b></font> "
+                    f"&mdash; {_it['title']}", s_h3))
+                story.append(Paragraph(f"<b>Evidence:</b> {_it['evidence']}", s_body))
+                story.append(Paragraph(
+                    f"<b>Implication:</b> {_it['implication']}", s_body))
+            story.append(PageBreak())
+
+            # ---- 7. Prioritized Action Roadmap ----
+            story.append(Paragraph("7. Prioritized Action Roadmap", s_h1))
+            _sec_rule()
+            for _htitle, _hkey in [
+                ('7.1 Immediate (0–3 months)', 'immediate'),
+                ('7.2 Short-Term (3–9 months)', 'short_term'),
+                ('7.3 Medium-Term (9–18 months)', 'medium_term'),
+            ]:
+                story.append(Paragraph(_htitle, s_h2))
+                _items = _roadmap[_hkey]
+                if not _items:
+                    story.append(Paragraph(
+                        "No actions in this horizon.", s_body_italic))
+                    continue
+                for _it in _items:
+                    _pc = _get_status_color(_it['priority'])
+                    story.append(Paragraph(
+                        f"<font color=\"{_pc}\"><b>{_it['priority']}</b></font> "
+                        f"&middot; {_it['dimension']}", s_h3))
+                    story.append(Paragraph(f"<b>Issue:</b> {_it['issue']}", s_body))
+                    story.append(Paragraph(f"<b>Action:</b> {_it['action']}", s_body))
+                    story.append(Paragraph(
+                        f"<b>Expected impact:</b> {_it['expected_impact']}", s_body))
+                    _m = ', '.join(_it['metrics_to_improve']) or 'N/A'
+                    story.append(Paragraph(
+                        f"<b>Metrics to improve:</b> {_m}", s_body))
+            story.append(PageBreak())
+
+            # ---- 8. ESG Framework Mapping ----
+            story.append(Paragraph("8. ESG Framework Mapping", s_h1))
+            _sec_rule()
+            story.append(Paragraph(
+                "Indicative crosswalk linking OASIS findings to recognized disclosure "
+                "frameworks (GRI, ESRS/CSRD, TCFD). Provided for navigation and context "
+                "only; not a compliance attestation.", s_body_italic))
+            _esg_data = [['OASIS Finding', 'GRI', 'ESRS / CSRD', 'TCFD']]
+            for _row in _esg:
+                _esg_data.append([
+                    Paragraph(
+                        f"<b>{_row['oasis_dimension']}</b><br/>"
+                        f"{_row['finding_summary']}", cell_s),
+                    Paragraph(_row['gri_ref'], cell_s),
+                    Paragraph(_row['esrs_ref'], cell_s),
+                    Paragraph(_row['tcfd_ref'], cell_s)])
+            _et = Table(_esg_data, colWidths=[
+                CONTENT_W * 0.34, CONTENT_W * 0.22, CONTENT_W * 0.22, CONTENT_W * 0.22])
+            _et.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), _hex_to_rgb(TABLE_HEADER_BG)),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('TOPPADDING', (0, 0), (-1, -1), 5),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                ('LEFTPADDING', (0, 0), (-1, -1), 6),
+                ('GRID', (0, 0), (-1, -1), 0.3, _hex_to_rgb('#cccccc')),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1),
+                 [colors.white, _hex_to_rgb(TABLE_ALT_ROW)]),
+            ]))
+            story.append(_et)
+            story.append(Paragraph(
+                "<i>Table 6. Indicative OASIS-to-ESG framework crosswalk.</i>",
+                s_caption))
+            story.append(PageBreak())
+        except Exception:
+            # Detailed analysis is additive; never break the base report.
+            pass
+
+    # ════════════════════════════════════════════════════════════════════
+    # 9. DISCUSSION
+    # ════════════════════════════════════════════════════════════════════
+    story.append(Paragraph("9. Discussion", s_h1))
     story.append(HRFlowable(
         width='100%', thickness=1, color=_hex_to_rgb(FOREST_GREEN),
         spaceBefore=0, spaceAfter=8,
@@ -980,7 +1143,7 @@ def _build_reportlab_pdf(report_generator, calculator, metrics, charts=None):
     # ════════════════════════════════════════════════════════════════════
     # 6. CONCLUSIONS & RECOMMENDATIONS
     # ════════════════════════════════════════════════════════════════════
-    story.append(Paragraph("6. Conclusions &amp; Recommendations", s_h1))
+    story.append(Paragraph("10. Conclusions &amp; Recommendations", s_h1))
     story.append(HRFlowable(
         width='100%', thickness=1, color=_hex_to_rgb(FOREST_GREEN),
         spaceBefore=0, spaceAfter=8,
