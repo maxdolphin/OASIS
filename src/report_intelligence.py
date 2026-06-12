@@ -75,7 +75,10 @@ def build_benchmark_view(metrics: Dict[str, Any],
 def _reference_anchors() -> List[Dict[str, Any]]:
     """Published ecological reference points (labelled, NOT organizational targets)."""
     try:
-        from src.services import published_metrics_db as pdb
+        try:
+            from src.services import published_metrics_db as pdb
+        except Exception:
+            from services import published_metrics_db as pdb  # 'src' on sys.path
     except Exception:
         return []
     anchors = []

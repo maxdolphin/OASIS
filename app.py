@@ -915,23 +915,42 @@ def upload_data_interface():
     
     col1, col2 = st.columns([2, 1])
     
+    from network_ingestion import (
+        parse_network_csv, NetworkIngestionError,
+        matrix_template_csv, edgelist_template_csv,
+    )
+
     with col1:
         st.markdown("""
         ### Supported Formats
         - **JSON**: Flow matrix with node names
-        - **CSV**: Square matrix (with or without headers)
-        
+        - **CSV — Adjacency matrix**: square table, identical row/column labels
+        - **CSV — Edge list**: `source, target, weight` (one row per flow)
+
         ### Expected Structure
-        Your data should represent communication flows between departments/teams.
-        Values can be emails per month, document exchanges, or any flow metric.
+        Your data should represent directed flows between departments/teams.
+        Values can be emails per month, messages, document exchanges, or any flow metric.
+        Edge lists are the easiest export from email, Teams, Slack, or Jira.
         """)
-        
+
+        tcol1, tcol2 = st.columns(2)
+        with tcol1:
+            st.download_button(
+                "⬇️ Matrix CSV template", data=matrix_template_csv(),
+                file_name="network_matrix_template.csv", mime="text/csv",
+                use_container_width=True)
+        with tcol2:
+            st.download_button(
+                "⬇️ Edge-list CSV template", data=edgelist_template_csv(),
+                file_name="network_edgelist_template.csv", mime="text/csv",
+                use_container_width=True)
+
         uploaded_file = st.file_uploader(
             "Choose a file",
             type=['json', 'csv'],
             help="Upload a JSON or CSV file containing your organizational flow data"
         )
-        
+
         if uploaded_file is not None:
             try:
                 if uploaded_file.name.endswith('.json'):
@@ -943,19 +962,28 @@ def upload_data_interface():
                     else:
                         st.error("JSON file must contain 'flows' and 'nodes' keys")
                         return
-                elif uploaded_file.name.endswith('.csv'):
-                    df = pd.read_csv(uploaded_file, index_col=0)
-                    flow_matrix = df.values
-                    node_names = df.columns.tolist()
+                else:  # CSV — auto-detect matrix vs edge list, with validation
+                    try:
+                        result = parse_network_csv(uploaded_file.getvalue())
+                    except NetworkIngestionError as ie:
+                        st.error(f"❌ {ie}")
+                        return
+                    flow_matrix = result.flow_matrix
+                    node_names = result.node_names
                     org_name = uploaded_file.name.replace('.csv', '').replace('_', ' ').title()
-                
+                    fmt_label = ('adjacency matrix' if result.fmt == 'matrix'
+                                 else 'edge list')
+                    st.info(f"Detected format: **{fmt_label}**.")
+                    for w in result.warnings:
+                        st.warning(f"⚠️ {w}")
+
                 st.success(f"✅ Data loaded successfully! Found {len(node_names)} departments/teams")
-                
+
                 # Show preview
                 st.subheader("📋 Data Preview")
                 preview_df = pd.DataFrame(flow_matrix, index=node_names, columns=node_names)
                 st.dataframe(preview_df.round(2))
-                
+
                 # Run analysis button
                 if st.button("🚀 Run Analysis", type="primary"):
                     # Store data in session state and navigate to analysis page
@@ -967,7 +995,7 @@ def upload_data_interface():
                     }
                     st.session_state.current_page = 'analysis'
                     st.rerun()
-                
+
             except Exception as e:
                 st.error(f"Error loading file: {str(e)}")
     
@@ -987,7 +1015,7 @@ def upload_data_interface():
         }
         ```
         
-        ### 📋 CSV Format
+        ### 📋 CSV — Adjacency Matrix
         ```
         ,Sales,Marketing,IT,HR
         Sales,0.0,8.0,3.0,2.0
@@ -995,6 +1023,16 @@ def upload_data_interface():
         IT,4.0,5.0,0.0,3.0
         HR,3.0,2.0,4.0,0.0
         ```
+
+        ### 🔗 CSV — Edge List
+        ```
+        source,target,weight
+        Sales,Marketing,8
+        Sales,IT,3
+        Marketing,Sales,6
+        IT,HR,3
+        ```
+        Headers like `from`/`to`/`count` are also recognized.
         """)
 
 def sample_data_interface():
