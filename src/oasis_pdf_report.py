@@ -248,6 +248,7 @@ class OASISPDFReport:
         chart_images: Optional[Dict[str, bytes]] = None,
         logo_path: Optional[str] = None,
         analyst_name: str = "OASIS Analysis System",
+        detailed: bool = True,
     ):
         """
         Initialize the report builder.
@@ -272,6 +273,24 @@ class OASISPDFReport:
         self.analyst_name = analyst_name
         self.timestamp = datetime.now()
         self.page_number = 0
+
+        self.detailed = detailed
+        # Lazily computed report-intelligence views (built on existing data only)
+        from src import report_intelligence as _ri
+        self._ri = _ri
+        if detailed:
+            self.benchmark = _ri.build_benchmark_view(self.metrics, self.profile)
+            self.risk = _ri.build_risk_view(self.metrics, self.profile)
+            self.roadmap = _ri.build_action_roadmap(self.recommendations, self.profile)
+            self.esg = _ri.build_esg_crosswalk(self.profile, self.metrics)
+            # Inject WoV chart into chart_images so existing chart pipeline renders it
+            try:
+                self.charts.setdefault(
+                    'window_viability',
+                    _ri.render_window_of_viability_png(
+                        self.benchmark['alpha'], self.benchmark['robustness']))
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------
     # CSS STYLESHEET
@@ -987,6 +1006,146 @@ class OASISPDFReport:
         html += "</ul>"
         return html
 
+    def _build_benchmarking(self) -> str:
+        """Benchmarking & position vs the Window of Viability and reference points."""
+        b = self.benchmark
+        pos_text = {
+            'within': 'within the Window of Viability',
+            'above': 'above the viability band (tending rigid / over-organized)',
+            'below': 'below the viability band (tending chaotic / under-organized)',
+        }.get(b['position'], 'undetermined')
+
+        anchor_rows = ""
+        for a in b['reference_anchors']:
+            anchor_rows += f"""
+            <tr>
+                <td>{_escape(a['label'])}</td>
+                <td class="numeric">{a['relative_ascendency']:.3f}</td>
+                <td>{_escape(a['source'])}</td>
+            </tr>"""
+        if not anchor_rows:
+            anchor_rows = '<tr><td colspan="3">No reference data available.</td></tr>'
+
+        return f"""
+        <div class="page-break"></div>
+        <h1>2. Benchmarking &amp; Position</h1>
+        <p>
+            The organization's relative ascendency is
+            <strong>&alpha; = {b['alpha']:.3f}</strong>, placing it {pos_text}
+            (viable band {b['lower']}&ndash;{b['upper']}; robustness optimum
+            &alpha; &asymp; {b['optimum']:.2f}). Distance to the robustness optimum is
+            <strong>{b['distance_to_optimum']:.3f}</strong>.
+        </p>
+        {self._build_results_charts_single('window_viability', 'Figure. Window of Viability with the organization positioned on the robustness curve.')}
+        <h2>2.1 Ecological Reference Points</h2>
+        <p class="text-small text-muted">
+            Published ecosystem values are shown as scientific reference points for the
+            viability scale&mdash;not as organizational targets.
+        </p>
+        <table>
+            <thead><tr><th>Reference Network</th>
+                <th style="text-align:right;">Relative Ascendency (&alpha;)</th>
+                <th>Source</th></tr></thead>
+            <tbody>{anchor_rows}</tbody>
+            <caption>Table 2. Published reference networks (relative ascendency).</caption>
+        </table>
+        """
+
+    def _build_results_charts_single(self, chart_name: str, caption: str) -> str:
+        """Render a single named chart (if present) as a figure block."""
+        img_bytes = self.charts.get(chart_name)
+        if not img_bytes:
+            return ""
+        b64 = base64.b64encode(img_bytes).decode('utf-8')
+        return f"""
+        <div class="figure">
+            <img src="data:image/png;base64,{b64}" alt="{chart_name}">
+            <div class="figure-caption">{caption}</div>
+        </div>
+        """
+
+    def _build_risk_resilience(self) -> str:
+        """Risk & resilience analysis section."""
+        r = self.risk
+        items_html = ""
+        for it in r['items']:
+            sev = _escape(it['severity'])
+            items_html += f"""
+            <div class="recommendation priority-{sev.lower()}">
+                <div class="recommendation-header">
+                    <span class="recommendation-dimension">{_escape(it['title'])}</span>
+                    <span class="priority-tag {sev.lower()}">{sev}</span>
+                </div>
+                <p style="margin:1mm 0;"><strong>Evidence:</strong> {_escape(it['evidence'])}</p>
+                <p style="margin:1mm 0;"><strong>Implication:</strong> {_escape(it['implication'])}</p>
+            </div>"""
+        return f"""
+        <div class="page-break"></div>
+        <h1>3. Risk &amp; Resilience Analysis</h1>
+        <p>
+            Overall fragility classification: <strong>{_escape(r['fragility'])}</strong>.
+            Adaptive reserve indicators &mdash; overhead ratio
+            {r['overhead_ratio']*100:.1f}%, redundancy {r['redundancy']:.3f}.
+        </p>
+        {items_html}
+        """
+
+    def _build_action_roadmap(self) -> str:
+        """Prioritized action roadmap section."""
+        def horizon_html(title, items):
+            if not items:
+                return f"<h2>{title}</h2><p class='text-muted'>No actions in this horizon.</p>"
+            rows = ""
+            for it in items:
+                metrics_txt = ', '.join(it['metrics_to_improve']) or 'N/A'
+                rows += f"""
+                <div class="recommendation priority-{it['priority'].lower()}">
+                    <div class="recommendation-header">
+                        <span class="recommendation-dimension">{_escape(it['dimension'])}</span>
+                        <span class="priority-tag {it['priority'].lower()}">{_escape(it['priority'])}</span>
+                    </div>
+                    <p style="margin:1mm 0; font-weight:600;">{_escape(it['issue'])}</p>
+                    <p style="margin:1mm 0;">{_escape(it['action'])}</p>
+                    <p class="text-small text-muted">Expected impact: {_escape(it['expected_impact'])}<br>
+                       Metrics to improve: {_escape(metrics_txt)}</p>
+                </div>"""
+            return f"<h2>{title}</h2>{rows}"
+
+        return f"""
+        <div class="page-break"></div>
+        <h1>4. Prioritized Action Roadmap</h1>
+        {horizon_html('4.1 Immediate (0&ndash;3 months)', self.roadmap['immediate'])}
+        {horizon_html('4.2 Short-Term (3&ndash;9 months)', self.roadmap['short_term'])}
+        {horizon_html('4.3 Medium-Term (9&ndash;18 months)', self.roadmap['medium_term'])}
+        """
+
+    def _build_esg_mapping(self) -> str:
+        """ESG framework mapping section (indicative)."""
+        rows = ""
+        for row in self.esg:
+            rows += f"""
+            <tr>
+                <td><strong>{_escape(row['oasis_dimension'])}</strong><br>
+                    <span class="text-small text-muted">{_escape(row['finding_summary'])}</span></td>
+                <td>{_escape(row['gri_ref'])}</td>
+                <td>{_escape(row['esrs_ref'])}</td>
+                <td>{_escape(row['tcfd_ref'])}</td>
+            </tr>"""
+        return f"""
+        <div class="page-break"></div>
+        <h1>7. ESG Framework Mapping</h1>
+        <p class="text-small text-muted">
+            Indicative crosswalk linking OASIS findings to recognized disclosure
+            frameworks. Provided for navigation and context only; not a compliance
+            attestation.
+        </p>
+        <table>
+            <thead><tr><th>OASIS Finding</th><th>GRI</th><th>ESRS / CSRD</th><th>TCFD</th></tr></thead>
+            <tbody>{rows}</tbody>
+            <caption>Table 7. Indicative OASIS-to-ESG framework crosswalk.</caption>
+        </table>
+        """
+
     def _build_methodology(self) -> str:
         """Build the Methodology section."""
         return f"""
@@ -1412,8 +1571,12 @@ class OASISPDFReport:
 
 {self._build_cover_page()}
 {self._build_executive_summary()}
+{self._build_benchmarking() if self.detailed else ""}
+{self._build_risk_resilience() if self.detailed else ""}
+{self._build_action_roadmap() if self.detailed else ""}
 {self._build_methodology()}
 {self._build_results()}
+{self._build_esg_mapping() if self.detailed else ""}
 {self._build_discussion()}
 {self._build_references()}
 {self._build_appendix()}
@@ -1493,6 +1656,7 @@ def generate_oasis_pdf_report(
     chart_images: Optional[Dict[str, bytes]] = None,
     logo_path: Optional[str] = None,
     output_path: Optional[str] = None,
+    detailed: bool = True,
 ) -> Optional[bytes]:
     """
     Convenience function to generate a complete OASIS PDF report.
@@ -1522,6 +1686,7 @@ def generate_oasis_pdf_report(
         recommendations=recommendations,
         chart_images=chart_images,
         logo_path=logo_path,
+        detailed=detailed,
     )
 
     if output_path:
