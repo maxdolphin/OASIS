@@ -78,35 +78,71 @@ def _is_numeric_series(s: pd.Series) -> bool:
     return pd.to_numeric(s, errors="coerce").notna().all()
 
 
+def build_flow_matrix_from_edges(edges, extra_warnings=None) -> ParseResult:
+    """
+    Build a validated square flow matrix from directed edges.
+
+    This is the provider-agnostic primitive that CSV edge lists and cloud connectors
+    (Microsoft 365, Google, Atlassian, Slack) both feed into: each interaction is a
+    directed (source, target, weight) flow between organizational units.
+
+    Args:
+        edges: iterable of (source, target) or (source, target, weight) tuples.
+               weight defaults to 1.0 when omitted.
+        extra_warnings: optional list of warnings to prepend (e.g. from the connector).
+
+    Returns:
+        ParseResult with fmt='edgelist'.
+    """
+    warnings: List[str] = list(extra_warnings or [])
+    pairs = []  # (source, target, weight)
+    for edge in edges:
+        if len(edge) == 2:
+            s, t = edge
+            w = 1.0
+        elif len(edge) >= 3:
+            s, t, w = edge[0], edge[1], edge[2]
+        else:
+            raise NetworkIngestionError(
+                "Each edge must be (source, target) or (source, target, weight).")
+        try:
+            w = float(w)
+        except (TypeError, ValueError):
+            w = 0.0
+        pairs.append((str(s).strip(), str(t).strip(), w))
+
+    nodes = sorted({p[0] for p in pairs} | {p[1] for p in pairs})
+    if len(nodes) < 2:
+        raise NetworkIngestionError(
+            "An edge list needs at least two distinct nodes.")
+    index = {n: i for i, n in enumerate(nodes)}
+    matrix = np.zeros((len(nodes), len(nodes)), dtype=float)
+    for s, t, w in pairs:
+        matrix[index[s], index[t]] += w
+
+    warnings.extend(_validate(matrix, nodes))
+    return ParseResult(matrix, nodes, "edgelist", warnings)
+
+
 def parse_edge_list(df: pd.DataFrame, source_col, target_col,
                     weight_col=None) -> ParseResult:
-    """Build a square flow matrix from a directed edge list."""
-    warnings: List[str] = []
+    """Build a square flow matrix from a directed edge-list DataFrame."""
+    pre_warnings: List[str] = []
     src = df[source_col].astype(str).str.strip()
     tgt = df[target_col].astype(str).str.strip()
 
     if weight_col is not None:
         w = pd.to_numeric(df[weight_col], errors="coerce")
         if w.isna().any():
-            warnings.append(
+            pre_warnings.append(
                 f"{int(w.isna().sum())} edge(s) had non-numeric weights; treated as 0.")
         weights = w.fillna(0.0).to_numpy(dtype=float)
     else:
-        warnings.append("No weight column detected; each edge counted as 1.0.")
+        pre_warnings.append("No weight column detected; each edge counted as 1.0.")
         weights = np.ones(len(df), dtype=float)
 
-    nodes = sorted(set(src) | set(tgt))
-    if len(nodes) < 2:
-        raise NetworkIngestionError(
-            "An edge list needs at least two distinct nodes.")
-    index = {n: i for i, n in enumerate(nodes)}
-    n = len(nodes)
-    matrix = np.zeros((n, n), dtype=float)
-    for s, t, wv in zip(src, tgt, weights):
-        matrix[index[s], index[t]] += float(wv)
-
-    warnings.extend(_validate(matrix, nodes))
-    return ParseResult(matrix, nodes, "edgelist", warnings)
+    edges = zip(src.tolist(), tgt.tolist(), weights.tolist())
+    return build_flow_matrix_from_edges(edges, extra_warnings=pre_warnings)
 
 
 def parse_matrix(df: pd.DataFrame) -> ParseResult:

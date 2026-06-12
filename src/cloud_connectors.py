@@ -273,19 +273,37 @@ class MicrosoftGraphConnector(BaseConnector):
         return {}
     
     def get_flow_data(self, start_date: datetime, end_date: datetime) -> np.ndarray:
-        """Extract flows from Microsoft Graph."""
-        # Implementation would query:
-        # - Email flows from Exchange
-        # - Teams channel messages
-        # - SharePoint collaboration
-        # - Meeting patterns from Calendar
-        
-        # Simplified POC
+        """
+        Extract directed flows from Microsoft Graph.
+
+        Production implementation queries Exchange (email), Teams (channel messages),
+        SharePoint (collaboration), and Calendar (meetings), maps each actor/recipient
+        to its department, and accumulates directed interactions. Those interactions
+        are normalized with `flows_from_interactions` (the shared connector primitive),
+        NOT fabricated. Until live extraction is wired, this returns a zero matrix so
+        downstream analysis never operates on synthetic data.
+        """
         org_data = self.get_organization_structure()
         n = len(org_data.get('nodes', []))
-        
-        # Would process actual data here
-        return np.random.rand(n, n) * 100  # Placeholder
+        # No real interaction extraction yet — return zeros, never random/fake flows.
+        return np.zeros((n, n), dtype=float)
+
+    @staticmethod
+    def flows_from_interactions(interactions) -> np.ndarray:
+        """
+        Normalize directed interactions into a flow matrix via the shared primitive.
+
+        Args:
+            interactions: iterable of (source_dept, target_dept, weight) tuples.
+
+        Returns:
+            Square numpy flow matrix.
+        """
+        try:
+            from network_ingestion import build_flow_matrix_from_edges
+        except Exception:
+            from src.network_ingestion import build_flow_matrix_from_edges
+        return build_flow_matrix_from_edges(interactions).flow_matrix
     
     def get_metadata(self) -> Dict[str, Any]:
         """Get Microsoft Graph metadata."""

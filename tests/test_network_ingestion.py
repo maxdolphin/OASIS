@@ -134,6 +134,34 @@ def test_templates_roundtrip():
     assert e.fmt == 'edgelist' and len(e.node_names) == 4
 
 
+# ---- connector primitive: build_flow_matrix_from_edges ----
+
+def test_build_from_edges_with_weights():
+    edges = [('A', 'B', 5), ('B', 'C', 3), ('A', 'B', 2)]
+    res = ni.build_flow_matrix_from_edges(edges)
+    assert res.fmt == 'edgelist'
+    i, j = res.node_names.index('A'), res.node_names.index('B')
+    assert res.flow_matrix[i, j] == 7
+
+
+def test_build_from_edges_default_weight():
+    edges = [('A', 'B'), ('A', 'B'), ('B', 'A')]
+    res = ni.build_flow_matrix_from_edges(edges)
+    i, j = res.node_names.index('A'), res.node_names.index('B')
+    assert res.flow_matrix[i, j] == 2
+
+
+def test_build_from_edges_single_node_raises():
+    with pytest.raises(ni.NetworkIngestionError):
+        ni.build_flow_matrix_from_edges([('A', 'A', 5)])
+
+
+def test_build_from_edges_passes_connector_warnings():
+    res = ni.build_flow_matrix_from_edges(
+        [('A', 'B', 1)], extra_warnings=['Sampled last 30 days only.'])
+    assert any('30 days' in w for w in res.warnings)
+
+
 # ---- end-to-end into the engine ----
 
 def test_ingested_matrix_feeds_calculator():
