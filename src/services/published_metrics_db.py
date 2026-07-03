@@ -44,6 +44,12 @@ class NetworkPublishedData:
     tolerance: float = 0.05  # 5% default tolerance
     metrics: Dict[str, PublishedMetric] = field(default_factory=dict)
     notes: List[str] = field(default_factory=list)
+    # When True, the entry is a published-literature reference value (e.g. a
+    # benchmark anchor quoted directly from a paper's prose) that is NOT tied to
+    # a recomputable flow matrix in NETWORK_DATA_FILES. The computational
+    # validation agent skips these instead of erroring on a missing data file;
+    # they are still exposed as scientific reference anchors in the report.
+    reference_only: bool = False
 
 
 # =============================================================================
@@ -174,24 +180,72 @@ PUBLISHED_METRICS: Dict[str, NetworkPublishedData] = {
     ),
 
     # =========================================================================
-    # FLORIDA BAY
+    # SOUTH FLORIDA EVERGLADES - Heymans et al. (2002) reference anchors
+    # -------------------------------------------------------------------------
+    # DATA-PROVENANCE FIX (replaces the former mislabeled "florida_bay" entry):
+    # The prior entry stored relative ascendency alpha = 0.367 citing
+    # "Heymans et al. 2002" with a "subtropical seagrass / shallow marine"
+    # description. That is unsourceable: Heymans, Ulanowicz & Bondavalli (2002),
+    # "Network analysis of the South Florida Everglades graminoid marshes and
+    # comparison with nearby cypress ecosystems", Ecological Modelling 149:5-23,
+    # is about a FRESHWATER graminoid marsh and a cypress swamp, NOT a marine
+    # seagrass bay, and it never reports 0.367 (which happens to equal 1/e used
+    # elsewhere in the code as the robustness optimum).
+    #
+    # The paper reports relative ascendency directly, as whole-percent prose on
+    # p.20 (Section 3.3, "System-level analysis"):
+    #   "... the relative ascendency of 52% for the graminoids is higher than
+    #    any such index they had encountered ... The relative ascendency of 34%
+    #    reported for the cypress is lower than most of the relative
+    #    ascendencies calculated by NETWRK ..."
+    # (%AC, ascendency as a percentage of development capacity, IS the relative
+    # ascendency alpha = A/C.) These two values are stored below.
+    #
+    # They are reference_only anchors: the paper gives alpha as a percentage in
+    # prose without a published A/C/Phi breakdown, and no flow matrix shipped in
+    # this repo reproduces the paper's alpha, so they are quoted literature
+    # values (benchmark anchors), not recomputable-from-JSON entries.
     # =========================================================================
-    "florida_bay": NetworkPublishedData(
+    "everglades_graminoid": NetworkPublishedData(
         source="Heymans et al. 2002",
-        doi=None,
+        doi="10.1016/S0304-3800(01)00511-7",
+        page=20,  # Section 3.3 "System-level analysis": "relative ascendency of 52%"
         log_base=LogBase.NATURAL,
         tolerance=0.10,
+        reference_only=True,
         metrics={
             "relative_ascendency": PublishedMetric(
-                value=0.367,
+                value=0.52,  # 52% per Heymans et al. 2002, p.20 (prose)
                 unit="dimensionless",
-                note="Lower organization, higher resilience"
+                note="alpha = A/C = 52% (Heymans et al. 2002, p.20)"
             ),
         },
         notes=[
-            "Subtropical seagrass-dominated ecosystem",
-            "Shallow marine environment",
-            "Value indicates good balance between efficiency and resilience"
+            "South Florida Everglades freshwater graminoid marsh (sawgrass)",
+            "Two-dimensional wetland dominated by periphyton primary production",
+            "Exceptionally high relative ascendency (52%) -> tightly organized, "
+            "efficient but relatively fragile system",
+        ]
+    ),
+    "everglades_cypress": NetworkPublishedData(
+        source="Heymans et al. 2002",
+        doi="10.1016/S0304-3800(01)00511-7",
+        page=20,  # Section 3.3 "System-level analysis": "relative ascendency of 34%"
+        log_base=LogBase.NATURAL,
+        tolerance=0.10,
+        reference_only=True,
+        metrics={
+            "relative_ascendency": PublishedMetric(
+                value=0.34,  # 34% per Heymans et al. 2002, p.20 (prose)
+                unit="dimensionless",
+                note="alpha = A/C = 34% (Heymans et al. 2002, p.20)"
+            ),
+        },
+        notes=[
+            "Big Cypress Preserve / Fakahatchee Strand cypress swamp",
+            "Three-dimensional forested wetland with higher primary-producer diversity",
+            "Lower relative ascendency (34%) -> more overhead/redundancy, "
+            "greater long-term resilience",
         ]
     ),
 
@@ -426,6 +480,12 @@ NETWORK_DATA_FILES = {
     "cone_spring_original": "data/ecosystem_samples/cone_spring_original.json",
     "cone_spring_eutrophicated": "data/ecosystem_samples/cone_spring_eutrophicated.json",
     "crystal_river_creek": "data/ecosystem_samples/crystal_river_creek.json",
+    # florida_bay.json is a genuine Ulanowicz et al. (1998) Florida Bay marine
+    # food web (see the file's own metadata) and is still used by
+    # validation/test_florida_bay.py. It is intentionally NOT tied to a
+    # PUBLISHED_METRICS entry: the former "florida_bay" metrics entry that cited
+    # Heymans 2002 was mislabeled and has been replaced by the everglades_*
+    # reference anchors above.
     "florida_bay": "data/ecosystem_samples/florida_bay.json",
     "prawns_alligator_original": "data/ecosystem_samples/prawns_alligator_original.json",
     "prawns_alligator_efficient": "data/ecosystem_samples/prawns_alligator_efficient.json",

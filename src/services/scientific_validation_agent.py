@@ -341,6 +341,27 @@ class ScientificValidationAgent:
                 summary=f"Network '{network_id}' not found in published metrics database"
             )
 
+        # Reference-only anchors are published-literature values (e.g. a
+        # benchmark alpha quoted from a paper's prose) with no recomputable flow
+        # matrix. They are not validated computationally; skip cleanly instead
+        # of erroring on a missing data file.
+        pub_entry = PUBLISHED_METRICS.get(network_id)
+        if pub_entry is not None and getattr(pub_entry, "reference_only", False):
+            return NetworkValidationResult(
+                network_id=network_id,
+                network_name=network_info.get('source', network_id),
+                source=network_info['source'],
+                timestamp=timestamp,
+                computed_metrics={},
+                metric_comparisons=[],
+                validation_checks=[],
+                overall_status=ValidationStatus.SKIP,
+                summary=(
+                    f"Network '{network_id}' is a published-literature reference "
+                    f"anchor (reference_only); no recomputable flow matrix to validate."
+                )
+            )
+
         # Load network data
         network_data = self._load_network_data(network_id)
         if network_data is None:
