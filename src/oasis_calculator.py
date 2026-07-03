@@ -46,6 +46,43 @@ class OASISCalculator:
         'sustainable': 0.20
     }
 
+    # ------------------------------------------------------------------
+    # Per-dimension normalization caps (0-100 mapping)
+    # ------------------------------------------------------------------
+    # Each dimension's raw score is a convex combination of sub-metrics that
+    # are each in [0, 1], so the raw dimension score is itself in [0, 1]. These
+    # caps are the `max_val` used by `_normalize_to_100(raw, 0, cap)`: a raw
+    # sub-score >= cap maps to 100. A cap < 1.0 therefore compresses the top of
+    # the scale (raw values above the cap all saturate at 100).
+    #
+    # IMPORTANT (research-integrity note, same conservative stance as the
+    # viability-window caveat): these cap VALUES are CALIBRATION PARAMETERS that
+    # are PENDING EMPIRICAL DERIVATION from a reference corpus of organizational
+    # flow-networks. They are NOT theoretically-derived maxima. They are kept at
+    # their historical values here and only CENTRALIZED + DOCUMENTED so that a
+    # future empirical re-baseline is a single-line change. Do NOT substitute a
+    # different arbitrary number without a corpus + re-baseline decision.
+    #
+    # Size dependence: OPEN, INTELLIGENT and SYMBIOTIC carry the network's SIZE
+    # dependence (their sub-metrics — betweenness, clustering, roles, effective
+    # nodes — scale with node count n and are size-normalized upstream). Those
+    # dimensions are where a size-relative cap would eventually matter most.
+    # SUSTAINABLE is SIZE-INVARIANT (built from alpha = A/C and the robustness
+    # proxy R = -alpha*log(alpha), which are ratios independent of n), so its
+    # cap is a pure scale choice, not a size gauge.
+    #
+    # No principled theoretical max is available for any of these five caps
+    # (each raw score's true attainable maximum depends on the empirical
+    # distribution of the constituent metrics, not on a closed-form bound), so
+    # all values are left unchanged and marked calibration-pending.
+    DIMENSION_NORMALIZATION_CAPS = {
+        'open': 0.6,          # calibration pending (size-sensitive dimension)
+        'autonomous': 0.5,    # calibration pending
+        'symbiotic': 0.7,     # calibration pending (size-sensitive dimension)
+        'intelligent': 0.6,   # calibration pending (size-sensitive dimension)
+        'sustainable': 0.8,   # calibration pending (size-INVARIANT dimension)
+    }
+
     # Health thresholds for interpretation
     HEALTH_THRESHOLDS = {
         'open': {'healthy': (50, 85), 'warning': (30, 50), 'critical': (0, 30)},
@@ -185,7 +222,15 @@ class OASISCalculator:
         expected_cycles = n_nodes * (n_nodes - 1) / 2  # Rough expectation
         count_factor = min(1, len(cycles) / max(1, expected_cycles))
 
-        autocatalytic_index = 0.5 * count_factor + 0.5 * min(1, cycle_flow_ratio * 10)
+        # Flow component: use the cycle_flow_ratio DIRECTLY (it is already a
+        # proportion in [0, 1] — the fraction of total system throughput that
+        # cycles). The former `* 10` amplifier had NO basis and saturated the
+        # component to 1.0 for any network with >10% cycled flow, hiding real
+        # variation in cyclic re-investment. Removing it de-saturates the term;
+        # the clamp to 1 is retained only as a numerical guard.
+        flow_component = min(1.0, cycle_flow_ratio)
+
+        autocatalytic_index = 0.5 * count_factor + 0.5 * flow_component
 
         return {
             'count': len(cycles),
@@ -465,8 +510,8 @@ class OASISCalculator:
             0.20 * clustering
         )
 
-        # Convert to 0-100 scale
-        score = self._normalize_to_100(raw_score, 0, 0.6)
+        # Convert to 0-100 scale (cap centralized in DIMENSION_NORMALIZATION_CAPS)
+        score = self._normalize_to_100(raw_score, 0, self.DIMENSION_NORMALIZATION_CAPS['open'])
 
         return {
             'score': score,
@@ -538,8 +583,8 @@ class OASISCalculator:
             0.15 * autocatalytic_idx
         )
 
-        # Convert to 0-100 scale
-        score = self._normalize_to_100(raw_score, 0, 0.5)
+        # Convert to 0-100 scale (cap centralized in DIMENSION_NORMALIZATION_CAPS)
+        score = self._normalize_to_100(raw_score, 0, self.DIMENSION_NORMALIZATION_CAPS['autonomous'])
 
         return {
             'score': score,
@@ -620,8 +665,8 @@ class OASISCalculator:
             0.20 * integral_mutualism
         )
 
-        # Convert to 0-100 scale
-        score = self._normalize_to_100(raw_score, 0, 0.7)
+        # Convert to 0-100 scale (cap centralized in DIMENSION_NORMALIZATION_CAPS)
+        score = self._normalize_to_100(raw_score, 0, self.DIMENSION_NORMALIZATION_CAPS['symbiotic'])
 
         return {
             'score': score,
@@ -665,20 +710,37 @@ class OASISCalculator:
         """
         metrics = self._get_ulanowicz_metrics()
 
-        # Number of roles (normalized by network size)
+        # Number of roles, SIZE-RELATIVE normalization (principled).
+        #
+        # R = number_of_roles = exp(AMI). The Zorach & Ulanowicz (2003) identity
+        # block gives R = N / C, where N = effective_nodes and C = effective
+        # connectivity. The connectivity floor C >= 1 for a connected network
+        # (Ulanowicz 2004, p.334 — the lower edge of the window of vitality is
+        # C = 1) implies R <= N. Hence R / N in [0, 1] is a PRINCIPLED,
+        # size-relative normalizer: it gauges how close the network is to its
+        # own maximum functional differentiation (one distinct role per
+        # effective node), independent of node count. This replaces the former
+        # fixed `roles / 10` ceiling, which implicitly assumed a ~10-role
+        # organization and systematically penalized small nets / inflated large
+        # ones purely as a size artifact.
         num_roles = metrics.get('number_of_roles', 1)
-        # Normalize: expect 2-10 roles for healthy systems
-        norm_roles = min(num_roles / 10, 1)
+        effective_nodes = metrics.get('effective_nodes', self.ulanowicz.n_nodes)
+        if effective_nodes and effective_nodes > 0:
+            norm_roles = min(num_roles / effective_nodes, 1)
+        else:
+            norm_roles = 0.0
 
         # Functional diversity (log of roles = AMI)
         functional_diversity = metrics.get('functional_diversity', 0)
         max_diversity = math.log(self.ulanowicz.n_nodes)
         norm_diversity = functional_diversity / max_diversity if max_diversity > 0 else 0
 
-        # Roles per node
+        # Roles per node = R / N. By the same R <= N bound above, roles_per_node
+        # is already in [0, 1], so the principled max is 1.0. We normalize by
+        # min(rpn, 1.0) rather than the former arbitrary `/ 2` (which implied a
+        # "2 roles per effective node" ceiling with no theoretical basis).
         roles_per_node = metrics.get('roles_per_node', 1)
-        # Normalize: expect 0.5-2 roles per effective node
-        norm_roles_per_node = min(roles_per_node / 2, 1)
+        norm_roles_per_node = min(roles_per_node / 1.0, 1)
 
         # Conditional entropy (flexibility in the system)
         cond_entropy = metrics.get('conditional_entropy', 0)
@@ -693,8 +755,8 @@ class OASISCalculator:
             0.20 * norm_cond_entropy
         )
 
-        # Convert to 0-100 scale
-        score = self._normalize_to_100(raw_score, 0, 0.6)
+        # Convert to 0-100 scale (cap centralized in DIMENSION_NORMALIZATION_CAPS)
+        score = self._normalize_to_100(raw_score, 0, self.DIMENSION_NORMALIZATION_CAPS['intelligent'])
 
         return {
             'score': score,
@@ -770,8 +832,8 @@ class OASISCalculator:
             0.30 * alpha_optimality
         )
 
-        # Convert to 0-100 scale
-        score = self._normalize_to_100(raw_score, 0, 0.8)
+        # Convert to 0-100 scale (cap centralized in DIMENSION_NORMALIZATION_CAPS)
+        score = self._normalize_to_100(raw_score, 0, self.DIMENSION_NORMALIZATION_CAPS['sustainable'])
 
         return {
             'score': score,

@@ -922,7 +922,14 @@ class UlanowiczCalculator:
         expected_cycles = self.n_nodes * (self.n_nodes - 1) / 2  # Rough expectation
         count_factor = min(1, len(cycles) / max(1, expected_cycles))
 
-        autocatalytic_index = 0.5 * count_factor + 0.5 * min(1, cycle_flow_ratio * 10)
+        # Flow component: use cycle_flow_ratio DIRECTLY (already a proportion in
+        # [0, 1]). The former `* 10` amplifier had no basis and saturated the
+        # component for any network with >10% cycled flow; removing it
+        # de-saturates the term. Clamp retained only as a numerical guard.
+        # (Kept in sync with OASISCalculator.calculate_autocatalytic_index.)
+        flow_component = min(1.0, cycle_flow_ratio)
+
+        autocatalytic_index = 0.5 * count_factor + 0.5 * flow_component
 
         return {
             'count': len(cycles),
