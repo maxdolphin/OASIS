@@ -887,13 +887,23 @@ def _build_reportlab_pdf(report_generator, calculator, metrics, charts=None):
         spaceBefore=0, spaceAfter=8,
     ))
 
-    # Try to get OASIS data
+    # Try to get OASIS data — prefer the precomputed profile (computed once at
+    # provision) carried on the report_generator; recompute only on a miss.
     try:
-        from oasis_calculator import OASISCalculator
-        oasis = OASISCalculator(calculator)
-        profile = oasis.get_oasis_profile()
-        interpretations = oasis.get_oasis_interpretation()
-        recommendations = oasis.get_recommendations()
+        profile = getattr(report_generator, 'oasis_profile', None)
+        if not (isinstance(profile, dict) and 'dimension_scores' in profile):
+            profile = None
+        interpretations = profile.get('interpretation') if profile else None
+        recommendations = profile.get('recommendations') if profile else None
+        if profile is None or interpretations is None or recommendations is None:
+            from oasis_calculator import OASISCalculator
+            oasis = OASISCalculator(calculator)
+            if profile is None:
+                profile = oasis.get_oasis_profile()
+            if interpretations is None:
+                interpretations = oasis.get_oasis_interpretation()
+            if recommendations is None:
+                recommendations = oasis.get_recommendations()
 
         scores = profile['dimension_scores']
         overall = profile['overall_score']
@@ -1008,9 +1018,17 @@ def _build_reportlab_pdf(report_generator, calculator, metrics, charts=None):
 
     if _ri is not None:
         try:
-            _oasis = _OC(calculator)
-            _profile = _oasis.get_oasis_profile()
-            _recs = _oasis.get_recommendations()
+            # Prefer the precomputed OASIS profile carried on report_generator.
+            _profile = getattr(report_generator, 'oasis_profile', None)
+            if not (isinstance(_profile, dict) and 'dimension_scores' in _profile):
+                _profile = None
+            _recs = _profile.get('recommendations') if _profile else None
+            if _profile is None or _recs is None:
+                _oasis = _OC(calculator)
+                if _profile is None:
+                    _profile = _oasis.get_oasis_profile()
+                if _recs is None:
+                    _recs = _oasis.get_recommendations()
             _bench = _ri.build_benchmark_view(metrics, _profile)
             _risk = _ri.build_risk_view(metrics, _profile)
             _roadmap = _ri.build_action_roadmap(_recs, _profile)

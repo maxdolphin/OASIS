@@ -53,14 +53,22 @@ class PublicationReportGenerator:
     """
 
     def __init__(self, calculator, metrics: Dict[str, Any], assessments: Dict[str, str],
-                 org_name: str, flow_matrix: np.ndarray, node_names: List[str]):
-        """Initialize report generator with analysis data."""
+                 org_name: str, flow_matrix: np.ndarray, node_names: List[str],
+                 oasis_profile: Dict[str, Any] = None):
+        """Initialize report generator with analysis data.
+
+        Args:
+            oasis_profile: optional precomputed OASIS profile (from the full
+                profile computed once at provision). When provided, the OASIS
+                section READS it instead of recomputing via OASISCalculator.
+        """
         self.calculator = calculator
         self.metrics = metrics
         self.assessments = assessments
         self.org_name = org_name
         self.flow_matrix = flow_matrix
         self.node_names = node_names
+        self.oasis_profile = oasis_profile
         self.timestamp = datetime.now()
 
     # ==================================================================
@@ -552,11 +560,21 @@ Table A3. Assessment Summary
         """Generate OASIS Organizational Health Assessment section with narrative interpretation."""
 
         try:
-            from oasis_calculator import OASISCalculator
-            oasis = OASISCalculator(self.calculator)
-            profile = oasis.get_oasis_profile()
-            interpretations = oasis.get_oasis_interpretation()
-            recommendations = oasis.get_recommendations()
+            # Prefer the precomputed OASIS profile (computed once at provision).
+            profile = self.oasis_profile if isinstance(self.oasis_profile, dict) \
+                and 'dimension_scores' in self.oasis_profile else None
+            if profile is not None:
+                interpretations = profile.get('interpretation')
+                recommendations = profile.get('recommendations')
+            if profile is None or interpretations is None or recommendations is None:
+                from oasis_calculator import OASISCalculator
+                oasis = OASISCalculator(self.calculator)
+                if profile is None:
+                    profile = oasis.get_oasis_profile()
+                if interpretations is None:
+                    interpretations = oasis.get_oasis_interpretation()
+                if recommendations is None:
+                    recommendations = oasis.get_recommendations()
         except Exception as e:
             return f"""
 6. OASIS ORGANIZATIONAL HEALTH ASSESSMENT
