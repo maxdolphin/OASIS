@@ -1046,13 +1046,24 @@ class UlanowiczCalculator:
         """
         Calculate effective connectivity (C).
 
-        Based on Zorach & Ulanowicz (2003), effective connectivity is
-        calculated directly from the flow distribution.
+        Based on Zorach & Ulanowicz (2003), effective connectivity is the
+        number of effective flows per effective node.
 
-        Formula: C = exp(0.5 * Σ((Tij/T••) * log(Tij²/(Ti•*T•j))))
+        Formula: C = F / N  (Zorach & Ulanowicz 2003, p.72: "C ≡ F/N").
+        This is the average number of flows per node and is bounded below by
+        1.0 for a connected network (Ulanowicz 2004, p.334: the lower limit of
+        the window of vitality is 1.0). The identities R = F/C² = N/C follow.
+
+        NOTE (Track-1 correction): the previous implementation used the literal
+        product-form C = exp(0.5·Σ w·ln(Tij²/(Ti·Tj))), which carries a POSITIVE
+        exponent. The canonical form (Z-U 2003 Appendix p.76) has a NEGATIVE
+        exponent; the positive form equals N/F (the reciprocal, always < 1) and
+        violates the C ≥ 1 connectivity floor. Computing C = F/N directly is the
+        cleanest form and guarantees the identity block holds to machine
+        precision.
 
         Returns:
-            Effective connectivity in flows per node
+            Effective connectivity in flows per node (>= 1.0 for a connected net)
         """
         # Use vectorized version if enabled
         if self.use_vectorized:
@@ -1065,25 +1076,11 @@ class UlanowiczCalculator:
                 )
             return self._vectorized_cache['effective_connectivity']
 
-        # Original implementation - now using precomputed sums
-        tst = self._tst
-        if tst == 0:
+        # Original implementation: C = F / N (Zorach & Ulanowicz 2003, p.72)
+        eff_nodes = self.calculate_effective_nodes()
+        if eff_nodes <= 0:
             return 0
-
-        sum_term = 0
-        for i in range(self.n_nodes):
-            for j in range(self.n_nodes):
-                if self.flow_matrix[i, j] > 0:
-                    tij = self.flow_matrix[i, j]
-                    # Use precomputed throughputs instead of recomputing
-                    ti_out = self.output_throughput[i]
-                    tj_in = self.input_throughput[j]
-
-                    if ti_out > 0 and tj_in > 0:
-                        weight = tij / tst
-                        sum_term += weight * np.log(tij**2 / (ti_out * tj_in))
-
-        return np.exp(0.5 * sum_term)
+        return self.calculate_effective_flows() / eff_nodes
     
     def calculate_number_of_roles(self) -> float:
         """
