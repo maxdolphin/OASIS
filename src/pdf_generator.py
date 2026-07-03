@@ -1272,6 +1272,19 @@ def _build_reportlab_pdf(report_generator, calculator, metrics, charts=None):
             f"The overall health score is <b>{overall:.0f}/100</b> ({overall_status}).",
             s_body))
 
+        # Transparency note: which weighting lens produced the overall. Equal
+        # weights are the honest default; a named profile is a modest context
+        # tilt (see docs/business-revision/evidence/expert-org-management.md §3).
+        _prof_weights = profile.get('weights') or {}
+        _is_equal = all(abs(w - 0.20) < 1e-6 for w in _prof_weights.values()) \
+            if _prof_weights else True
+        _lens = (profile.get('profile_name')
+                 or ('Balanced (equal weights)' if _is_equal else 'Custom weights'))
+        story.append(Paragraph(
+            f"<i>Weighting profile: {_lens}. The overall is a weighted mean of the "
+            f"five dimension scores; equal weights (20% each) are the default lens.</i>",
+            s_body))
+
         # OASIS scores table
         oasis_data = [['Dimension', 'Score', 'Status', 'Key Focus']]
         dim_descriptions = {

@@ -4788,47 +4788,113 @@ def display_oasis_health(calculator, metrics, flow_matrix, node_names, org_name)
     # ===== WEIGHT CONFIGURATION =====
     st.markdown("---")
     with st.expander("⚙️ **Customize Dimension Weights**", expanded=False):
-        st.markdown("""
-        Adjust weights based on your organization's priorities.
-        All weights must sum to 100%.
-        """)
+        # ── Named context weighting PROFILES (a re-weighting lens) ───────────
+        # Per docs/business-revision/evidence/expert-org-management.md §3: equal
+        # 20% is the honest published DEFAULT; named profiles let a consultant
+        # select a context lens that MODESTLY re-weights the five dimensions.
+        # Selecting a profile is a CHEAP recombination on the already-computed
+        # dimension scores (no metric recompute) via apply_weighting_profile.
+        from src.oasis_calculator import WEIGHTING_PROFILES
 
-        # Initialize session state for weights if not exists
-        if 'oasis_weights' not in st.session_state:
-            st.session_state.oasis_weights = {k: v * 100 for k, v in OASISCalculator.DEFAULT_WEIGHTS.items()}
+        st.markdown("#### 🎚️ Weighting Profile (lens)")
+        st.caption(
+            "Equal 20% is the honest default. A profile applies a **modest** "
+            "context tilt to the five dimensions and instantly re-weights the "
+            "overall score — it never changes the dimension scores or metrics."
+        )
+        _profile_names = list(WEIGHTING_PROFILES.keys()) + ['Custom (manual sliders)']
+        selected_profile = st.selectbox(
+            "Select a lens",
+            _profile_names,
+            index=0,  # "Balanced (default)" so nothing changes unless chosen
+            key='oasis_weighting_profile',
+        )
 
-        col1, col2, col3, col4, col5 = st.columns(5)
+        if selected_profile != 'Custom (manual sliders)':
+            st.info(WEIGHTING_PROFILES[selected_profile]['description'])
+            # Cheap recombination on the PRECOMPUTED dimension scores.
+            reweighted = OASISCalculator.apply_weighting_profile(
+                scores, selected_profile)
+            new_overall = reweighted['overall_score']
+            new_status = reweighted['overall_status']
+            new_capped_by = reweighted.get('capped_by', [])
 
-        with col1:
-            new_open = st.slider("🌐 Open", 0, 50, int(st.session_state.oasis_weights['open']), key='w_open')
-        with col2:
-            new_auto = st.slider("🧠 Autonomous", 0, 50, int(st.session_state.oasis_weights['autonomous']), key='w_auto')
-        with col3:
-            new_symb = st.slider("🤝 Symbiotic", 0, 50, int(st.session_state.oasis_weights['symbiotic']), key='w_symb')
-        with col4:
-            new_intel = st.slider("💡 Intelligent", 0, 50, int(st.session_state.oasis_weights['intelligent']), key='w_intel')
-        with col5:
-            new_sust = st.slider("🌱 Sustainable", 0, 50, int(st.session_state.oasis_weights['sustainable']), key='w_sust')
-
-        total = new_open + new_auto + new_symb + new_intel + new_sust
-
-        if total != 100:
-            st.warning(f"⚠️ Weights sum to {total}%. They should sum to 100%.")
+            _status_colors = {'HEALTHY': '#2ecc71', 'WARNING': '#f5b041',
+                              'CRITICAL': '#e74c3c'}
+            _c = _status_colors.get(new_status, '#3498db')
+            _delta = new_overall - overall
+            st.markdown(
+                f"**Active lens:** {selected_profile} &nbsp;→&nbsp; "
+                f"Overall <span style='color:{_c};font-weight:bold'>"
+                f"{new_overall:.0f}/100 ({new_status})</span> "
+                f"<span style='opacity:0.7'>(Δ {_delta:+.1f} vs balanced)</span>",
+                unsafe_allow_html=True,
+            )
+            if new_capped_by:
+                st.caption(
+                    "Status capped by worst dimension(s): "
+                    + ", ".join(d.upper() for d in new_capped_by)
+                )
+            # Show the profile weights being applied.
+            _wcols = st.columns(5)
+            _emoji = {'open': '🌐', 'autonomous': '🧠', 'symbiotic': '🤝',
+                      'intelligent': '💡', 'sustainable': '🌱'}
+            for _col, _dim in zip(_wcols, ['open', 'autonomous', 'symbiotic',
+                                           'intelligent', 'sustainable']):
+                with _col:
+                    st.metric(f"{_emoji[_dim]} {_dim.capitalize()}",
+                              f"{reweighted['weights'][_dim] * 100:.0f}%")
+            st.markdown("---")
+            st.caption(
+                "Switch to **Custom (manual sliders)** to set your own weights."
+            )
         else:
-            st.success("✅ Weights sum to 100%")
+            # ── Manual "Custom" override (existing slider path) ──────────────
+            st.markdown("""
+            Adjust weights based on your organization's priorities.
+            All weights must sum to 100%.
+            """)
 
-            if st.button("Apply Weights"):
-                # Update weights and recalculate
-                new_weights = {
-                    'open': new_open / 100,
-                    'autonomous': new_auto / 100,
-                    'symbiotic': new_symb / 100,
-                    'intelligent': new_intel / 100,
-                    'sustainable': new_sust / 100
+            # Initialize session state for weights if not exists
+            if 'oasis_weights' not in st.session_state:
+                st.session_state.oasis_weights = {k: v * 100 for k, v in OASISCalculator.DEFAULT_WEIGHTS.items()}
+
+            col1, col2, col3, col4, col5 = st.columns(5)
+
+            with col1:
+                new_open = st.slider("🌐 Open", 0, 50, int(st.session_state.oasis_weights['open']), key='w_open')
+            with col2:
+                new_auto = st.slider("🧠 Autonomous", 0, 50, int(st.session_state.oasis_weights['autonomous']), key='w_auto')
+            with col3:
+                new_symb = st.slider("🤝 Symbiotic", 0, 50, int(st.session_state.oasis_weights['symbiotic']), key='w_symb')
+            with col4:
+                new_intel = st.slider("💡 Intelligent", 0, 50, int(st.session_state.oasis_weights['intelligent']), key='w_intel')
+            with col5:
+                new_sust = st.slider("🌱 Sustainable", 0, 50, int(st.session_state.oasis_weights['sustainable']), key='w_sust')
+
+            total = new_open + new_auto + new_symb + new_intel + new_sust
+
+            if total != 100:
+                st.warning(f"⚠️ Weights sum to {total}%. They should sum to 100%.")
+            else:
+                st.success("✅ Weights sum to 100%")
+
+                # Cheap live recombination preview on the precomputed scores.
+                _custom_weights = {
+                    'open': new_open / 100, 'autonomous': new_auto / 100,
+                    'symbiotic': new_symb / 100, 'intelligent': new_intel / 100,
+                    'sustainable': new_sust / 100,
                 }
-                _get_live_oasis().set_dimension_weights(new_weights)
-                st.session_state.oasis_weights = {k: v * 100 for k, v in new_weights.items()}
-                st.rerun()
+                _custom = OASISCalculator.apply_weighting_profile(scores, _custom_weights)
+                st.caption(
+                    f"Custom overall: {_custom['overall_score']:.0f}/100 "
+                    f"({_custom['overall_status']})"
+                )
+
+                if st.button("Apply Weights"):
+                    _get_live_oasis().set_dimension_weights(_custom_weights)
+                    st.session_state.oasis_weights = {k: v * 100 for k, v in _custom_weights.items()}
+                    st.rerun()
 
     # ===== DIMENSION DETAILS =====
     st.markdown("---")

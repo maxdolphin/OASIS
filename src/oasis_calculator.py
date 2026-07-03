@@ -23,8 +23,102 @@ OASIS Dimension Mapping to Fath et al. (2019) Principles:
 
 import numpy as np
 import networkx as nx
-from typing import Dict, List, Tuple, Optional, Any
+from typing import Dict, List, Tuple, Optional, Any, Union
 import math
+
+
+# ---------------------------------------------------------------------------
+# Named context WEIGHTING PROFILES for the OASIS composite
+# ---------------------------------------------------------------------------
+# Per docs/business-revision/evidence/expert-org-management.md §3: keep the
+# equal 20% weighting as the PUBLISHED, honest default (no false precision — no
+# peer-reviewed weighting exists for these specific network constructs), but
+# expose a small number of NAMED, context-tagged profiles a consultant can
+# select as a diagnostic LENS. Only MODEST tilts are defensible (±0.05–0.08 from
+# 0.20); NO extreme weightings. Dimension → org-design construct mapping (expert
+# review §3.2):
+#   open        ↔ external adaptability / boundary-spanning / environmental sensing
+#   autonomous  ↔ distributed decision rights / empowerment / self-management
+#   symbiotic   ↔ cross-functional collaboration / psychological safety
+#   intelligent ↔ information-processing / learning / knowledge diversity
+#   sustainable ↔ long-term resilience / structural balance / adaptive capacity
+#
+# IMPORTANT: re-weighting only recombines the FIVE ALREADY-COMPUTED dimension
+# scores into a new OVERALL score + capped status. It does NOT change any
+# dimension score or metric formula. Every profile's weights MUST sum to exactly
+# 1.0 over exactly the five dimensions (validated at import time below).
+WEIGHTING_PROFILES: Dict[str, Dict[str, Any]] = {
+    'Balanced (default)': {
+        'weights': {
+            'open': 0.20,
+            'autonomous': 0.20,
+            'symbiotic': 0.20,
+            'intelligent': 0.20,
+            'sustainable': 0.20,
+        },
+        'description': (
+            "Equal 20% across all five dimensions — the published, honest "
+            "default. No lens applied; use when you have no reason to privilege "
+            "one dimension over another (avoids false precision)."
+        ),
+    },
+    'Scale-up / Growth': {
+        'weights': {
+            'open': 0.25,
+            'intelligent': 0.25,
+            'autonomous': 0.20,
+            'symbiotic': 0.15,
+            'sustainable': 0.15,
+        },
+        'description': (
+            "Modest emphasis on Open + Intelligent (external adaptability and "
+            "learning). Use for fast-growing organizations in changing markets "
+            "where sensing and knowledge-processing dominate durable performance."
+        ),
+    },
+    'Efficiency / Turnaround': {
+        'weights': {
+            'autonomous': 0.25,
+            'sustainable': 0.25,
+            'intelligent': 0.20,
+            'open': 0.15,
+            'symbiotic': 0.15,
+        },
+        'description': (
+            "Modest emphasis on Autonomous + Sustainable (decision clarity and "
+            "structural discipline / viability). Use for cost-out, restructuring "
+            "or turnaround contexts prioritizing operational discipline."
+        ),
+    },
+    'Regulated / Resilience-first': {
+        'weights': {
+            'sustainable': 0.28,
+            'symbiotic': 0.25,
+            'autonomous': 0.20,
+            'open': 0.15,
+            'intelligent': 0.12,
+        },
+        'description': (
+            "Modest emphasis on Symbiotic + Sustainable (coordinated control and "
+            "durability). Use for regulated, safety-critical or resilience-first "
+            "organizations where long-term viability and coordination dominate."
+        ),
+    },
+}
+
+
+# Guard: every profile must cover exactly the five dimensions and sum to 1.0.
+_OASIS_DIMENSIONS = frozenset(
+    {'open', 'autonomous', 'symbiotic', 'intelligent', 'sustainable'})
+for _name, _profile in WEIGHTING_PROFILES.items():
+    _w = _profile['weights']
+    assert frozenset(_w.keys()) == _OASIS_DIMENSIONS, (
+        f"Weighting profile '{_name}' must cover exactly the five OASIS "
+        f"dimensions, got {sorted(_w.keys())}")
+    assert abs(sum(_w.values()) - 1.0) < 1e-9, (
+        f"Weighting profile '{_name}' weights must sum to 1.0, "
+        f"got {sum(_w.values())}")
+del _name, _profile, _w
 
 
 class OASISCalculator:
@@ -944,6 +1038,74 @@ class OASISCalculator:
             'capped': capped,
             'capped_by': capped_by,
         }
+
+    @classmethod
+    def resolve_weights(cls, profile: Union[str, Dict[str, float]]) -> Dict[str, float]:
+        """
+        Resolve a weighting-profile NAME or an explicit weight dict to a validated
+        weight dict over the five dimensions.
+
+        Args:
+            profile: either a key of WEIGHTING_PROFILES (e.g. "Scale-up / Growth")
+                     or an explicit {dimension: weight} dict (manual "Custom").
+
+        Returns:
+            A copy of the weight dict (covering the five dimensions, summing to 1.0).
+
+        Raises:
+            ValueError: if the name is unknown, the dimensions are wrong, or the
+                        weights do not sum to 1.0 (within 1e-2, matching __init__).
+        """
+        if isinstance(profile, str):
+            if profile not in WEIGHTING_PROFILES:
+                raise ValueError(
+                    f"Unknown weighting profile '{profile}'. "
+                    f"Available: {sorted(WEIGHTING_PROFILES)}")
+            return dict(WEIGHTING_PROFILES[profile]['weights'])
+
+        # Explicit weight dict (manual "Custom" override).
+        weights = dict(profile)
+        if frozenset(weights.keys()) != _OASIS_DIMENSIONS:
+            raise ValueError(
+                f"Weights must cover exactly the five OASIS dimensions, "
+                f"got {sorted(weights.keys())}")
+        total = sum(weights.values())
+        if abs(total - 1.0) > 0.01:
+            raise ValueError(f"Weights must sum to 1.0, got {total}")
+        return weights
+
+    @classmethod
+    def apply_weighting_profile(
+            cls,
+            dimension_scores: Dict[str, float],
+            profile: Union[str, Dict[str, float]] = 'Balanced (default)',
+    ) -> Dict[str, Any]:
+        """
+        Cheaply RE-WEIGHT the OASIS overall from ALREADY-COMPUTED dimension scores.
+
+        This is a pure recombination: it takes the five STORED (0..100) dimension
+        scores and a named profile (or explicit weight dict) and returns the new
+        weighted-mean overall + the worst-dimension band-capped status, reusing
+        `compute_overall_status`. It does NOT recompute any dimension metric —
+        weights never touch the dimension scores — so the app can switch profiles
+        instantly on a precomputed profile.
+
+        Args:
+            dimension_scores: {dimension: 0..100 score} for the five dimensions.
+            profile: a WEIGHTING_PROFILES name (default "Balanced (default)") or an
+                     explicit weight dict (manual "Custom").
+
+        Returns:
+            The `compute_overall_status` result dict (overall_score, overall_status,
+            raw_overall_status, dimension_status, capped, capped_by), plus:
+                'weights': the resolved weight dict used
+                'profile_name': the profile name if a name was passed, else 'Custom'
+        """
+        weights = cls.resolve_weights(profile)
+        rollup = cls.compute_overall_status(dimension_scores, weights)
+        rollup['weights'] = weights
+        rollup['profile_name'] = profile if isinstance(profile, str) else 'Custom'
+        return rollup
 
     def get_oasis_profile(self) -> Dict[str, Any]:
         """
