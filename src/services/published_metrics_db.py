@@ -24,6 +24,60 @@ class LogBase(Enum):
     LOG10 = "log10"  # log base 10
 
 
+# =============================================================================
+# BASE-DEPENDENCE OF METRICS
+# -----------------------------------------------------------------------------
+# Information-theoretic MAGNITUDES scale linearly with the logarithm base: a
+# value computed in nats (natural log, as the UlanowiczCalculator does) is
+# ``1/ln(2)`` times SMALLER than the same quantity in bits (log2). When a stored
+# published value is quoted in a different base than the engine computes, these
+# metrics MUST be base-converted before comparison (see
+# ``scientific_validation_agent.nats_to_bits``).
+#
+# Ratios / dimensionless indices are base-INVARIANT: the log base cancels in a
+# quotient (e.g. relative ascendency alpha = A/C) or the quantity never involves
+# a logarithm at all (e.g. total system throughput = a sum of flows). These must
+# NEVER be converted, or a correct value would be corrupted.
+# =============================================================================
+
+# Metrics whose magnitude changes with the log base (nats vs bits vs digits).
+BASE_DEPENDENT_METRICS = frozenset({
+    "ascendency",
+    "development_capacity",
+    "reserve",
+    "overhead",
+    "average_mutual_information",
+    "statistical_entropy",
+    "flow_diversity",
+    "conditional_entropy",
+    "structural_information",
+})
+
+# Metrics that are invariant to the log base (ratios, indices, raw flow sums).
+BASE_INVARIANT_METRICS = frozenset({
+    "relative_ascendency",
+    "ascendency_ratio",
+    "robustness",
+    "total_system_throughput",
+    "network_efficiency",
+    "finn_cycling_index",
+    "is_viable",
+    "regenerative_capacity",
+    "redundancy",
+})
+
+
+def is_base_dependent(metric_name: str) -> bool:
+    """Return True if a metric's magnitude scales with the logarithm base.
+
+    Base-dependent metrics require a nats<->bits conversion before a
+    cross-base published-value comparison; base-invariant ones must not be
+    converted. Unknown metric names default to base-invariant (no conversion)
+    so a comparison is never silently corrupted by an unexpected key.
+    """
+    return metric_name in BASE_DEPENDENT_METRICS
+
+
 @dataclass
 class PublishedMetric:
     """A single published metric with its value and metadata."""
