@@ -327,8 +327,60 @@ def _build_reportlab_pdf(report_generator, calculator, metrics, charts=None):
                                      width=render_w, height=render_h, scale=2)
             img_buf = BytesIO(img_bytes)
             return Image(img_buf, width=width, height=height)
-        except Exception:
+        except Exception as _e:
+            import logging
+            logging.getLogger(__name__).warning(
+                "PDF chart (plotly/kaleido) export failed, skipping: %s", _e)
             return None
+
+    def _mpl_image(fig, width=CONTENT_W, height=280, dpi=150):
+        """Convert a matplotlib Figure to a reportlab Image flowable.
+
+        Used for charts that already have a native matplotlib builder (e.g. the
+        Window-of-Viability curve) and as a kaleido-free fallback path.
+        """
+        try:
+            img_buf = BytesIO()
+            fig.savefig(img_buf, format='png', dpi=dpi,
+                        bbox_inches='tight', facecolor='white')
+            img_buf.seek(0)
+            try:
+                import matplotlib.pyplot as _plt
+                _plt.close(fig)
+            except Exception:
+                pass
+            return Image(img_buf, width=width, height=height)
+        except Exception as _e:
+            import logging
+            logging.getLogger(__name__).warning(
+                "PDF chart (matplotlib) export failed, skipping: %s", _e)
+            return None
+
+    def _guarded_chart_block(builder, caption, story_list,
+                             heading=None, heading_style=None):
+        """Build one chart via *builder* (returns a reportlab Image or None),
+        wrap it with a caption, and append as a KeepTogether block.
+
+        Each chart is individually guarded so one failure logs a warning and is
+        skipped rather than aborting the whole PDF. Returns True if embedded.
+        """
+        img = None
+        try:
+            img = builder()
+        except Exception as _e:
+            import logging
+            logging.getLogger(__name__).warning(
+                "PDF chart builder raised, skipping: %s", _e)
+            img = None
+        if img is None:
+            return False
+        block = []
+        if heading is not None:
+            block.append(Paragraph(heading, heading_style or s_h2))
+        block.append(img)
+        block.append(Paragraph(caption, s_caption))
+        story_list.append(KeepTogether(block))
+        return True
 
     # ── Build story ──────────────────────────────────────────────────────
     story = []
@@ -796,40 +848,99 @@ def _build_reportlab_pdf(report_generator, calculator, metrics, charts=None):
         "efficiency-resilience gradient relative to the indicative reference band, "
         "with direction of travel. " + _pdf_gradient(alpha)['caveat'], s_caption))
 
-    # ── Charts ──
-    # Professional figure caption mapping: chart_name -> interpretive note
+    # ── Window-of-Viability / robustness curve (most important credibility
+    #    visual). Prefer the native matplotlib builder; fall back to the
+    #    Plotly robustness curve via kaleido if matplotlib is unavailable.
+    _wov_num = [0]  # figure counter carried into 3.3
+
+    def _build_wov_image():
+        try:
+            from visualizer import SustainabilityVisualizer as _SV
+        except Exception:
+            from src.visualizer import SustainabilityVisualizer as _SV
+        try:
+            viz = _SV(calculator)
+            mpl_fig = viz.plot_sustainability_curve_matplotlib(figsize=(11, 4.5))
+            img = _mpl_image(mpl_fig, width=CONTENT_W * 0.95, height=CONTENT_W * 0.95 * 4.5 / 11)
+            if img is not None:
+                return img
+            # Fallback: plotly robustness curve through kaleido
+            return _chart_image(viz.create_robustness_curve(),
+                                width=CONTENT_W * 0.9, height=250)
+        except Exception:
+            return None
+
+    if _guarded_chart_block(
+            _build_wov_image,
+            "<i>Figure 1. Window of Viability &amp; Robustness Curve</i> — Left: the "
+            "organization's ascendency (A) versus development capacity (C) with the "
+            "green band marking the empirical window of viability. Right: key "
+            "sustainability metrics. This visual anchors the efficiency&ndash;resilience "
+            "trade-off central to the Ulanowicz-Fath framework.",
+            story):
+        _wov_num[0] = 1
+
+    # ── 3.3 Visualizations ──
+    # Self-sufficient: charts are built internally from the calculator so the
+    # report embeds real images even when the caller passes charts=None
+    # (previously this whole block was skipped -> zero images in the PDF).
+    # Any caller-supplied plotly figures are embedded in addition.
     _figure_notes = {
         "System Robustness Curve": "The organization's position (red marker) relative to the theoretical robustness function R = -α·log(α), with the empirical optimum at α ≈ 0.37.",
         "Core Metrics Analysis": "Comparative bar chart of key information-theoretic indicators, enabling rapid identification of metrics that deviate from healthy-system benchmarks.",
         "Flow Distribution": "Distribution of resource flows across the top network nodes, illustrating concentration patterns and potential structural dependencies.",
     }
+
+    story.append(Paragraph("3.3 Visualizations", s_h2))
+    fig_num = [_wov_num[0]]  # continue numbering after the WoV figure
+
+    # (a) Internal flow / Sankey diagram built from the calculator.
+    def _build_flow_image():
+        try:
+            from visualizer import SustainabilityVisualizer as _SV
+        except Exception:
+            from src.visualizer import SustainabilityVisualizer as _SV
+        viz = _SV(calculator)
+        return _chart_image(viz.create_sankey_diagram(),
+                            width=CONTENT_W * 0.95, height=300)
+
+    fig_num[0] += 1
+    _flow_ok = _guarded_chart_block(
+        _build_flow_image,
+        f"<i>Figure {fig_num[0]}. Network Flow Diagram (Sankey)</i> — Directed "
+        "resource flows between nodes, revealing structural pathways, hubs and "
+        "dependencies across the organizational network.",
+        story)
+    if not _flow_ok:
+        fig_num[0] -= 1  # don't burn a figure number on a skipped chart
+
+    # (b) Any caller-supplied plotly figures (app path).
+    embedded_any = _flow_ok or _wov_num[0] > 0
     if charts:
-        fig_num = 1
-        first_chart = True
         for chart_name, fig in charts.items():
             if fig is None:
                 continue
-            img = _chart_image(fig, width=CONTENT_W * 0.92, height=250)
-            if img:
-                note = _figure_notes.get(chart_name, f"Visualization of {chart_name.lower()} for the analyzed network.")
-                chart_block = [
-                    img,
-                    Paragraph(
-                        f"<i>Figure {fig_num}. {chart_name}</i> — {note}", s_caption),
-                ]
-                if first_chart:
-                    # Keep section heading with the first chart
-                    chart_block.insert(
-                        0, Paragraph("3.3 Visualizations", s_h2))
-                    first_chart = False
-                story.append(KeepTogether(chart_block))
-                fig_num += 1
-        if first_chart:
-            # No valid charts — still emit the heading
-            story.append(Paragraph("3.3 Visualizations", s_h2))
-            story.append(Paragraph(
-                "Chart images could not be generated for this report.",
-                s_body_italic))
+
+            def _build(_f=fig):
+                return _chart_image(_f, width=CONTENT_W * 0.92, height=250)
+
+            fig_num[0] += 1
+            note = _figure_notes.get(
+                chart_name,
+                f"Visualization of {chart_name.lower()} for the analyzed network.")
+            ok = _guarded_chart_block(
+                _build,
+                f"<i>Figure {fig_num[0]}. {chart_name}</i> — {note}",
+                story)
+            if ok:
+                embedded_any = True
+            else:
+                fig_num[0] -= 1
+
+    if not embedded_any:
+        story.append(Paragraph(
+            "Chart images could not be generated for this report.",
+            s_body_italic))
 
     # ── Remaining results text ──
     story.append(Paragraph("3.4 Flow Distribution Analysis", s_h2))
@@ -958,6 +1069,39 @@ def _build_reportlab_pdf(report_generator, calculator, metrics, charts=None):
         story.append(oasis_t)
         story.append(Paragraph(
             "<i>Table 4. OASIS Organizational Health Profile</i> — Composite scores across the five OASIS dimensions (Open, Autonomous, Symbiotic, Intelligent, Sustainable), with status indicators benchmarked against healthy-system thresholds.", s_caption))
+
+        # ── OASIS radar + dimension gauges (embedded images) ──
+        try:
+            from oasis_visualizer import (
+                create_oasis_radar_chart as _radar,
+                create_all_dimension_gauges as _gauges)
+        except Exception:
+            try:
+                from src.oasis_visualizer import (
+                    create_oasis_radar_chart as _radar,
+                    create_all_dimension_gauges as _gauges)
+            except Exception:
+                _radar = _gauges = None
+
+        if _radar is not None:
+            _guarded_chart_block(
+                lambda: _chart_image(
+                    _radar(scores, title="OASIS Health Profile"),
+                    width=CONTENT_W * 0.7, height=CONTENT_W * 0.7),
+                "<i>Figure O1. OASIS Radar</i> — Five-dimension health profile "
+                "(Open, Autonomous, Symbiotic, Intelligent, Sustainable) plotted "
+                "against healthy-system thresholds. A balanced pentagon indicates "
+                "well-rounded organizational health.",
+                story)
+        if _gauges is not None:
+            _guarded_chart_block(
+                lambda: _chart_image(
+                    _gauges(profile),
+                    width=CONTENT_W * 0.98, height=200),
+                "<i>Figure O2. OASIS Dimension Gauges</i> — Per-dimension scores "
+                "(0&ndash;100) with color-coded status bands for at-a-glance "
+                "identification of strengths and weaknesses.",
+                story)
 
         # Dimension interpretations
         story.append(Paragraph("4.1 Dimension Interpretations", s_h2))
