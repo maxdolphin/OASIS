@@ -68,6 +68,9 @@ Thumbs.db
 *.png
 *.pdf
 !docs/static_analysis.png
+# Business-revision audit evidence (dashboard screenshots + report PDFs) must be tracked
+!docs/business-revision/evidence/dashboards/*.png
+!docs/business-revision/evidence/reports/*.pdf
 
 # Temporary files
 temp/
