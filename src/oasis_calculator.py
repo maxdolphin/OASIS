@@ -797,6 +797,92 @@ class OASISCalculator:
             }
         }
 
+    # Ordered status bands for the roll-up band cap: CRITICAL < WARNING < HEALTHY
+    _STATUS_LEVELS = {'CRITICAL': 0, 'WARNING': 1, 'HEALTHY': 2}
+    _LEVEL_TO_STATUS = {0: 'CRITICAL', 1: 'WARNING', 2: 'HEALTHY'}
+
+    @classmethod
+    def _dimension_status(cls, dim: str, score: float) -> str:
+        """Per-dimension status band using HEALTH_THRESHOLDS (O9 logic)."""
+        thresholds = cls.HEALTH_THRESHOLDS[dim]
+        if score >= thresholds['healthy'][0]:
+            return 'HEALTHY'
+        elif score >= thresholds['warning'][0]:
+            return 'WARNING'
+        return 'CRITICAL'
+
+    @classmethod
+    def compute_overall_status(cls, scores: Dict[str, float],
+                               weights: Optional[Dict[str, float]] = None) -> Dict[str, Any]:
+        """
+        Compute the overall OASIS status with the dimension-agnostic worst-dimension
+        band cap veto.
+
+        Rule (expert-guided, see docs/business-revision/evidence/expert-org-management.md
+        section 2 and expert-ecosystem-dynamics.md):
+            Order bands CRITICAL=0 < WARNING=1 < HEALTHY=2.
+            - raw_overall_level from the weighted mean (>=60 HEALTHY / >=40 WARNING / else CRITICAL)
+            - each dimension's level from HEALTH_THRESHOLDS
+            - worst_dim_level = min(level over the 5 dimensions)
+            - final_overall_level = min(raw_overall_level, worst_dim_level + 1)
+              ("overall can never be more than one band above the worst dimension")
+            - the numeric overall score is UNCHANGED; only the STATUS LABEL is capped.
+
+        Args:
+            scores: dict of dimension -> 0..100 score (open/autonomous/symbiotic/
+                    intelligent/sustainable).
+            weights: optional dimension weights; defaults to DEFAULT_WEIGHTS.
+
+        Returns:
+            dict with:
+                overall_score: weighted mean (unchanged by the cap)
+                raw_overall_status: label before the cap
+                overall_status: final label after the cap
+                dimension_status: per-dimension status labels
+                capped: whether the cap lowered the label
+                capped_by: dimension(s) at the worst band that drove the cap
+                           (empty list if no cap applied)
+        """
+        if weights is None:
+            weights = cls.DEFAULT_WEIGHTS
+
+        # Weighted-mean numeric score (unchanged by the cap).
+        overall = sum(scores[dim] * weights[dim] for dim in scores)
+
+        # Raw overall band from the score, exactly as before.
+        if overall >= 60:
+            raw_level = cls._STATUS_LEVELS['HEALTHY']
+        elif overall >= 40:
+            raw_level = cls._STATUS_LEVELS['WARNING']
+        else:
+            raw_level = cls._STATUS_LEVELS['CRITICAL']
+
+        # Per-dimension bands.
+        dim_status = {dim: cls._dimension_status(dim, score)
+                      for dim, score in scores.items()}
+        dim_levels = {dim: cls._STATUS_LEVELS[s] for dim, s in dim_status.items()}
+
+        worst_dim_level = min(dim_levels.values())
+
+        # Band cap: overall can never be more than one band above the worst dimension.
+        final_level = min(raw_level, worst_dim_level + 1)
+
+        capped = final_level < raw_level
+        # Dimensions sitting at the worst band are the ones that drove the cap.
+        capped_by = (
+            sorted(dim for dim, lvl in dim_levels.items() if lvl == worst_dim_level)
+            if capped else []
+        )
+
+        return {
+            'overall_score': overall,
+            'raw_overall_status': cls._LEVEL_TO_STATUS[raw_level],
+            'overall_status': cls._LEVEL_TO_STATUS[final_level],
+            'dimension_status': dim_status,
+            'capped': capped,
+            'capped_by': capped_by,
+        }
+
     def get_oasis_profile(self) -> Dict[str, Any]:
         """
         Calculate complete OASIS profile with all dimension scores.
@@ -824,31 +910,14 @@ class OASISCalculator:
             'sustainable': sustainable_result['score']
         }
 
-        # Calculate weighted overall score
-        overall = sum(
-            scores[dim] * self.weights[dim]
-            for dim in scores
-        )
+        # Compute the weighted overall score, per-dimension status, and the
+        # worst-dimension band cap on the overall status label. The numeric
+        # overall score is the weighted mean and is UNCHANGED by the cap.
+        rollup = self.compute_overall_status(scores, self.weights)
 
-        # Determine status for each dimension
-        def get_status(dim: str, score: float) -> str:
-            thresholds = self.HEALTH_THRESHOLDS[dim]
-            if score >= thresholds['healthy'][0]:
-                return 'HEALTHY'
-            elif score >= thresholds['warning'][0]:
-                return 'WARNING'
-            else:
-                return 'CRITICAL'
-
-        status = {dim: get_status(dim, score) for dim, score in scores.items()}
-
-        # Overall status
-        if overall >= 60:
-            overall_status = 'HEALTHY'
-        elif overall >= 40:
-            overall_status = 'WARNING'
-        else:
-            overall_status = 'CRITICAL'
+        overall = rollup['overall_score']
+        status = rollup['dimension_status']
+        overall_status = rollup['overall_status']
 
         return {
             'dimension_scores': scores,
@@ -862,7 +931,11 @@ class OASISCalculator:
             'overall_score': overall,
             'weights': self.weights.copy(),
             'dimension_status': status,
-            'overall_status': overall_status
+            'overall_status': overall_status,
+            # Roll-up band cap veto metadata (worst-dimension cap):
+            'raw_overall_status': rollup['raw_overall_status'],
+            'overall_status_capped': rollup['capped'],
+            'capped_by': rollup['capped_by']
         }
 
     def get_oasis_interpretation(self) -> Dict[str, str]:

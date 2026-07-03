@@ -950,6 +950,27 @@ class OASISPDFReport:
         warning_n = sum(1 for s in dim_status.values() if s == 'WARNING')
         critical_n = sum(1 for s in dim_status.values() if s == 'CRITICAL')
 
+        # Roll-up band cap explanation: the overall label can never sit more than
+        # one band above the worst-performing dimension.
+        cap_note = ""
+        if self.profile.get('overall_status_capped') and self.profile.get('capped_by'):
+            dim_labels_cap = {
+                'open': 'Open', 'autonomous': 'Autonomous', 'symbiotic': 'Symbiotic',
+                'intelligent': 'Intelligent', 'sustainable': 'Sustainable',
+            }
+            capped_names = ', '.join(
+                dim_labels_cap.get(d, d.capitalize()) for d in self.profile['capped_by']
+            )
+            raw_status = self.profile.get('raw_overall_status', overall_status)
+            cap_note = (
+                f"<p><em>Note: although the weighted mean alone would classify the "
+                f"organization as <strong>{raw_status}</strong>, the overall status is "
+                f"capped at <strong>{overall_status}</strong> because the "
+                f"<strong>{capped_names}</strong> dimension(s) are the weakest band. "
+                f"An organization cannot be rated more than one health band above its "
+                f"worst-performing dimension.</em></p>"
+            )
+
         return f"""
         <div class="page-break"></div>
 
@@ -985,6 +1006,7 @@ class OASISPDFReport:
             Of the five assessment dimensions, {healthy_n} are in healthy range,
             {warning_n} require attention, and {critical_n} are critical.
         </p>
+        {cap_note}
         {self._build_key_findings_bullets()}
         """
 
