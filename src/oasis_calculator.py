@@ -195,17 +195,39 @@ class OASISCalculator:
             'autocatalytic_index': autocatalytic_index
         }
 
+    # Condition-number cutoff for the integral-utility inversion. Real flow
+    # networks yield cond(I - D) < ~10; a value this large signals a near-singular
+    # (I - D) whose inverse would blow up (e.g. det ~ 1e-6 -> U ~ 1e6 -> b:c
+    # explodes). We fall back to direct-only above this cutoff. (E-scale margin:
+    # ~5-6 orders above any observed real-network condition number.)
+    _INTEGRAL_UTILITY_COND_MAX = 1e6
+
     def _build_direct_utility_matrix(self) -> np.ndarray:
         """
         Patten direct utility matrix D.
 
             d_ij = (f_ij - f_ji) / T_i
 
-        where T_i is the throughflow of node i (row sum of outgoing flows here; for a
-        balanced network in = out, so the row sum is the standard throughflow proxy).
-        A zero-throughflow node yields a zero row (no self-referential utility).
+        where T_i is the throughflow of node i.
 
-        Reference: Fath et al. (2019) Principle 8; Patten integral-utility theory.
+        THROUGHFLOW CAVEAT (research-integrity note): this uses T_i = the internal
+        row-sum of outgoing flows (internal outgoing throughflow) as a proxy for
+        Patten throughflow. It OMITS boundary imports/exports (which a full Patten
+        analysis includes in T_i = inflow + internal + outflow). This is an
+        internal-flow-only-data proxy appropriate when the engine holds only the
+        internal flow matrix; where boundary vectors are available a full
+        throughflow should be substituted. A zero-throughflow node yields a zero
+        row (no self-referential utility).
+
+        References for the utility-analysis convention:
+          - Patten's environ / utility analysis (Patten 1991, 1992).
+          - Fath, B.D. & Patten, B.C. (1998) "Network mutualism: Positive
+            community-level relations in ecosystems," Ecol. Modelling 107:127-143.
+          - As generalized to organizations in Fath et al. (2019) Principle 8.
+        NOTE: the primary Patten sources (Patten 1991/1992; Fath & Patten 1998) are
+        NOT present in the local `_papers/` corpus; only Fath et al. (2019), which
+        cites and applies them, is on hand. The construction here follows the
+        convention as reported in Fath (2019) P8.
         """
         flow_matrix = self.ulanowicz.flow_matrix
         n = self.ulanowicz.n_nodes
@@ -232,11 +254,22 @@ class OASISCalculator:
         This is Patten's integral-utility construction:
 
             Direct utility     D:  d_ij = (f_ij - f_ji) / T_i
-            Integral utility   U = (I - D)^(-1)      (guarded against singularity)
-            Network mutualism b:c = sum(U > 0) / |sum(U < 0)|   (>1 => net mutualistic)
+            Integral utility   U = (I - D)^(-1)      (guarded against ill-conditioning)
+            Network mutualism b:c = sum(M > 0) / |sum(M < 0)|  over the OFF-DIAGONAL
+                                    of M (i != j), for M in {D, U}. (>1 => net
+                                    mutualistic.)
+
+        DIAGONAL EXCLUSION: the benefit:cost sums run over off-diagonal relational
+        pairings only (i != j). Network mutualism (Patten/Fath) is a property of
+        the relations BETWEEN nodes; the diagonal of U is self-utility / return
+        flow (always >= 0) and is not a "relation." Including it inflates the
+        numerator for every network (e.g. the 4-ring integral b:c reads 6.0 with
+        the diagonal but 3.0 without). Both D and U are aggregated the same way.
 
         The classic Patten result is that INDIRECT effects make relationships MORE
-        mutualistic than direct effects alone; hence integral b:c >= direct b:c.
+        mutualistic than direct effects alone; hence integral b:c >= direct b:c on
+        a network with indirect paths. With NO indirect path (a 2-node network) the
+        integral b:c EQUALS the direct b:c (no network-mutualism lift).
 
         The original direct-only reciprocity is retained as `direct_mutualism`
         (== the legacy `mutualism_ratio`) for back-compat and transparency.
@@ -282,36 +315,48 @@ class OASISCalculator:
 
         weighted_ratio = weighted_mutual / weighted_total if weighted_total > 0 else 0
 
-        # ---- Direct benefit:cost ratio from the direct utility matrix D ----
+        def _off_diagonal_bc(M: np.ndarray) -> float:
+            """Benefit:cost ratio over OFF-DIAGONAL entries (i != j) of M.
+            The diagonal (self-utility) is excluded — see method docstring."""
+            M = np.array(M, dtype=float)
+            np.fill_diagonal(M, 0.0)
+            pos = float(np.sum(M[M > 0]))
+            neg = float(np.abs(np.sum(M[M < 0])))
+            if neg > 0:
+                return pos / neg
+            return float('inf') if pos > 0 else 0.0
+
+        # ---- Direct benefit:cost ratio (off-diagonal of D) -----------------
         D = self._build_direct_utility_matrix()
-        direct_pos = float(np.sum(D[D > 0]))
-        direct_neg = float(np.abs(np.sum(D[D < 0])))
-        direct_bc = (direct_pos / direct_neg) if direct_neg > 0 else (
-            float('inf') if direct_pos > 0 else 0.0)
+        direct_bc = _off_diagonal_bc(D)
 
         # ---- Integral (direct + indirect) utility U = (I - D)^-1 -----------
+        # Guard against a near-singular (I - D): a plain det<tiny test misses
+        # ill-conditioned blow-ups (det ~ 1e-6 -> U ~ 1e6 -> b:c explodes). Use a
+        # condition-number test and fall back to direct-only on ill-conditioning.
         fallback = False
         U = None
-        integral_pos = direct_pos
-        integral_neg = direct_neg
+        IminusD = np.eye(n_nodes) - D
         try:
-            I = np.eye(n_nodes)
-            # Guard: only invert if well-conditioned (non-singular).
-            IminusD = I - D
-            if abs(np.linalg.det(IminusD)) < 1e-12:
-                raise np.linalg.LinAlgError("(I - D) is singular")
-            U = np.linalg.inv(IminusD)
-            integral_pos = float(np.sum(U[U > 0]))
-            integral_neg = float(np.abs(np.sum(U[U < 0])))
+            cond = np.linalg.cond(IminusD)
         except np.linalg.LinAlgError:
-            # Fall back to direct-only with a flag; do not raise.
+            cond = np.inf
+        if not np.isfinite(cond) or cond > self._INTEGRAL_UTILITY_COND_MAX:
             fallback = True
-            U = None
-            integral_pos = direct_pos
-            integral_neg = direct_neg
+        else:
+            try:
+                U = np.linalg.inv(IminusD)
+                if not np.all(np.isfinite(U)):
+                    raise np.linalg.LinAlgError("non-finite U")
+            except np.linalg.LinAlgError:
+                fallback = True
+                U = None
 
-        integral_bc = (integral_pos / integral_neg) if integral_neg > 0 else (
-            float('inf') if integral_pos > 0 else 0.0)
+        if fallback:
+            # Fall back to the direct component (no crash, flagged).
+            integral_bc = direct_bc
+        else:
+            integral_bc = _off_diagonal_bc(U)
 
         # Normalize the integral b:c to [0,1] for use as a dimension input:
         # bc/(1+bc) maps [0, inf) -> [0, 1), with bc=1 (break-even) -> 0.5.
