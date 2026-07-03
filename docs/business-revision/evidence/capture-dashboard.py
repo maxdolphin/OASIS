@@ -7,7 +7,12 @@ Drives http://localhost:8501/ in a headless Chrome (remote-debugging-port=9222):
   3. Iterates every "Analysis Sections" radio option, screenshotting each full page.
 
 Usage:
-    python3 capture-dashboard.py "<org sidebar label>" <filename-prefix>
+    python3 capture-dashboard.py "<org sidebar label>" <filename-prefix> [--tab <name>]
+
+Options:
+    --tab <name>   Click a sample-data sub-tab (e.g. "ecosystem") whose button
+                   innerText matches the given regex before locating the org card.
+                   Ecological reference networks live under the "Ecosystems" tab.
 
 Requires: websocket-client, a running Streamlit app on :8501, Chrome CDP on :9222.
 """
@@ -74,6 +79,11 @@ def main():
         sys.exit(2)
     org_label = sys.argv[1]
     prefix = sys.argv[2]
+    tab_regex = None
+    if "--tab" in sys.argv:
+        i = sys.argv.index("--tab")
+        if i + 1 < len(sys.argv):
+            tab_regex = sys.argv[i + 1]
     os.makedirs(OUT_DIR, exist_ok=True)
 
     ws = get_page_ws()
@@ -105,6 +115,26 @@ def main():
     )
     print(f"[sample-data] {clicked}")
     time.sleep(WAIT_AFTER_SAMPLE)
+
+    # 1b. Optionally click a sample-data sub-tab (e.g. Ecosystems) before finding the card.
+    if tab_regex:
+        tab_js = json.dumps(tab_regex)
+        tab_clicked = ev(
+            r"""
+            (function(){
+              var rx = new RegExp(%s, 'i');
+              var tabs = Array.from(document.querySelectorAll('button[role="tab"], [role="tab"], button'));
+              var t = tabs.find(function(x){ return rx.test(x.innerText||''); });
+              if(!t) return 'NO_TAB';
+              t.scrollIntoView();
+              t.click();
+              return 'OK:'+(t.innerText||'').trim();
+            })()
+            """
+            % tab_js
+        )
+        print(f"[tab:{tab_regex}] {tab_clicked}")
+        time.sleep(4)
 
     # 2. Find and click the Analyze button whose ancestor container mentions the org.
     org_js = json.dumps(org_label)
@@ -150,6 +180,20 @@ def main():
         "(function(){var t=document.body.innerText||''; return t.indexOf(%s)>=0;})()" % org_js
     )
     print(f"[verify-org-in-page] {org_present}")
+
+    # Report the sustainability verdict so the operator can confirm viability.
+    verdict = ev(
+        r"""
+        (function(){
+          var b=document.body.innerText||'';
+          var m=b.match(/(VIABLE|UNSUSTAINABLE)[^\n|]{0,60}/i);
+          var a=b.match(/α=\s*([0-9.]+)/);
+          return JSON.stringify({verdict:m?m[0].trim():'?', alpha:a?a[1]:'?',
+            has_viable:b.indexOf('VIABLE')>=0, has_unsustainable:b.indexOf('UNSUSTAINABLE')>=0});
+        })()
+        """
+    )
+    print(f"[viability] {verdict}")
 
     # 3. Enumerate the "Analysis Sections" radio options.
     sections = ev(
