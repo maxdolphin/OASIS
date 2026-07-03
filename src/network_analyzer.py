@@ -129,10 +129,16 @@ class AdvancedNetworkAnalyzer:
         except:
             centralities['pagerank'] = {i: 1/self.n_nodes for i in range(self.n_nodes)}
         
-        # Katz centrality (considers all paths)
+        # Katz centrality (considers all paths).
+        # Katz converges only for alpha < 1/lambda_max(A) (Newman, Networks §7.3).
+        # A FIXED alpha=0.1 overflows/diverges on dense or strong-flow graphs where
+        # lambda_max is large (validation N7). Use an ADAPTIVE alpha = 0.9/lambda_max
+        # (a safe margin below the 1/lambda_max bound); fall back to degree
+        # centrality if lambda_max cannot be computed or Katz still fails.
         try:
+            alpha = self._katz_alpha(self.G)
             centralities['katz'] = nx.katz_centrality(
-                self.G, weight='weight', alpha=0.1, normalized=True
+                self.G, weight='weight', alpha=alpha, normalized=True
             )
         except:
             centralities['katz'] = centralities['total_degree']
@@ -203,6 +209,28 @@ class AdvancedNetworkAnalyzer:
         return results
     
     @staticmethod
+    def _katz_alpha(G, margin: float = 0.9, default: float = 0.1) -> float:
+        """Convergence-safe Katz attenuation factor alpha.
+
+        Katz centrality converges iff alpha < 1/lambda_max(A), where lambda_max is
+        the largest-magnitude eigenvalue of the (weighted) adjacency matrix. A fixed
+        alpha (0.1) diverges on dense/strong-flow graphs with large lambda_max. We
+        set alpha = margin / lambda_max (margin=0.9, i.e. 90% of the theoretical
+        bound). Falls back to `default` if lambda_max is non-finite/non-positive or
+        the eigenvalue computation fails (e.g. empty graph).
+        """
+        try:
+            A = nx.to_numpy_array(G, weight='weight')
+            if A.size == 0:
+                return default
+            lambda_max = float(max(abs(np.linalg.eigvals(A))))
+            if not np.isfinite(lambda_max) or lambda_max <= 0:
+                return default
+            return margin / lambda_max
+        except Exception:
+            return default
+
+    @staticmethod
     def _mean_degree(G_undirected) -> float:
         """Mean degree <k> of an undirected graph = 2m/n.
 
@@ -248,12 +276,26 @@ class AdvancedNetworkAnalyzer:
         # Convert to undirected for analysis
         G_undirected = self.G.to_undirected()
         
-        # Actual metrics
+        # Actual metrics.
+        # BASE CONSISTENCY (FIX D follow-up): the small-world sigma/omega triple
+        # compares C against an UNWEIGHTED equivalent-lattice clustering
+        # (_lattice_clustering) and an UNWEIGHTED hop-count path length L. The C
+        # in that triple must therefore also be UNWEIGHTED (topological Watts-
+        # Strogatz clustering). Using the WEIGHTED Onnela clustering there mixes a
+        # weighted C with an unweighted C_lattice/L, deflating C/C_lattice
+        # (~2x on typical weighted graphs) and biasing omega toward "random".
+        # We keep the Onnela weighted clustering available separately for any
+        # consumer that reports it.
         try:
-            actual_clustering = nx.average_clustering(G_undirected, weight='weight')
+            actual_clustering = nx.average_clustering(G_undirected)  # unweighted
         except:
             actual_clustering = 0
-        
+
+        try:
+            weighted_clustering = nx.average_clustering(G_undirected, weight='weight')
+        except:
+            weighted_clustering = 0
+
         try:
             if nx.is_connected(G_undirected):
                 actual_path_length = nx.average_shortest_path_length(G_undirected)
@@ -311,7 +353,8 @@ class AdvancedNetworkAnalyzer:
             omega = 0
 
         metrics = {
-            'clustering_coefficient': actual_clustering,
+            'clustering_coefficient': actual_clustering,  # unweighted, used in sigma/omega
+            'weighted_clustering_coefficient': weighted_clustering,  # Onnela, reported separately
             'average_path_length': actual_path_length,
             'random_clustering': random_clustering,
             'random_path_length': random_path_length,

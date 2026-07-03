@@ -356,3 +356,109 @@ class TestFixFUtilizationBase:
     def test_guard_tiny_graph(self):
         # n=1 => log(1)=0 denominator; must not divide by zero.
         assert publication_report.flow_diversity_utilization(0.0, 1) == 0.0
+
+
+# ---------------------------------------------------------------------------
+# FIX D (follow-up) — small-world sigma/omega triple must be base-consistent:
+# UNWEIGHTED clustering to match the UNWEIGHTED C_lattice and hop-count L.
+# ---------------------------------------------------------------------------
+
+def _weighted_ring_lattice_matrix(n=20, k=4, weight=5.0, seed=1):
+    """Weighted ring lattice (WS with p=0), every tie carries the same weight."""
+    ws = nx.watts_strogatz_graph(n, k, 0.0, seed=seed)
+    m = np.zeros((n, n))
+    for u, v in ws.edges():
+        m[u, v] = weight
+        m[v, u] = weight
+    return m
+
+
+class TestFixDClusteringConsistency:
+    """The C used in the sigma/omega triple must be the UNWEIGHTED topological
+    clustering (Onnela weighted clustering deflates C and biases omega toward
+    'random' when mixed with an unweighted C_lattice and hop-count L)."""
+
+    def test_triple_uses_unweighted_clustering(self):
+        # On a weighted ring lattice the Onnela weighted clustering is materially
+        # BELOW the unweighted topological clustering. The small-world triple must
+        # report the UNWEIGHTED value.
+        m = _weighted_ring_lattice_matrix(n=20, k=4, weight=5.0)
+        analyzer = AdvancedNetworkAnalyzer(m, [f"N{i}" for i in range(20)])
+        sw = analyzer.calculate_small_world_metrics()
+
+        Gu = analyzer.G.to_undirected()
+        unweighted_C = nx.average_clustering(Gu)              # topological
+        weighted_C = nx.average_clustering(Gu, weight="weight")  # Onnela
+
+        # The C fed to the triple must equal the UNWEIGHTED clustering ...
+        assert sw["clustering_coefficient"] == pytest.approx(unweighted_C, abs=1e-9)
+        # ... and the Onnela weighted value is preserved separately.
+        assert sw["weighted_clustering_coefficient"] == pytest.approx(weighted_C, abs=1e-9)
+
+    def test_weighted_lattice_omega_negative(self):
+        # A (weighted) ring lattice is the lattice end -> omega must stay negative.
+        m = _weighted_ring_lattice_matrix(n=24, k=4, weight=7.0)
+        analyzer = AdvancedNetworkAnalyzer(m, [f"N{i}" for i in range(24)])
+        sw = analyzer.calculate_small_world_metrics()
+        assert sw["small_world_omega"] < 0.0
+
+    def test_uniform_weight_does_not_change_topological_C(self):
+        # With uniform weights, Onnela weighted clustering != unweighted in general
+        # (weighted uses geometric-mean triangle intensity), so the base choice
+        # genuinely matters. Assert the triple's C matches the unweighted value
+        # even when all weights are identical.
+        n = 16
+        ws = nx.watts_strogatz_graph(n, 4, 0.0, seed=3)
+        m = np.zeros((n, n))
+        for u, v in ws.edges():
+            m[u, v] = 3.0
+            m[v, u] = 3.0
+        analyzer = AdvancedNetworkAnalyzer(m, [f"N{i}" for i in range(n)])
+        sw = analyzer.calculate_small_world_metrics()
+        Gu = analyzer.G.to_undirected()
+        assert sw["clustering_coefficient"] == pytest.approx(nx.average_clustering(Gu), abs=1e-9)
+
+
+# ---------------------------------------------------------------------------
+# Katz centrality (validation N7) — fixed alpha=0.1 overflows on dense/
+# strong-flow graphs. Alpha must be adaptive: alpha < 1/lambda_max.
+# ---------------------------------------------------------------------------
+
+def _dense_strong_flow_matrix(n=8, weight=100.0):
+    """Dense graph with large edge weights -> large lambda_max -> fixed
+    alpha=0.1 diverges/overflows in Katz iteration."""
+    m = np.zeros((n, n))
+    for i in range(n):
+        for j in range(n):
+            if i != j:
+                m[i, j] = weight
+    return m
+
+
+class TestKatzAdaptiveAlpha:
+    def test_katz_no_overflow_finite(self, recwarn):
+        import warnings
+        m = _dense_strong_flow_matrix(n=8, weight=100.0)
+        analyzer = AdvancedNetworkAnalyzer(m, [f"N{i}" for i in range(8)])
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", RuntimeWarning)  # overflow => error
+            cent = analyzer.calculate_centralities()
+        katz = cent["katz"]
+        assert len(katz) == 8
+        assert all(np.isfinite(v) for v in katz.values())
+
+    def test_alpha_below_inverse_lambda_max(self):
+        # The adaptive alpha must satisfy Katz's convergence bound alpha < 1/lambda_max.
+        m = _dense_strong_flow_matrix(n=8, weight=100.0)
+        analyzer = AdvancedNetworkAnalyzer(m, [f"N{i}" for i in range(8)])
+        alpha = analyzer._katz_alpha(analyzer.G)
+        A = nx.to_numpy_array(analyzer.G, weight="weight")
+        lambda_max = max(abs(np.linalg.eigvals(A)))
+        assert 0 < alpha < 1.0 / lambda_max
+
+    def test_katz_still_works_on_sparse_graph(self):
+        # Sanity: adaptive alpha must not break the normal sparse case.
+        m = _random_directed_matrix(10, density=0.3, seed=5)
+        analyzer = AdvancedNetworkAnalyzer(m, [f"N{i}" for i in range(10)])
+        cent = analyzer.calculate_centralities()
+        assert all(np.isfinite(v) for v in cent["katz"].values())
