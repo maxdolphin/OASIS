@@ -399,36 +399,193 @@ def build_action_roadmap(recommendations: List[Dict[str, Any]],
     return horizons
 
 
-# Indicative qualitative crosswalk (navigation/credibility aid, NOT a compliance map)
+# ---------------------------------------------------------------------------
+# ESG FRAMEWORK CROSSWALK — indicative structural-lens mapping (NOT compliance)
+# ---------------------------------------------------------------------------
+# This is a FINDING-SPECIFIC crosswalk: it reads OASIS *structure* (how the org
+# is wired) and points to the disclosure areas that structural evidence informs.
+# It is NOT a compliance mapping and does NOT attest to any GRI/ESRS/TCFD
+# requirement. Where a framework code is a genuine analogue rather than a direct
+# disclosure (notably TCFD, a climate-financial framework, against non-climate
+# structural findings) it is flagged `contextual` and carries an explicit caveat
+# — never presented as a direct disclosure. The dimension->construct mapping
+# follows docs/business-revision/evidence/expert-org-management.md §3.2.
+INDICATIVE_ESG_CAVEAT = (
+    "Indicative structural-lens crosswalk — not a compliance attestation. It maps "
+    "OASIS network-structure findings to the disclosure areas they inform; it does "
+    "not verify, satisfy, or attest to any GRI, ESRS/CSRD, or TCFD requirement."
+)
+
+# Real framework structure used below (series/pillar granularity, no invented codes):
+#   GRI 2 (General Disclosures 2021): 2-13 delegation, 2-16 critical concerns,
+#         2-17 collective knowledge of the highest governance body, 2-29 stakeholder
+#         engagement. GRI 3 (Material Topics 2021): 3-3 management of material topics.
+#         GRI 401 Employment; GRI 404 Training & education.
+#   ESRS 2 General Disclosures: GOV-1 role/expertise of admin bodies, GOV-2 information
+#         to bodies, SBM-2 stakeholder interests/views, SBM-3 material IROs & business-
+#         model resilience, IRO-1 process to identify/assess IROs. ESRS S1 Own workforce;
+#         ESRS G1 Business conduct.
+#   TCFD pillars: Governance, Strategy, Risk Management, Metrics & Targets (climate-scoped).
 _ESG_CROSSWALK = {
-    'OPEN':        {'gri': 'GRI 2-9/2-29 (governance, stakeholder engagement)',
-                    'esrs': 'ESRS 2 GOV/SBM (strategy & stakeholder interaction)',
-                    'tcfd': 'Governance (board oversight of interconnected risks)',
-                    'theme': 'interconnectivity and information circulation'},
-    'AUTONOMOUS':  {'gri': 'GRI 3-3 (management of material topics)',
-                    'esrs': 'ESRS 2 IRO (impact, risk & opportunity management)',
-                    'tcfd': 'Risk Management (processes to identify/learn)',
-                    'theme': 'organizational learning and feedback'},
-    'SYMBIOTIC':   {'gri': 'GRI 3-3 / 207 (equitable value distribution)',
-                    'esrs': 'ESRS S/G (own workforce, business conduct)',
-                    'tcfd': 'Strategy (resource dependencies)',
-                    'theme': 'resource equity and mutualism'},
-    'INTELLIGENT': {'gri': 'GRI 2-17 (collective knowledge of governance body)',
-                    'esrs': 'ESRS 2 GOV (skills/expertise of administrative bodies)',
-                    'tcfd': 'Governance (competencies to assess risk)',
-                    'theme': 'functional diversity and capability'},
-    'SUSTAINABLE': {'gri': 'GRI 201-2 (financial implications/risks of change)',
-                    'esrs': 'ESRS 2 SBM-3 (resilience of strategy & business model)',
-                    'tcfd': 'Strategy — Resilience (scenario/long-term viability)',
-                    'theme': 'efficiency/resilience balance (Window of Viability)'},
+    'OPEN': {
+        'construct': 'boundary-spanning / information circulation / stakeholder connectivity',
+        'theme': 'interconnectivity and information circulation',
+        'frameworks': [
+            {'standard': 'GRI', 'code': 'GRI 2-29, 2-16',
+             'label': 'Approach to stakeholder engagement; communication of critical concerns'},
+            {'standard': 'ESRS', 'code': 'ESRS 2 SBM-2, GOV-2',
+             'label': 'Interests/views of stakeholders; information flow to administrative bodies'},
+            {'standard': 'TCFD', 'code': 'Governance',
+             'label': 'Board oversight — the channels by which risk/opportunity information reaches oversight',
+             'contextual': True,
+             'caveat': 'TCFD is climate-scoped; used here as a structural analogue for '
+                       'information-flow-to-oversight, not a climate disclosure.'},
+        ],
+        'disclosure_relevance': (
+            'Open (boundary-spanning and information circulation) evidences whether the '
+            'stakeholder-engagement and information-flow processes disclosed under GRI 2-29 '
+            'and ESRS 2 SBM-2/GOV-2 actually carry information across the organization and up '
+            'to its oversight bodies — the structural substrate beneath those qualitative claims.'),
+    },
+    'AUTONOMOUS': {
+        'construct': 'distributed decision rights / empowerment / feedback loops',
+        'theme': 'organizational learning and devolved decision-making',
+        'frameworks': [
+            {'standard': 'GRI', 'code': 'GRI 2-13, 3-3',
+             'label': 'Delegation of responsibility for managing impacts; management of material topics'},
+            {'standard': 'ESRS', 'code': 'ESRS 2 GOV-1, IRO-1',
+             'label': 'Role of administrative bodies; process to identify/assess/manage impacts, risks & opportunities'},
+            {'standard': 'TCFD', 'code': 'Risk Management',
+             'label': 'Processes to identify, assess and manage risks — whether detection/response is embedded and devolved',
+             'contextual': True,
+             'caveat': 'TCFD Risk Management is climate-scoped; the structural reading of '
+                       'devolved risk-detection is an analogue, not a climate disclosure.'},
+        ],
+        'disclosure_relevance': (
+            'Autonomous (distributed decision rights and feedback loops) informs how '
+            'responsibility for managing impacts is delegated (GRI 2-13, ESRS 2 GOV-1) and '
+            'whether risk identification and response are embedded across the organization '
+            'rather than centralized (ESRS IRO-1; TCFD Risk Management as an analogue).'),
+    },
+    'SYMBIOTIC': {
+        'construct': 'cross-functional collaboration / relational coordination / reciprocity',
+        'theme': 'cross-functional reciprocity and relational coordination',
+        'frameworks': [
+            {'standard': 'GRI', 'code': 'GRI 3-3, 401',
+             'label': 'Management of material social topics; employment / relational conditions'},
+            {'standard': 'ESRS', 'code': 'ESRS S1; G1',
+             'label': 'Own workforce (social dialogue, working conditions); corporate culture / business conduct'},
+            {'standard': 'TCFD', 'code': 'Governance (contextual)',
+             'label': 'Cross-functional collaboration is not a direct TCFD disclosure',
+             'contextual': True,
+             'caveat': 'TCFD is a climate-financial framework; cross-functional collaboration '
+                       'is shown only as contextual organizational-resilience input, not a TCFD disclosure.'},
+        ],
+        'disclosure_relevance': (
+            'Symbiotic (cross-functional reciprocity and relational coordination) evidences '
+            'the collaboration and relational conditions in the own workforce that underlie '
+            'ESRS S1 social disclosures and the corporate-culture element of ESRS G1 / GRI 3-3 '
+            '— the structural reciprocity beneath those qualitative social claims.'),
+    },
+    'INTELLIGENT': {
+        'construct': 'information-processing / learning / knowledge & functional diversity',
+        'theme': 'functional diversity and information-processing capacity',
+        'frameworks': [
+            {'standard': 'GRI', 'code': 'GRI 2-17, 404',
+             'label': 'Collective knowledge of the highest governance body; training & education'},
+            {'standard': 'ESRS', 'code': 'ESRS 2 GOV-1; S1',
+             'label': 'Expertise/skills of administrative bodies; skills development in own workforce'},
+            {'standard': 'TCFD', 'code': 'Governance',
+             'label': 'Board competencies to assess and oversee risk',
+             'contextual': True,
+             'caveat': 'TCFD scopes board competency to climate risk; used here as an analogue '
+                       'for information-processing capacity, not a climate-competency disclosure.'},
+        ],
+        'disclosure_relevance': (
+            'Intelligent (functional diversity and information-processing capacity) informs the '
+            'collective-knowledge and expertise conditions disclosed under GRI 2-17 and ESRS 2 '
+            'GOV-1 — the structural diversity that determines whether governance and workforce '
+            'bodies can actually process the matters they are disclosed as overseeing.'),
+    },
+    'SUSTAINABLE': {
+        'construct': 'structural balance / efficiency-vs-resilience / adaptive capacity',
+        'theme': 'efficiency/resilience structural balance (Window of Viability)',
+        'frameworks': [
+            {'standard': 'GRI', 'code': 'GRI 3-3',
+             'label': 'Management of the material topic of long-term organizational resilience',
+             'contextual': True,
+             'caveat': 'GRI has no dedicated structural-resilience disclosure; GRI 201-2 '
+                       '(financial implications of climate change) is deliberately NOT used — '
+                       'OASIS structural balance is not a climate-financial metric.'},
+            {'standard': 'ESRS', 'code': 'ESRS 2 SBM-3',
+             'label': 'Material impacts, risks & opportunities and the resilience of the business model'},
+            {'standard': 'TCFD', 'code': 'Strategy — Resilience',
+             'label': 'Resilience of the strategy',
+             'contextual': True,
+             'caveat': 'TCFD frames strategic resilience under climate scenarios; OASIS measures '
+                       'structural (network) resilience — a contextual analogue, not a '
+                       'climate-scenario disclosure.'},
+        ],
+        'disclosure_relevance': (
+            'Sustainable (efficiency/resilience structural balance — the Window of Viability) '
+            'provides a network-structural indicator of adaptive capacity that informs the '
+            'business-model-resilience narrative of ESRS 2 SBM-3. It is explicitly distinct '
+            'from the climate-financial risk addressed by GRI 201-2 / TCFD climate-scenario '
+            'analysis, which this structural framework does not measure.'),
+    },
 }
+
+
+def _esg_materiality(status: str) -> Dict[str, Any]:
+    """
+    Status-driven materiality flag: reflects THIS org's finding, not a static table.
+
+    CRITICAL -> flagged for attention (potentially material disclosure area);
+    WARNING  -> watch (emerging materiality signal);
+    HEALTHY  -> supporting evidence (structural conditions favorable);
+    otherwise -> not assessed. Reads the precomputed OASIS dimension status; it
+    recomputes nothing.
+    """
+    s = (status or 'N/A').upper()
+    if s == 'CRITICAL':
+        return {'flag': 'attention', 'material': True,
+                'label': 'Flagged for attention — potentially material disclosure area'}
+    if s == 'WARNING':
+        return {'flag': 'watch', 'material': True,
+                'label': 'Watch — emerging materiality signal in this disclosure area'}
+    if s == 'HEALTHY':
+        return {'flag': 'supporting', 'material': False,
+                'label': 'Supporting evidence — structural conditions favorable for this disclosure area'}
+    return {'flag': 'not_assessed', 'material': False,
+            'label': 'Not assessed'}
+
+
+def _esg_ref_string(frameworks: List[Dict[str, Any]], standard: str) -> str:
+    """Backward-compatible per-standard reference string (with contextual marker)."""
+    parts = []
+    for fw in frameworks:
+        if fw['standard'] != standard:
+            continue
+        code = fw['code']
+        if fw.get('contextual') and 'contextual' not in code.lower():
+            code = f"{code} (contextual)"
+        parts.append(code)
+    return '; '.join(parts) if parts else 'N/A'
 
 
 def build_esg_crosswalk(profile: Dict[str, Any],
                         metrics: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
-    Indicative crosswalk from OASIS findings to GRI/ESRS-CSRD/TCFD disclosure areas.
-    Qualitative navigation aid only — NOT a compliance attestation.
+    Finding-specific, status-driven crosswalk from OASIS structural findings to
+    GRI / ESRS-CSRD / TCFD disclosure areas.
+
+    For each of the five dimensions it returns: the relevant framework mappings
+    (with contextual caveats where a code is an analogue rather than a direct
+    disclosure), a disclosure-relevance sentence describing what the structural
+    finding informs, and a materiality flag driven by the org's ACTUAL dimension
+    status from the precomputed OASIS profile. This is an INDICATIVE structural
+    lens only — NOT a compliance attestation (see INDICATIVE_ESG_CAVEAT). No
+    scores or statuses are recomputed here.
     """
     scores = profile.get('dimension_scores', {})
     status = profile.get('dimension_status', {})
@@ -441,12 +598,19 @@ def build_esg_crosswalk(profile: Dict[str, Any],
         finding = (f"{dim.title()} ({cw['theme']}): "
                    + (f"score {sc:.0f}/100, status {stt}." if sc is not None
                       else "not assessed."))
+        frameworks = cw['frameworks']
         rows.append({
             'oasis_dimension': dim,
+            'construct': cw['construct'],
             'finding_summary': finding,
-            'gri_ref': cw['gri'],
-            'esrs_ref': cw['esrs'],
-            'tcfd_ref': cw['tcfd'],
+            'frameworks': frameworks,
+            'disclosure_relevance': cw['disclosure_relevance'],
+            'materiality': _esg_materiality(stt),
+            # backward-compatible per-standard strings for existing consumers:
+            'gri_ref': _esg_ref_string(frameworks, 'GRI'),
+            'esrs_ref': _esg_ref_string(frameworks, 'ESRS'),
+            'tcfd_ref': _esg_ref_string(frameworks, 'TCFD'),
+            'caveat': INDICATIVE_ESG_CAVEAT,
         })
     return rows
 

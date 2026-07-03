@@ -1582,36 +1582,65 @@ def _build_reportlab_pdf(report_generator, calculator, metrics, charts=None):
             # ---- 8. ESG Framework Mapping ----
             story.append(Paragraph("8. ESG Framework Mapping", s_h1))
             _sec_rule()
+            # Single source of truth for the caveat (report_intelligence).
+            _esg_caveat = getattr(
+                _ri, 'INDICATIVE_ESG_CAVEAT',
+                "Indicative structural-lens crosswalk — not a compliance attestation.")
+            story.append(Paragraph(f"<i>{_esg_caveat}</i>", s_body_italic))
             story.append(Paragraph(
-                "Indicative crosswalk linking OASIS findings to recognized disclosure "
-                "frameworks (GRI, ESRS/CSRD, TCFD). Provided for navigation and context "
-                "only; not a compliance attestation.", s_body_italic))
-            _esg_data = [['OASIS Finding', 'GRI', 'ESRS / CSRD', 'TCFD']]
+                "The mapping is <b>finding-specific</b>: framework codes are shown at the "
+                "granularity we can defend (series/pillar), the relevance note states what "
+                "the structural finding <i>informs</i>, and the materiality flag reflects "
+                "this organization's actual dimension status. Analogue mappings (e.g. the "
+                "climate-scoped TCFD pillars against non-climate structural findings) are "
+                "explicitly marked <b>contextual</b>, never as direct disclosures.", s_body))
+            story.append(Spacer(1, 0.2 * cm))
+
+            _materiality_color = {
+                'attention': '#c0392b', 'watch': '#d4a843',
+                'supporting': '#1a5f35', 'not_assessed': MUTED,
+            }
             for _row in _esg:
-                _esg_data.append([
-                    Paragraph(
-                        f"<b>{_row['oasis_dimension']}</b><br/>"
-                        f"{_row['finding_summary']}", cell_s),
-                    Paragraph(_row['gri_ref'], cell_s),
-                    Paragraph(_row['esrs_ref'], cell_s),
-                    Paragraph(_row['tcfd_ref'], cell_s)])
-            _et = Table(_esg_data, colWidths=[
-                CONTENT_W * 0.34, CONTENT_W * 0.22, CONTENT_W * 0.22, CONTENT_W * 0.22])
-            _et.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), _hex_to_rgb(TABLE_HEADER_BG)),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-                ('TOPPADDING', (0, 0), (-1, -1), 5),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
-                ('LEFTPADDING', (0, 0), (-1, -1), 6),
-                ('GRID', (0, 0), (-1, -1), 0.3, _hex_to_rgb('#cccccc')),
-                ('ROWBACKGROUNDS', (0, 1), (-1, -1),
-                 [colors.white, _hex_to_rgb(TABLE_ALT_ROW)]),
-            ]))
-            story.append(_et)
+                _mat = _row['materiality']
+                _mc = _materiality_color.get(_mat['flag'], MUTED)
+                story.append(Paragraph(
+                    f"<b>{_row['oasis_dimension']}</b> &mdash; {_row['construct']}", s_h3))
+                story.append(Paragraph(
+                    f"<b>Finding:</b> {_row['finding_summary']}", s_body))
+                # Framework codes (with contextual caveats) as a compact table.
+                _fw_data = [['Standard', 'Reference', 'Disclosure area / caveat']]
+                for _fw in _row['frameworks']:
+                    _lbl = _fw.get('label', '')
+                    if _fw.get('contextual') and _fw.get('caveat'):
+                        _lbl = (f"{_lbl} <font color=\"{MUTED}\"><i>[contextual: "
+                                f"{_fw['caveat']}]</i></font>")
+                    _fw_data.append([
+                        Paragraph(f"<b>{_fw['standard']}</b>", cell_s),
+                        Paragraph(_fw['code'], cell_s),
+                        Paragraph(_lbl, cell_s)])
+                _ft = Table(_fw_data, colWidths=[
+                    CONTENT_W * 0.12, CONTENT_W * 0.22, CONTENT_W * 0.66])
+                _ft.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), _hex_to_rgb(TABLE_HEADER_BG)),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                    ('TOPPADDING', (0, 0), (-1, -1), 4),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 6),
+                    ('GRID', (0, 0), (-1, -1), 0.3, _hex_to_rgb('#cccccc')),
+                    ('ROWBACKGROUNDS', (0, 1), (-1, -1),
+                     [colors.white, _hex_to_rgb(TABLE_ALT_ROW)]),
+                ]))
+                story.append(_ft)
+                story.append(Paragraph(
+                    f"<b>Disclosure relevance:</b> {_row['disclosure_relevance']}", s_body))
+                story.append(Paragraph(
+                    f"<b>Materiality (this organization):</b> "
+                    f"<font color=\"{_mc}\"><b>{_mat['label']}</b></font>", s_body))
+                story.append(Spacer(1, 0.25 * cm))
             story.append(Paragraph(
-                "<i>Table 6. Indicative OASIS-to-ESG framework crosswalk.</i>",
-                s_caption))
+                "<i>Table 6. Finding-specific, status-driven OASIS-to-ESG structural-lens "
+                "crosswalk (indicative; not a compliance attestation).</i>", s_caption))
             story.append(PageBreak())
         except Exception:
             # Detailed analysis is additive; never break the base report.
