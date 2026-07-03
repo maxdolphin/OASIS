@@ -262,6 +262,106 @@ def get_cached_metrics(flow_matrix: np.ndarray, node_names: list) -> tuple:
 
     return metrics, False
 
+
+def provision_network(network_data: dict) -> dict:
+    """
+    Compute the full-index profile ONCE at provision time and stash it.
+
+    Called from every provision path (JSON/CSV upload, sample data, ecosystem
+    samples, synthetic generation, user-saved networks, HuggingFace, direct
+    analysis entry) right when ``analysis_data`` is built. The heavy computation
+    happens here, so every subsequent render/report READS the stored profile
+    instead of recomputing.
+
+    Supports both key conventions: ``flow_matrix``/``flows`` and
+    ``node_names``/``nodes``.
+
+    Args:
+        network_data: dict with the flow matrix, node names and (optionally) an
+                      organization name.
+
+    Returns:
+        The full-profile dict (also stashed in ``st.session_state['full_profile']``),
+        or ``None`` if no pipeline is available or the matrix is empty.
+    """
+    raw_matrix = network_data.get('flow_matrix', network_data.get('flows'))
+    if raw_matrix is None:
+        return None
+    flow_matrix = np.asarray(raw_matrix, dtype=np.float64)
+    if flow_matrix.size == 0:
+        return None
+
+    node_names = network_data.get('node_names', network_data.get('nodes'))
+    if node_names is None or len(node_names) == 0:
+        node_names = [f"N{i}" for i in range(flow_matrix.shape[0])]
+    org_name = network_data.get('org_name',
+                                network_data.get('organization',
+                                                 network_data.get('name', 'Unknown')))
+
+    profile = None
+    if DATABASE_AVAILABLE:
+        pipeline = get_cached_pipeline()
+        if pipeline is not None:
+            try:
+                result = pipeline.get_full_profile(flow_matrix, node_names, org_name=org_name)
+                profile = result.get('profile')
+            except Exception as e:
+                # Never break a provision path — fall back to lazy compute on read.
+                import logging as _logging
+                _logging.getLogger(__name__).warning(f"provision_network failed: {e}")
+                profile = None
+
+    if profile is not None:
+        st.session_state['full_profile'] = profile
+    return profile
+
+
+def get_active_profile(flow_matrix=None, node_names=None, org_name=None) -> dict:
+    """
+    Return the full-index profile for the active network — READ, don't recompute.
+
+    Common path: returns ``st.session_state['full_profile']`` (populated at
+    provision by ``provision_network``). Safe fallback: on a miss (e.g. a
+    provision path was not wired, or the session was restored), compute+store
+    via ``pipeline.get_full_profile`` and cache in session_state so subsequent
+    reads hit the store. Never raises for a missing profile.
+
+    Args:
+        flow_matrix / node_names / org_name: only needed for the fallback
+            compute path; if omitted they are pulled from
+            ``st.session_state.analysis_data``.
+
+    Returns:
+        The full-profile dict, or ``None`` if it cannot be produced.
+    """
+    profile = st.session_state.get('full_profile')
+    if profile is not None:
+        return profile
+
+    # Fallback: pull the network from analysis_data if not supplied.
+    if flow_matrix is None:
+        data = st.session_state.get('analysis_data') or {}
+        flow_matrix = data.get('flow_matrix', data.get('flows'))
+        node_names = node_names or data.get('node_names', data.get('nodes'))
+        org_name = org_name or data.get('org_name', data.get('organization'))
+
+    if flow_matrix is None or not DATABASE_AVAILABLE:
+        return None
+
+    pipeline = get_cached_pipeline()
+    if pipeline is None:
+        return None
+    try:
+        result = pipeline.get_full_profile(np.asarray(flow_matrix, dtype=np.float64),
+                                           node_names, org_name=org_name)
+        profile = result.get('profile')
+    except Exception:
+        return None
+    if profile is not None:
+        st.session_state['full_profile'] = profile
+    return profile
+
+
 # Configure page
 st.set_page_config(
     page_title="Adaptive Organization Analysis",
@@ -1007,6 +1107,8 @@ def upload_data_interface():
                         'org_name': org_name,
                         'source': 'uploaded'
                     }
+                    # Compute the full profile ONCE at provision (read thereafter).
+                    provision_network(st.session_state.analysis_data)
                     st.session_state.current_page = 'analysis'
                     st.rerun()
 
@@ -1366,6 +1468,8 @@ def sample_data_interface():
                 'org_name': org_name_data,
                 'source': 'sample_data'
             }
+            # Compute the full profile ONCE at provision (read thereafter).
+            provision_network(st.session_state.analysis_data)
             st.session_state.current_page = 'analysis'
             st.rerun()
             return True
@@ -1630,9 +1734,11 @@ def sample_data_interface():
                 'org_name': org_name,
                 'source': 'sample_data'
             }
+            # Compute the full profile ONCE at provision (read thereafter).
+            provision_network(st.session_state.analysis_data)
             st.session_state.current_page = 'analysis'
             st.rerun()
-            
+
         except Exception as e:
             st.error(f"Error loading sample data: {str(e)}")
 
@@ -1768,8 +1874,10 @@ def synthetic_data_interface():
                 'network': G_weighted,
                 'source': 'synthetic'
             }
+            # Compute the full profile ONCE at provision (read thereafter).
+            provision_network(st.session_state.analysis_data)
             st.session_state.current_page = 'analysis'
-            
+
             st.success("✅ Network generated successfully! Navigating to analysis...")
             st.rerun()
 
@@ -2099,6 +2207,12 @@ def show_analysis_page():
     org_name = data['org_name']
     n_nodes = len(node_names)
 
+    # Safety net: ensure the full profile is provisioned for this network.
+    # Every provision path calls provision_network(), but if one was missed
+    # (or the session was restored) this computes+stores it once here.
+    if st.session_state.get('full_profile') is None:
+        provision_network(data)
+
     # Try to use precomputed/cached metrics from database or disk cache
     precomputed_metrics = None
     cache_hit = False
@@ -2108,6 +2222,23 @@ def show_analysis_page():
         if cache_hit:
             st.toast("Loaded from cache", icon="⚡")
 
+    # Extended SI/ELD/TD: prefer the precomputed profile's `core` (no recompute);
+    # fall back to the live calculator only if the profile lacks a usable value.
+    def _fill_extended_from_profile(ext, calc):
+        prof = st.session_state.get('full_profile')
+        core = prof.get('core', {}) if isinstance(prof, dict) else {}
+        for key, method in (
+            ('structural_information', 'calculate_structural_information'),
+            ('effective_link_density', 'calculate_effective_link_density'),
+            ('trophic_depth', 'calculate_trophic_depth'),
+        ):
+            if key not in ext or ext.get(key, 0) == 0:
+                stored = core.get(key)
+                if stored is not None and stored != 0:
+                    ext[key] = stored
+                else:
+                    ext[key] = getattr(calc, method)()
+
     # Check if we already have calculated metrics (session caching)
     if 'extended_metrics' in data and 'assessments' in data and 'calculator' in data:
         # Use session-cached results - no notification needed on re-render
@@ -2115,13 +2246,8 @@ def show_analysis_page():
         assessments = data['assessments']
         calculator = data['calculator']
 
-        # Ensure missing extended metrics are computed (SI, ELD, TD)
-        if 'structural_information' not in extended_metrics or extended_metrics.get('structural_information', 0) == 0:
-            extended_metrics['structural_information'] = calculator.calculate_structural_information()
-        if 'effective_link_density' not in extended_metrics or extended_metrics.get('effective_link_density', 0) == 0:
-            extended_metrics['effective_link_density'] = calculator.calculate_effective_link_density()
-        if 'trophic_depth' not in extended_metrics or extended_metrics.get('trophic_depth', 0) == 0:
-            extended_metrics['trophic_depth'] = calculator.calculate_trophic_depth()
+        # Ensure missing extended metrics are present (SI, ELD, TD) — read from profile.
+        _fill_extended_from_profile(extended_metrics, calculator)
 
     # If we have cache hit but no session cache, use cache to reconstruct
     elif cache_hit and precomputed_metrics:
@@ -2136,13 +2262,8 @@ def show_analysis_page():
             alpha = extended_metrics.get('relative_ascendency', 0)
             extended_metrics['is_viable'] = 0.2 <= alpha <= 0.6
 
-        # Compute missing extended metrics if not in cache (SI, ELD, TD)
-        if 'structural_information' not in extended_metrics or extended_metrics.get('structural_information', 0) == 0:
-            extended_metrics['structural_information'] = calculator.calculate_structural_information()
-        if 'effective_link_density' not in extended_metrics or extended_metrics.get('effective_link_density', 0) == 0:
-            extended_metrics['effective_link_density'] = calculator.calculate_effective_link_density()
-        if 'trophic_depth' not in extended_metrics or extended_metrics.get('trophic_depth', 0) == 0:
-            extended_metrics['trophic_depth'] = calculator.calculate_trophic_depth()
+        # Extended metrics (SI, ELD, TD) — read from profile, fall back to calc.
+        _fill_extended_from_profile(extended_metrics, calculator)
 
         # Generate assessments from cached metrics
         assessments = calculator.assess_regenerative_health()
@@ -2638,6 +2759,8 @@ def run_analysis(flow_matrix, node_names, org_name):
         'org_name': org_name,
         'source': 'direct'
     }
+    # Compute the full profile ONCE at provision (read thereafter).
+    provision_network(st.session_state.analysis_data)
     st.session_state.current_page = 'analysis'
     st.rerun()
 
@@ -4033,21 +4156,72 @@ def create_flow_heatmap(flow_matrix, node_names, max_size=100):
     return fig
 
 
+def _format_network_summary(metrics: dict) -> str:
+    """
+    Format the network-science summary text from an already-computed metrics dict.
+
+    Mirrors ``AdvancedNetworkAnalyzer.get_summary_report`` but reads the passed
+    metrics (from the precomputed profile) instead of recomputing.
+    """
+    report = "=" * 60 + "\n"
+    report += "NETWORK ANALYSIS REPORT\n"
+    report += "=" * 60 + "\n\n"
+
+    basic = metrics.get('basic', {})
+    report += f"Network Size: {basic.get('num_nodes', 0)} nodes, {basic.get('num_edges', 0)} edges\n"
+    report += f"Density: {basic.get('density', 0):.3f}\n"
+    report += f"Connected: {basic.get('is_connected', False)}\n\n"
+
+    sw = metrics.get('small_world', {})
+    report += "SMALL WORLD PROPERTIES:\n"
+    report += f"  Clustering: {sw.get('clustering_coefficient', 0):.3f} (random: {sw.get('random_clustering', 0):.3f})\n"
+    report += f"  Path Length: {sw.get('average_path_length', 0):.2f} (random: {sw.get('random_path_length', 0):.2f})\n"
+    report += f"  Small World σ: {sw.get('small_world_sigma', 0):.2f} {'✓ Small World' if sw.get('is_small_world') else '✗ Not Small World'}\n\n"
+
+    comm = metrics.get('communities', {})
+    if 'louvain' in comm and comm['louvain'].get('modularity', 0) > 0:
+        report += "COMMUNITY STRUCTURE:\n"
+        report += f"  Number of Communities: {comm['louvain'].get('num_communities', 0)}\n"
+        report += f"  Modularity: {comm['louvain'].get('modularity', 0):.3f}\n\n"
+
+    rob = metrics.get('robustness', {})
+    report += "ROBUSTNESS:\n"
+    report += f"  Random Failure: {rob.get('random_failure_robustness', 0):.3f}\n"
+    report += f"  Targeted Attack: {rob.get('targeted_attack_robustness', 0):.3f}\n"
+    report += f"  Path Redundancy: {rob.get('path_redundancy', 0):.2f}\n\n"
+
+    flow = metrics.get('flow', {})
+    report += "FLOW CHARACTERISTICS:\n"
+    report += f"  Flow Inequality (Gini): {flow.get('flow_gini_coefficient', 0):.3f}\n"
+    report += f"  Flow Reciprocity: {flow.get('flow_reciprocity', 0):.3f}\n"
+    report += f"  Throughput Efficiency: {flow.get('throughput_efficiency', 0):.3f}\n"
+
+    report += "\n" + "=" * 60
+    return report
+
+
 def display_network_analysis(calculator, metrics, flow_matrix, node_names):
     """Display advanced network science analysis - separate from ecosystem metrics."""
     
     st.header("🔄 Network Analysis")
     st.markdown("*Advanced network science metrics independent of ecological theory*")
     
-    # Import the advanced network analyzer
-    from src.network_analyzer import AdvancedNetworkAnalyzer
-    
-    # Initialize analyzer
-    analyzer = AdvancedNetworkAnalyzer(flow_matrix, node_names)
-    
-    # Calculate all network metrics
-    with st.spinner("Calculating network science metrics..."):
-        network_metrics = analyzer.get_all_metrics()
+    # READ the network-analysis family from the precomputed full profile
+    # (computed once at provision). Fall back to a live analyzer only if the
+    # stored profile is missing/unusable, so nothing breaks.
+    network_metrics = None
+    full_profile = get_active_profile(flow_matrix, node_names)
+    if isinstance(full_profile, dict):
+        stored_na = full_profile.get('network_analysis')
+        if isinstance(stored_na, dict) and '_error' not in stored_na and 'basic' in stored_na:
+            network_metrics = stored_na
+
+    if network_metrics is None:
+        # Fallback: compute live (profile absent or degenerate graph).
+        from src.network_analyzer import AdvancedNetworkAnalyzer
+        analyzer = AdvancedNetworkAnalyzer(flow_matrix, node_names)
+        with st.spinner("Calculating network science metrics..."):
+            network_metrics = analyzer.get_all_metrics()
     
     # Network Topology
     st.subheader("📐 Network Topology")
@@ -4280,9 +4454,9 @@ def display_network_analysis(calculator, metrics, flow_matrix, node_names):
         st.error(f"**Overall Network Health: POOR ({avg_health:.2f}/1.0)**")
         st.write("The network shows significant structural vulnerabilities requiring attention.")
     
-    # Export network report
+    # Export network report — formatted from the already-read metrics (no recompute).
     with st.expander("📄 Network Science Report"):
-        st.text(analyzer.get_summary_report())
+        st.text(_format_network_summary(network_metrics))
 
 def create_radar_chart(metrics):
     """Create a radar/spider chart for multi-metric comparison."""
@@ -4486,15 +4660,50 @@ def display_oasis_health(calculator, metrics, flow_matrix, node_names, org_name)
     regenerative economics principles*
     """)
 
-    # Initialize OASIS calculator
-    try:
-        oasis = OASISCalculator(calculator)
-        profile = oasis.get_oasis_profile()
-        interpretations = oasis.get_oasis_interpretation()
-        recommendations = oasis.get_recommendations()
-    except Exception as e:
-        st.error(f"Error computing OASIS metrics: {str(e)}")
-        return
+    # READ the OASIS profile from the precomputed full profile (computed once at
+    # provision). Fall back to a live OASISCalculator only if the stored profile
+    # is missing/unusable, so nothing breaks if a provision path was skipped.
+    oasis = None
+    profile = None
+    full_profile = get_active_profile(flow_matrix, node_names, org_name)
+    if isinstance(full_profile, dict):
+        stored_oasis = full_profile.get('oasis')
+        if isinstance(stored_oasis, dict) and '_error' not in stored_oasis \
+                and 'dimension_scores' in stored_oasis:
+            profile = stored_oasis
+            interpretations = stored_oasis.get('interpretation')
+            recommendations = stored_oasis.get('recommendations')
+            # Interpretation/recommendations are cheap derived views; if the
+            # stored profile lacks them (older build / build error), derive live.
+            if interpretations is None or recommendations is None:
+                try:
+                    _live = OASISCalculator(calculator)
+                    if interpretations is None:
+                        interpretations = _live.get_oasis_interpretation()
+                    if recommendations is None:
+                        recommendations = _live.get_recommendations()
+                except Exception:
+                    interpretations = interpretations or {}
+                    recommendations = recommendations or []
+
+    if profile is None:
+        # Fallback: compute live (profile absent or degenerate graph).
+        try:
+            oasis = OASISCalculator(calculator)
+            profile = oasis.get_oasis_profile()
+            interpretations = oasis.get_oasis_interpretation()
+            recommendations = oasis.get_recommendations()
+        except Exception as e:
+            st.error(f"Error computing OASIS metrics: {str(e)}")
+            return
+
+    # The interactive "custom weights" widget needs a live calculator; build it
+    # lazily only if we read from the store (does not recompute the profile shown).
+    def _get_live_oasis():
+        nonlocal oasis
+        if oasis is None:
+            oasis = OASISCalculator(calculator)
+        return oasis
 
     # Get scores and status
     scores = profile['dimension_scores']
@@ -4566,7 +4775,7 @@ def display_oasis_health(calculator, metrics, flow_matrix, node_names, org_name)
 
         # Initialize session state for weights if not exists
         if 'oasis_weights' not in st.session_state:
-            st.session_state.oasis_weights = {k: v * 100 for k, v in oasis.DEFAULT_WEIGHTS.items()}
+            st.session_state.oasis_weights = {k: v * 100 for k, v in OASISCalculator.DEFAULT_WEIGHTS.items()}
 
         col1, col2, col3, col4, col5 = st.columns(5)
 
@@ -4597,7 +4806,7 @@ def display_oasis_health(calculator, metrics, flow_matrix, node_names, org_name)
                     'intelligent': new_intel / 100,
                     'sustainable': new_sust / 100
                 }
-                oasis.set_dimension_weights(new_weights)
+                _get_live_oasis().set_dimension_weights(new_weights)
                 st.session_state.oasis_weights = {k: v * 100 for k, v in new_weights.items()}
                 st.rerun()
 
@@ -4875,6 +5084,14 @@ def display_detailed_report(calculator, metrics, assessments, org_name):
     # Add visual summary cards at the top
     display_visual_summary_cards(metrics, assessments)
 
+    # Read the precomputed OASIS profile so report exports don't recompute it.
+    _full_profile = get_active_profile(calculator.flow_matrix, calculator.node_names, org_name)
+    _oasis_profile = None
+    if isinstance(_full_profile, dict):
+        _stored_oasis = _full_profile.get('oasis')
+        if isinstance(_stored_oasis, dict) and 'dimension_scores' in _stored_oasis:
+            _oasis_profile = _stored_oasis
+
     # Generate publication-quality report
     report_generator = PublicationReportGenerator(
         calculator=calculator,
@@ -4882,7 +5099,8 @@ def display_detailed_report(calculator, metrics, assessments, org_name):
         assessments=assessments,
         org_name=org_name,
         flow_matrix=calculator.flow_matrix,
-        node_names=calculator.node_names
+        node_names=calculator.node_names,
+        oasis_profile=_oasis_profile
     )
 
     # ── Download buttons — prominent at top ────────────────────────────
