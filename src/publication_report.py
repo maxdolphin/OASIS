@@ -11,6 +11,16 @@ from typing import Dict, Any, List, Optional
 import json
 
 
+def _viability_bands():
+    """Import the report_intelligence module holding the single-source-of-truth
+    viability / efficiency / robustness band constants (E-19, E-20)."""
+    try:
+        import report_intelligence as _ri
+    except ImportError:  # pragma: no cover - package-path fallback
+        from src import report_intelligence as _ri
+    return _ri
+
+
 def flow_diversity_utilization(flow_diversity: float, n_nodes: int) -> float:
     """Flow-diversity utilization as a percentage of the theoretical maximum.
 
@@ -452,7 +462,7 @@ Effective Link Density (ELD): ELD = (number of non-zero F_ij) / n^2
 
 Trophic Depth: Average path length weighted by flow magnitude
 
-Network Efficiency: A / (C x log2(n))
+Network Efficiency: alpha = A / C
 
 Regenerative Capacity: (Phi / C) x (1 - |alpha - 0.37|)
 
@@ -663,44 +673,22 @@ END OF REPORT
     # ==================================================================
 
     def _categorize_efficiency(self) -> str:
-        """Categorize network efficiency level."""
+        """Categorize network efficiency (alpha = A/C) using the viability-anchored
+        single-source-of-truth bands (E-19). HIGH efficiency reads as
+        over-organized/brittle (NOT "good"), consistent with the risk framing."""
         eff = self.metrics['network_efficiency']
-        if eff < 0.2:
-            return "Low"
-        elif eff < 0.4:
-            return "Moderate"
-        elif eff < 0.6:
-            return "High"
-        else:
-            return "Very High"
+        return _viability_bands().categorize_efficiency_label(eff)
 
     def _categorize_robustness(self) -> str:
-        """Categorize robustness level."""
+        """Categorize robustness using the shared threshold constant (E-20)."""
         rob = self.metrics['robustness']
-        if rob < 0.1:
-            return "Very Low"
-        elif rob < 0.15:
-            return "Low"
-        elif rob < 0.2:
-            return "Moderate"
-        elif rob < 0.25:
-            return "High"
-        else:
-            return "Very High"
+        return _viability_bands().categorize_robustness_label(rob)
 
     def _interpret_position(self) -> str:
-        """Interpret position in window of viability."""
+        """Interpret alpha's position in the window of viability. Shares the
+        single-source-of-truth efficiency bands (E-19)."""
         alpha = self.metrics['ascendency_ratio']
-        if alpha < 0.2:
-            return "Under-organized"
-        elif alpha < 0.35:
-            return "Developing"
-        elif alpha < 0.45:
-            return "Optimal"
-        elif alpha < 0.6:
-            return "Efficient"
-        else:
-            return "Over-constrained"
+        return _viability_bands().categorize_efficiency_label(alpha)
 
     def _calculate_gini(self) -> float:
         """Calculate Gini coefficient for flow distribution."""

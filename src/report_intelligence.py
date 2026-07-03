@@ -14,6 +14,68 @@ VIABILITY_LOWER = 0.2
 VIABILITY_UPPER = 0.6
 ROBUSTNESS_OPTIMUM = 0.367879441  # 1/e, where R = -alpha*ln(alpha) is maximal
 
+# ---------------------------------------------------------------------------
+# SINGLE SOURCE OF TRUTH — efficiency (alpha) interpretation bands (E-19 fix)
+# ---------------------------------------------------------------------------
+# The efficiency label of alpha (= network_efficiency = A/C) MUST agree with the
+# Window-of-Viability risk framing. Under that model, HIGH efficiency is NOT
+# "good" — it is over-organized / brittle. The interior sub-bands (0.35, 0.45)
+# split the in-window range into developing / optimal / efficient.
+#   alpha < 0.2                : under-organized / chaotic  (below window)
+#   0.2  <= alpha < 0.35       : developing
+#   0.35 <= alpha < 0.45       : optimal (near 1/e robustness peak)
+#   0.45 <= alpha < 0.6        : efficient (watch for rigidity)
+#   alpha >= 0.6               : over-organized / brittle    (above window)
+EFFICIENCY_BAND_LOWER = VIABILITY_LOWER   # 0.2  — below = under-organized
+EFFICIENCY_BAND_DEVELOPING = 0.35         # 0.35 — developing -> optimal
+EFFICIENCY_BAND_OPTIMAL = 0.45            # 0.45 — optimal -> efficient
+EFFICIENCY_BAND_UPPER = VIABILITY_UPPER   # 0.6  — above = over-organized/brittle
+
+# ---------------------------------------------------------------------------
+# SINGLE SOURCE OF TRUTH — robustness "high" threshold (E-20 fix)
+# ---------------------------------------------------------------------------
+# The lower rung 0.2 was already shared across paths; the "high" cutoff differed
+# (0.20 on the PDF path, 0.25 on LaTeX/CLI). Unified to 0.25 so R = 0.22 no
+# longer flips verdict by export type. Documented choice: 0.25 is the more
+# conservative rung and matches the LaTeX/CLI narrative already in production.
+ROBUSTNESS_HIGH_THRESHOLD = 0.25
+
+
+def categorize_efficiency_label(alpha: float) -> str:
+    """
+    Viability-anchored efficiency label for alpha (= network_efficiency = A/C).
+
+    Single source of truth for the E-19 efficiency labels. HIGH efficiency is
+    framed as over-organized/brittle (NOT "good"), consistent with the risk view.
+    """
+    if alpha < EFFICIENCY_BAND_LOWER:
+        return "Under-organized"
+    elif alpha < EFFICIENCY_BAND_DEVELOPING:
+        return "Developing"
+    elif alpha < EFFICIENCY_BAND_OPTIMAL:
+        return "Optimal"
+    elif alpha < EFFICIENCY_BAND_UPPER:
+        return "Efficient"
+    else:
+        return "Over-organized"
+
+
+def categorize_robustness_label(robustness: float) -> str:
+    """
+    Single source of truth for robustness labels (E-20). The "high" rung uses
+    ROBUSTNESS_HIGH_THRESHOLD (0.25) consistently across all report paths.
+    """
+    if robustness < 0.1:
+        return "Very Low"
+    elif robustness < 0.15:
+        return "Low"
+    elif robustness < VIABILITY_LOWER:      # 0.2
+        return "Moderate"
+    elif robustness < ROBUSTNESS_HIGH_THRESHOLD:  # 0.25
+        return "High"
+    else:
+        return "Very High"
+
 
 def _alpha(profile: Dict[str, Any], metrics: Dict[str, Any] = None) -> float:
     """Read relative ascendency (alpha) from metrics, falling back to profile."""

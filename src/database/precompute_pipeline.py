@@ -112,10 +112,14 @@ class PrecomputePipeline:
             pass
 
         # Basic network structure
+        # E-27: one "density" definition only. Self-loops are disallowed in these
+        # flow networks, so density == directed connectance = m / (n(n-1)), which
+        # also matches nx.density(G) used elsewhere. The prior m/n^2 duplicate
+        # (which double-counted the disallowed diagonal) is removed.
         num_edges = int(np.sum(flow_matrix > 0))
         metrics['num_edges'] = num_edges
-        metrics['network_density'] = num_edges / (n_nodes * n_nodes) if n_nodes > 0 else 0
         metrics['connectance'] = num_edges / (n_nodes * (n_nodes - 1)) if n_nodes > 1 else 0
+        metrics['network_density'] = metrics['connectance']  # single density definition
         metrics['link_density'] = num_edges / n_nodes if n_nodes > 0 else 0
 
         # Additional metrics

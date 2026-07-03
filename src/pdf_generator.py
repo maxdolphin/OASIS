@@ -395,7 +395,13 @@ def _build_reportlab_pdf(report_generator, calculator, metrics, charts=None):
         ]
 
     rob = metrics.get('robustness', 0)
-    rob_status = 'High' if rob > 0.2 else 'Moderate' if rob > 0.15 else 'Low'
+    # E-20: unified robustness "high" threshold (0.25) — shared source of truth.
+    try:
+        import report_intelligence as _ri_rob
+    except ImportError:  # pragma: no cover
+        from src import report_intelligence as _ri_rob
+    rob_status = ('High' if rob >= _ri_rob.ROBUSTNESS_HIGH_THRESHOLD
+                  else 'Moderate' if rob > 0.15 else 'Low')
     eff = metrics.get('network_efficiency', 0)
     eff_status = 'Optimal' if 0.2 <= eff <= 0.6 else 'Sub-optimal'
     alpha = metrics.get('ascendency_ratio', 0)

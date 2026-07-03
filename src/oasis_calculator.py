@@ -195,23 +195,59 @@ class OASISCalculator:
             'autocatalytic_index': autocatalytic_index
         }
 
-    def calculate_mutualism_index(self) -> Dict[str, float]:
+    def _build_direct_utility_matrix(self) -> np.ndarray:
         """
-        Classify pairwise relationships and compute mutualism index.
+        Patten direct utility matrix D.
 
-        Based on Fath et al. (2019) Principle 8: Mutualism.
+            d_ij = (f_ij - f_ji) / T_i
 
-        In flow networks, we assess mutual benefit by examining bidirectional flows:
-        - Mutualistic: Both nodes exchange resources (bidirectional flow)
-        - Exploitative: One-way flow (one benefits, one provides)
-        - Neutral: No direct connection
+        where T_i is the throughflow of node i (row sum of outgoing flows here; for a
+        balanced network in = out, so the row sum is the standard throughflow proxy).
+        A zero-throughflow node yields a zero row (no self-referential utility).
+
+        Reference: Fath et al. (2019) Principle 8; Patten integral-utility theory.
+        """
+        flow_matrix = self.ulanowicz.flow_matrix
+        n = self.ulanowicz.n_nodes
+        throughflow = np.sum(flow_matrix, axis=1)  # T_i (outgoing throughflow)
+        D = np.zeros((n, n), dtype=float)
+        for i in range(n):
+            Ti = throughflow[i]
+            if Ti <= 0:
+                continue
+            for j in range(n):
+                if i == j:
+                    continue
+                D[i, j] = (flow_matrix[i, j] - flow_matrix[j, i]) / Ti
+        return D
+
+    def calculate_mutualism_index(self) -> Dict[str, Any]:
+        """
+        Classify relationships and compute mutualism via integral (direct + indirect)
+        utility.
+
+        Based on Fath et al. (2019) Principle 8: Mutualism. Fath (2019) is explicit that
+        ecological/organizational mutualism is an *integral* property — the net benefit
+        emerges "when considering the effects of all direct AND indirect relations."
+        This is Patten's integral-utility construction:
+
+            Direct utility     D:  d_ij = (f_ij - f_ji) / T_i
+            Integral utility   U = (I - D)^(-1)      (guarded against singularity)
+            Network mutualism b:c = sum(U > 0) / |sum(U < 0)|   (>1 => net mutualistic)
+
+        The classic Patten result is that INDIRECT effects make relationships MORE
+        mutualistic than direct effects alone; hence integral b:c >= direct b:c.
+
+        The original direct-only reciprocity is retained as `direct_mutualism`
+        (== the legacy `mutualism_ratio`) for back-compat and transparency.
 
         Returns:
-            Dictionary with mutualism metrics
+            Dictionary with both direct and integral mutualism metrics.
         """
         flow_matrix = self.ulanowicz.flow_matrix
         n_nodes = self.ulanowicz.n_nodes
 
+        # ---- Direct-only reciprocity (legacy, retained) --------------------
         mutual_pairs = 0
         one_way_pairs = 0
 
@@ -246,12 +282,59 @@ class OASISCalculator:
 
         weighted_ratio = weighted_mutual / weighted_total if weighted_total > 0 else 0
 
+        # ---- Direct benefit:cost ratio from the direct utility matrix D ----
+        D = self._build_direct_utility_matrix()
+        direct_pos = float(np.sum(D[D > 0]))
+        direct_neg = float(np.abs(np.sum(D[D < 0])))
+        direct_bc = (direct_pos / direct_neg) if direct_neg > 0 else (
+            float('inf') if direct_pos > 0 else 0.0)
+
+        # ---- Integral (direct + indirect) utility U = (I - D)^-1 -----------
+        fallback = False
+        U = None
+        integral_pos = direct_pos
+        integral_neg = direct_neg
+        try:
+            I = np.eye(n_nodes)
+            # Guard: only invert if well-conditioned (non-singular).
+            IminusD = I - D
+            if abs(np.linalg.det(IminusD)) < 1e-12:
+                raise np.linalg.LinAlgError("(I - D) is singular")
+            U = np.linalg.inv(IminusD)
+            integral_pos = float(np.sum(U[U > 0]))
+            integral_neg = float(np.abs(np.sum(U[U < 0])))
+        except np.linalg.LinAlgError:
+            # Fall back to direct-only with a flag; do not raise.
+            fallback = True
+            U = None
+            integral_pos = direct_pos
+            integral_neg = direct_neg
+
+        integral_bc = (integral_pos / integral_neg) if integral_neg > 0 else (
+            float('inf') if integral_pos > 0 else 0.0)
+
+        # Normalize the integral b:c to [0,1] for use as a dimension input:
+        # bc/(1+bc) maps [0, inf) -> [0, 1), with bc=1 (break-even) -> 0.5.
+        if integral_bc == float('inf'):
+            integral_mutualism = 1.0
+        else:
+            integral_mutualism = integral_bc / (1.0 + integral_bc)
+
         return {
+            # --- back-compat keys (existing consumers read these) ---
             'mutual_pairs': mutual_pairs,
             'one_way_pairs': one_way_pairs,
             'mutualism_ratio': mutualism_ratio,
             'weighted_mutualism': weighted_ratio,
-            'total_connected_pairs': total_connected
+            'total_connected_pairs': total_connected,
+            # --- new direct/integral utility decomposition ---
+            'direct_mutualism': mutualism_ratio,
+            'direct_benefit_cost_ratio': direct_bc,
+            'integral_benefit_cost_ratio': integral_bc,
+            'integral_mutualism': integral_mutualism,
+            'direct_utility_matrix': D.tolist(),
+            'integral_utility_matrix': (U.tolist() if U is not None else None),
+            'fallback_direct_only': fallback,
         }
 
     def calculate_fitness_for_evolution(self, beta: float = 1.288) -> float:
@@ -442,10 +525,10 @@ class OASISCalculator:
         - gini_coefficient: Flow inequality (inverted - lower is better)
         - modularity: Community structure strength
         - effective_nodes/actual: Node utilization efficiency
-        - mutualism_ratio: Reciprocal relationships
+        - integral_mutualism: Integral (direct + indirect) utility, Patten / Fath 2019 P8
 
         Formula: SYMBIOTIC = 0.30*(1-gini) + 0.25*modularity +
-                             0.25*(eff_nodes/actual) + 0.20*mutualism
+                             0.25*(eff_nodes/actual) + 0.20*integral_mutualism
 
         Returns:
             Dictionary with score and contributing metrics
@@ -476,16 +559,20 @@ class OASISCalculator:
         actual_nodes = self.ulanowicz.n_nodes
         node_ratio = effective_nodes / actual_nodes if actual_nodes > 0 else 1
 
-        # Mutualism ratio
+        # Mutualism: use INTEGRAL (direct + indirect) utility per Fath (2019)
+        # Principle 8 / Patten. The integral b:c ratio is normalized to [0,1]
+        # (integral_mutualism). The legacy direct-only mutualism_ratio is retained
+        # in the metrics block below for back-compat and transparency.
         mutualism = self.calculate_mutualism_index()
-        mutualism_ratio = mutualism.get('mutualism_ratio', 0)
+        mutualism_ratio = mutualism.get('mutualism_ratio', 0)  # direct (legacy)
+        integral_mutualism = mutualism.get('integral_mutualism', mutualism_ratio)
 
-        # Calculate weighted score
+        # Calculate weighted score (mutualism input = integral utility)
         raw_score = (
             0.30 * (1 - gini) +
             0.25 * min(modularity, 1) +
             0.25 * min(node_ratio, 1) +
-            0.20 * mutualism_ratio
+            0.20 * integral_mutualism
         )
 
         # Convert to 0-100 scale
@@ -501,6 +588,7 @@ class OASISCalculator:
                 'actual_nodes': actual_nodes,
                 'node_utilization': node_ratio,
                 'mutualism_ratio': mutualism_ratio,
+                'integral_mutualism': integral_mutualism,
                 'mutualism_details': mutualism
             },
             'weights': {
@@ -596,8 +684,8 @@ class OASISCalculator:
         - regenerative_capacity: Self-renewal ability
         - alpha_optimality: Distance from optimal alpha (0.37)
 
-        Formula: SUSTAINABLE = 0.30*robustness + 0.25*is_in_window +
-                               0.20*regen_capacity + 0.25*alpha_optimality
+        Formula: SUSTAINABLE = 0.30*robustness + 0.20*is_in_window +
+                               0.20*regen_capacity + 0.30*alpha_optimality
 
         Returns:
             Dictionary with score and contributing metrics

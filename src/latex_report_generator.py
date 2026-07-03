@@ -371,30 +371,22 @@ When compared to sustainable reference systems:
     # Helper methods for LaTeX generation
     
     def _categorize_efficiency(self) -> str:
-        """Categorize network efficiency level."""
-        eff = self.metrics['network_efficiency']
-        if eff < 0.2:
-            return "Low"
-        elif eff < 0.4:
-            return "Moderate"
-        elif eff < 0.6:
-            return "High"
-        else:
-            return "Very High"
-    
+        """Categorize network efficiency (alpha = A/C) via the viability-anchored
+        single-source-of-truth bands (E-19). HIGH efficiency reads as
+        over-organized/brittle, consistent with the risk framing."""
+        try:
+            import report_intelligence as _ri
+        except ImportError:  # pragma: no cover
+            from src import report_intelligence as _ri
+        return _ri.categorize_efficiency_label(self.metrics['network_efficiency'])
+
     def _categorize_robustness(self) -> str:
-        """Categorize robustness level."""
-        rob = self.metrics['robustness']
-        if rob < 0.1:
-            return "Very Low"
-        elif rob < 0.15:
-            return "Low"
-        elif rob < 0.2:
-            return "Moderate"
-        elif rob < 0.25:
-            return "High"
-        else:
-            return "Very High"
+        """Categorize robustness via the shared threshold constant (E-20)."""
+        try:
+            import report_intelligence as _ri
+        except ImportError:  # pragma: no cover
+            from src import report_intelligence as _ri
+        return _ri.categorize_robustness_label(self.metrics['robustness'])
     
     def _interpret_efficiency_resilience_balance(self) -> str:
         """Interpret the efficiency-resilience balance."""
