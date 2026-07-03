@@ -596,61 +596,83 @@ class UlanowiczCalculator:
         
         return (active_links / max_links) * (ami / max_ami)
     
-    def calculate_trophic_depth(self) -> float:
+    def calculate_effective_trophic_levels(self) -> np.ndarray:
         """
-        Calculate average Trophic Depth (hierarchical levels) of the network.
+        Flow-weighted effective trophic level of each compartment (Levine 1980).
 
-        Trophic depth measures the average number of steps/levels in the
-        network hierarchy, similar to trophic levels in ecology.
-        Uses unweighted path lengths to count actual hierarchical steps.
+        Levine (1980), as presented in Ulanowicz 2004 §4 (p.327), defines the
+        effective trophic level of a compartment as the corresponding COLUMN-SUM
+        of the Leontief structure matrix [S] built from the diet/inflow
+        proportions:
+
+          - G[:, j] = T[:, j] / T_j_in  (column-normalized by inflow; each
+            column of G is the fractional diet composition of compartment j).
+          - S = (I - G)^-1.
+          - effective trophic level of j = Σ_i S[i, j]  (column-sum of S).
+
+        Because the levels are FLOW-WEIGHTED they can be fractional: a
+        compartment fed 60% from level 2, 30% from level 3 and 10% from level 4
+        has effective level 0.6·2 + 0.3·3 + 0.1·4 = 2.5 (Ulanowicz 2004 Fig. 4),
+        which an unweighted shortest-path hop count cannot reproduce.
 
         Returns:
-            Average Trophic Depth value (typically 1-10 for real networks)
+            1-D array of effective trophic levels, one per compartment.
         """
-        # Skip for networks > 50 nodes (computationally expensive)
+        n = self.n_nodes
+        if n == 0:
+            return np.zeros(0)
+
+        t_in = self.input_throughput  # internal inflow to each compartment (col sum)
+
+        G = np.zeros((n, n), dtype=np.float64)
+        for j in range(n):
+            if t_in[j] > 0:
+                G[:, j] = self.flow_matrix[:, j] / t_in[j]
+
+        identity = np.eye(n)
+        try:
+            S = np.linalg.inv(identity - G)
+        except np.linalg.LinAlgError:
+            eps = 1e-9
+            try:
+                S = np.linalg.inv(identity - (1.0 - eps) * G)
+            except np.linalg.LinAlgError:
+                return np.ones(n)
+
+        levels = np.sum(S, axis=0)
+        # Guard against numerical noise / non-finite entries in near-singular nets
+        levels = np.where(np.isfinite(levels), levels, 1.0)
+        return levels
+
+    def calculate_trophic_depth(self) -> float:
+        """
+        Trophic depth = maximum flow-weighted effective trophic level.
+
+        Trophic depth measures how many hierarchical levels the network spans.
+        It is the maximum of the flow-weighted effective trophic levels (Levine
+        1980; Ulanowicz 2004 §4), NOT an unweighted shortest-path hop count.
+
+        NOTE (Track-1 correction): the previous implementation used
+        ``nx.average_shortest_path_length``, an UNWEIGHTED topological hop count
+        that ignores flow magnitudes and can never reproduce the fractional
+        effective levels the ENA literature requires (e.g. 2.5 in Ulanowicz 2004
+        Fig. 4). It is replaced by the flow-weighted Levine effective trophic
+        level (column-sums of the Leontief structure matrix).
+
+        Returns:
+            Trophic depth (max effective trophic level; >= 1 for a live network).
+        """
+        # Skip for networks > 50 nodes (matrix inverse; keep the guard cheap)
         if self.n_nodes > 50:
             return 0.0
 
-        # Create networkx graph for path analysis (unweighted for level counting)
-        G = nx.DiGraph()
-
-        for i in range(self.n_nodes):
-            G.add_node(i)
-            for j in range(self.n_nodes):
-                if self.flow_matrix[i, j] > 0:
-                    G.add_edge(i, j)  # No weight - count hops, not flow magnitude
-
-        if G.number_of_edges() == 0:
+        if self._tst == 0:
             return 0.0
 
-        # Calculate average shortest path length (unweighted = number of levels)
-        try:
-            avg_path_length = nx.average_shortest_path_length(G)
-            return avg_path_length
-        except nx.NetworkXError:
-            # Graph is not strongly connected
-            # Calculate for weakly connected component or return estimate
-            try:
-                # Try largest strongly connected component
-                largest_scc = max(nx.strongly_connected_components(G), key=len, default=set())
-                if len(largest_scc) > 1:
-                    subgraph = G.subgraph(largest_scc)
-                    return nx.average_shortest_path_length(subgraph)
-            except:
-                pass
-
-            # Fallback: estimate from graph diameter or density
-            try:
-                # Use weakly connected component
-                largest_wcc = max(nx.weakly_connected_components(G), key=len, default=set())
-                if len(largest_wcc) > 1:
-                    subgraph = G.subgraph(largest_wcc).to_undirected()
-                    if nx.is_connected(subgraph):
-                        return nx.average_shortest_path_length(subgraph)
-            except:
-                pass
-
+        levels = self.calculate_effective_trophic_levels()
+        if levels.size == 0:
             return 0.0
+        return float(np.max(levels))
 
     def calculate_conditional_entropy(self) -> float:
         """
