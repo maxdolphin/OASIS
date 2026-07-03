@@ -4660,6 +4660,26 @@ def display_oasis_health(calculator, metrics, flow_matrix, node_names, org_name)
     regenerative economics principles*
     """)
 
+    # ── Credibility keystone (R9 in-app equivalent) ─────────────────────────
+    # The same 2-4 sentence justification the PDF leads with, so the app is not
+    # silent on WHY ecological/network math applies to an organization. Lead with
+    # the organizational evidence (Fath 2019); keep the indicative-reference caveat.
+    with st.expander("❓ **Why this applies to your organization**", expanded=False):
+        st.markdown(
+            "High-performing organizations analyzed with this same "
+            "efficiency–resilience framework cluster in a characteristic range "
+            "(relative ascendency **α ≈ 0.30–0.45**; "
+            "[Fath et al. 2019](https://doi.org/10.1016/j.glt.2019.06.002), "
+            "regenerative economics). OASIS reads how your organization is "
+            "*structurally wired* — the balance between coordinating efficiency "
+            "and adaptive reserve, computed from real flow data — a **network "
+            "lens that complements, and does not replace, culture and engagement "
+            "measures**. The viability band [0.2, 0.6] is an **indicative, "
+            "directional reference** (calibrated on ecological systems; "
+            "organizational calibration is an open question), so read your "
+            "position as a *direction of travel*, not a compliance grade."
+        )
+
     # READ the OASIS profile from the precomputed full profile (computed once at
     # provision). Fall back to a live OASISCalculator only if the stored profile
     # is missing/unusable, so nothing breaks if a provision path was skipped.

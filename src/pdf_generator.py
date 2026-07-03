@@ -439,16 +439,122 @@ def _build_reportlab_pdf(report_generator, calculator, metrics, charts=None):
     story.append(PageBreak())
 
     # ════════════════════════════════════════════════════════════════════
-    # EXECUTIVE SUMMARY (KPI Cards)
+    # EXECUTIVE ONE-PAGER  (R8 + R9)
+    # A self-contained, demo-ready first content page composed of five
+    # elements, in order:
+    #   0. The credibility keystone (R9) — "Why this applies to your org".
+    #   1. Reconciled headline verdict — the CAPPED OASIS status + capped_by.
+    #   2. KPI cards with reference anchors (gradient framing, never bare fail).
+    #   3. The marquee "you are here" Window-of-Viability curve.
+    #   4. Top-3 risks in Evidence -> Implication form.
+    #   5. Prioritized next steps (roadmap, time-horizoned).
+    # Then a clear "Detailed analysis follows" divider; the existing detailed
+    # sections continue after it.
+    # All inputs are the precomputed oasis_profile + report_intelligence views;
+    # nothing here recomputes a metric.
     # ════════════════════════════════════════════════════════════════════
+
+    # Shared intelligence module + the precomputed profile (read, do not recompute).
+    try:
+        import report_intelligence as _ri_exec
+    except ImportError:  # pragma: no cover
+        from src import report_intelligence as _ri_exec
+
+    _exec_profile = getattr(report_generator, 'oasis_profile', None)
+    if not (isinstance(_exec_profile, dict) and 'dimension_scores' in _exec_profile):
+        _exec_profile = None
+    if _exec_profile is None:
+        try:
+            from oasis_calculator import OASISCalculator as _OC_exec
+        except Exception:
+            try:
+                from src.oasis_calculator import OASISCalculator as _OC_exec
+            except Exception:
+                _OC_exec = None
+        if _OC_exec is not None:
+            try:
+                _exec_profile = _OC_exec(calculator).get_oasis_profile()
+            except Exception:
+                _exec_profile = None
+
+    rob = metrics.get('robustness', 0)
+    rob_status = _ri_exec.categorize_robustness_label(rob)
+    eff = metrics.get('network_efficiency', 0)
+    eff_status = _ri_exec.categorize_efficiency_label(eff)
+    alpha = metrics.get('ascendency_ratio', 0)
+    _grad_exec = _ri_exec.assess_alpha_position(alpha)
+
     story.append(Paragraph("Executive Summary", s_h1))
     story.append(HRFlowable(
         width='100%', thickness=1, color=_hex_to_rgb(FOREST_GREEN),
-        spaceBefore=0, spaceAfter=12,
+        spaceBefore=0, spaceAfter=10,
     ))
 
-    # Build KPI cards as a table
-    def _kpi_cell(label, value, status, color=None):
+    # ── 0. Credibility keystone (R9): "Why this applies to your organization" ──
+    #    Lead with the ORGANIZATIONAL evidence (Fath 2019), not wetlands; frame
+    #    the window as an indicative directional reference (honesty guardrail).
+    s_keystone = ParagraphStyle(
+        'Keystone', parent=s_body, fontSize=9.5, leading=13,
+        textColor=_hex_to_rgb(DARK_TEXT),
+        leftIndent=6, rightIndent=6, spaceBefore=2, spaceAfter=8,
+        borderColor=_hex_to_rgb(TEAL), borderWidth=0.5, borderPadding=5,
+        backColor=_hex_to_rgb('#f4fbf9'),
+    )
+    story.append(Paragraph(
+        "<b>Why this applies to your organization.</b> High-performing "
+        "organizations analyzed with this same efficiency&ndash;resilience "
+        "framework cluster in a characteristic range (relative ascendency "
+        "&alpha; &asymp; 0.30&ndash;0.45; Fath et al., 2019, regenerative "
+        "economics). OASIS reads how your organization is <i>structurally "
+        "wired</i> &mdash; the balance between coordinating efficiency and "
+        "adaptive reserve computed from real flow data &mdash; a network lens "
+        "that <i>complements</i>, and does not replace, culture and engagement "
+        "measures. The viability band is an <b>indicative, directional</b> "
+        "reference (calibrated on ecological systems; organizational "
+        "calibration is an open question), so read your position as a "
+        "direction of travel, not a compliance grade.",
+        s_keystone))
+
+    # ── 1. Reconciled headline verdict — capped status + business meaning ──
+    if _exec_profile is not None:
+        _overall = float(_exec_profile.get('overall_score', 0.0))
+        _capped_status = str(_exec_profile.get('overall_status', 'UNKNOWN'))
+        _capped = bool(_exec_profile.get('overall_status_capped', False))
+        _capped_by = _exec_profile.get('capped_by', []) or []
+        _verdict_color = _get_status_color(_capped_status)
+        if _capped and _capped_by:
+            _cap_names = ', '.join(d.capitalize() for d in _capped_by)
+            _headline = (
+                f"<font color=\"{_verdict_color}\"><b>{_capped_status} "
+                f"&mdash; {_overall:.0f}/100</b></font>, capped by a critical "
+                f"<b>{_cap_names}</b> dimension."
+            )
+            _sowhat = (
+                "So what: the overall label is held below its raw average "
+                "because a core pillar is critical &mdash; a weak pillar cannot "
+                "be averaged away, and it sets the near-term priority."
+            )
+        else:
+            _headline = (
+                f"<font color=\"{_verdict_color}\"><b>{_capped_status} "
+                f"&mdash; {_overall:.0f}/100</b></font>."
+            )
+            _sowhat = (
+                "So what: no single dimension is critical; the priority is to "
+                "hold the balance and address the weakest pillar before it "
+                "drifts."
+            )
+        _s_verdict = ParagraphStyle(
+            'Verdict', parent=s_body, fontSize=13, leading=17,
+            spaceBefore=2, spaceAfter=2, alignment=TA_LEFT)
+        story.append(Paragraph("Headline Verdict", ParagraphStyle(
+            'vh', parent=s_h3, spaceBefore=2, spaceAfter=2)))
+        story.append(Paragraph(_headline, _s_verdict))
+        story.append(Paragraph(_sowhat, ParagraphStyle(
+            's', parent=s_body_italic, fontSize=9.5, leading=12, spaceAfter=8)))
+
+    # ── 2. KPI cards with reference anchors (gradient framing) ──
+    def _kpi_cell(label, value, status, anchor, color=None):
         c = color or _get_status_color(status)
         return [
             Paragraph(str(value), ParagraphStyle(
@@ -456,36 +562,43 @@ def _build_reportlab_pdf(report_generator, calculator, metrics, charts=None):
             Paragraph(label, s_kpi_label),
             Paragraph(status, ParagraphStyle(
                 'ks', parent=s_kpi_status, textColor=_hex_to_rgb(c))),
+            Paragraph(anchor, ParagraphStyle(
+                'ka', parent=s_kpi_label, fontSize=7.2, leading=8.5,
+                textColor=_hex_to_rgb(MUTED))),
         ]
 
-    rob = metrics.get('robustness', 0)
-    # E-20: unified robustness "high" threshold (0.25) — shared source of truth.
-    try:
-        import report_intelligence as _ri_rob
-    except ImportError:  # pragma: no cover
-        from src import report_intelligence as _ri_rob
-    rob_status = ('High' if rob >= _ri_rob.ROBUSTNESS_HIGH_THRESHOLD
-                  else 'Moderate' if rob > 0.15 else 'Low')
-    eff = metrics.get('network_efficiency', 0)
-    eff_status = 'Optimal' if 0.2 <= eff <= 0.6 else 'Sub-optimal'
-    alpha = metrics.get('ascendency_ratio', 0)
+    # α gradient position drives the alpha card's status word (never "Non-Viable").
+    _alpha_pos = {
+        'under-organized': 'Under-organized',
+        'over-organized': 'Over-organized',
+        'balanced': 'Balanced',
+    }[_grad_exec['position']]
+    _overall_kpi = (f"{_exec_profile.get('overall_score', 0):.0f}"
+                    if _exec_profile is not None else '—')
+    _overall_status_kpi = (str(_exec_profile.get('overall_status', ''))
+                           if _exec_profile is not None else '')
 
     kpi_cells = [
-        _kpi_cell('Viability Status', viability, viability),
-        _kpi_cell('Robustness (R)', f"{rob:.3f}", rob_status),
-        _kpi_cell('Network Efficiency', f"{eff:.3f}", eff_status),
-        _kpi_cell('Rel. Ascendency (α)', f"{alpha:.3f}",
-                   'Optimal' if 0.30 <= alpha <= 0.45 else 'Warning'),
+        _kpi_cell('OASIS Overall', _overall_kpi, _overall_status_kpi,
+                  'HEALTHY ≥ 60 / WARNING ≥ 40 / else CRITICAL'),
+        _kpi_cell('Rel. Ascendency (α)', f"{alpha:.3f}", _alpha_pos,
+                  'indicative band 0.2–0.6; high-perf. orgs 0.30–0.45'),
+        _kpi_cell('Robustness (R)', f"{rob:.3f}", rob_status,
+                  'peaks ≈0.37 (=1/e); High ≥ 0.25'),
+        _kpi_cell('Efficiency', f"{eff:.3f}", eff_status,
+                  'balanced 0.2–0.6; high = brittle'),
     ]
 
-    # Flatten into table rows (3 rows per card, 4 columns)
-    kpi_data = [[cell[i] for cell in kpi_cells] for i in range(3)]
+    # Flatten into table rows (4 rows per card: value/label/status/anchor).
+    kpi_data = [[cell[i] for cell in kpi_cells] for i in range(4)]
     kpi_table = Table(kpi_data, colWidths=[CONTENT_W / 4] * 4)
     kpi_table.setStyle(TableStyle([
         ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('TOPPADDING', (0, 0), (-1, -1), 6),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ('LEFTPADDING', (0, 0), (-1, -1), 4),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 4),
         ('BOX', (0, 0), (0, -1), 0.5, _hex_to_rgb('#e0e0e0')),
         ('BOX', (1, 0), (1, -1), 0.5, _hex_to_rgb('#e0e0e0')),
         ('BOX', (2, 0), (2, -1), 0.5, _hex_to_rgb('#e0e0e0')),
@@ -493,25 +606,108 @@ def _build_reportlab_pdf(report_generator, calculator, metrics, charts=None):
         ('BACKGROUND', (0, 0), (-1, -1), _hex_to_rgb('#fafcfb')),
     ]))
     story.append(kpi_table)
-    story.append(Spacer(1, 0.5 * cm))
+    story.append(Spacer(1, 0.35 * cm))
 
-    # Executive summary text
-    exec_text = (
-        f"This report presents a comprehensive network analysis of <b>{org_name}</b> "
-        f"using the Ulanowicz-Fath regenerative economics framework. The organization's "
-        f"network comprises <b>{n_nodes} nodes</b> and <b>{n_edges} directed connections</b>, "
-        f"with a total system throughput of <b>{metrics['total_system_throughput']:.1f} units</b>."
-    )
-    story.append(Paragraph(exec_text, s_body))
+    # ── 3. The marquee "you are here" Window-of-Viability curve ──
+    def _build_exec_wov_image():
+        try:
+            png = _ri_exec.render_window_of_viability_png(alpha, rob)
+        except Exception:
+            return None
+        if not png:
+            return None
+        try:
+            _w = CONTENT_W * 0.72
+            return Image(BytesIO(png), width=_w, height=_w * 4.0 / 7.2)
+        except Exception:
+            return None
 
-    viab_text = (
-        f"The system {'operates within' if metrics['is_viable'] else 'falls outside'} the "
-        f"window of viability (α = {alpha:.3f}, bounds: {metrics['viability_lower_bound']:.2f}–"
-        f"{metrics['viability_upper_bound']:.2f}), indicating "
-        f"{'sustainable operational characteristics' if metrics['is_viable'] else 'need for structural adaptation'}. "
-        f"Robustness of R = {rob:.3f} suggests {rob_status.lower()} resilience to perturbations."
-    )
-    story.append(Paragraph(viab_text, s_body))
+    _guarded_chart_block(
+        _build_exec_wov_image,
+        "<i>You are here.</i> The organization's position (red marker) on the "
+        "robustness curve R(&alpha;) = &minus;&alpha;&middot;ln(&alpha;), with "
+        "the indicative reference band shaded. " + _grad_exec['caveat'],
+        story)
+
+    # ── 4. Top-3 risks (Evidence -> Implication) ──
+    story.append(Paragraph("Top Risks", ParagraphStyle(
+        'trh', parent=s_h3, spaceBefore=4, spaceAfter=3)))
+    _exec_risks_rendered = False
+    if _exec_profile is not None:
+        try:
+            _risk_view = _ri_exec.build_risk_view(metrics, _exec_profile)
+            for _it in _risk_view['items'][:3]:
+                _sc = _get_status_color(_it['severity'])
+                story.append(Paragraph(
+                    f"<font color=\"{_sc}\"><b>{_it['severity']}</b></font> "
+                    f"&mdash; {_it['title']}. "
+                    f"<b>Evidence:</b> {_it['evidence']} "
+                    f"<b>Implication:</b> {_it['implication']}",
+                    ParagraphStyle('rk', parent=s_body, fontSize=9, leading=11.5,
+                                   spaceBefore=1, spaceAfter=3,
+                                   leftIndent=10, firstLineIndent=-10)))
+                _exec_risks_rendered = True
+        except Exception:
+            _exec_risks_rendered = False
+    if not _exec_risks_rendered:
+        story.append(Paragraph(
+            "<b>Evidence:</b> risk view unavailable for this network. "
+            "<b>Implication:</b> see the detailed Risk &amp; Resilience section.",
+            ParagraphStyle('rk0', parent=s_body, fontSize=9, leading=11.5,
+                           spaceAfter=3)))
+
+    # ── 5. Prioritized next steps (roadmap, time-horizoned) ──
+    story.append(Paragraph("Prioritized Next Steps", ParagraphStyle(
+        'nsh', parent=s_h3, spaceBefore=4, spaceAfter=3)))
+    _exec_steps_rendered = False
+    if _exec_profile is not None:
+        try:
+            try:
+                from oasis_calculator import OASISCalculator as _OC_rec
+            except Exception:
+                from src.oasis_calculator import OASISCalculator as _OC_rec
+            _exec_recs = _exec_profile.get('recommendations')
+            if _exec_recs is None:
+                _exec_recs = _OC_rec(calculator).get_recommendations()
+            _exec_roadmap = _ri_exec.build_action_roadmap(_exec_recs, _exec_profile)
+            _horizon_labels = [
+                ('immediate', 'Immediate (0–3 mo)'),
+                ('short_term', 'Short-Term (3–9 mo)'),
+                ('medium_term', 'Medium-Term (9–18 mo)'),
+            ]
+            _flat_steps = []
+            for _hkey, _hlabel in _horizon_labels:
+                for _st in _exec_roadmap.get(_hkey, []):
+                    _flat_steps.append((_hlabel, _st))
+            for _hlabel, _st in _flat_steps[:3]:
+                _pc = _get_status_color(_st.get('priority', ''))
+                story.append(Paragraph(
+                    f"<font color=\"{_pc}\"><b>{_hlabel}</b></font> &middot; "
+                    f"<b>{_st.get('dimension', '')}</b> &mdash; "
+                    f"{_st.get('action', '')}",
+                    ParagraphStyle('ns', parent=s_body, fontSize=9, leading=11.5,
+                                   spaceBefore=1, spaceAfter=3,
+                                   leftIndent=10, firstLineIndent=-10)))
+                _exec_steps_rendered = True
+        except Exception:
+            _exec_steps_rendered = False
+    if not _exec_steps_rendered:
+        story.append(Paragraph(
+            "<b>Immediate (0–3 mo)</b> &middot; Establish a recurring "
+            "assessment cadence and confirm the reconciled verdict with "
+            "leadership before acting.",
+            ParagraphStyle('ns0', parent=s_body, fontSize=9, leading=11.5,
+                           spaceAfter=3)))
+
+    # ── Divider: analyst depth gated behind this line ──
+    story.append(Spacer(1, 0.2 * cm))
+    story.append(HRFlowable(
+        width='100%', thickness=1.2, color=_hex_to_rgb(GOLD),
+        dash=(3, 2), spaceBefore=1, spaceAfter=3))
+    story.append(Paragraph(
+        "— Detailed analysis follows —",
+        ParagraphStyle('divider', parent=s_caption, fontSize=10,
+                       textColor=_hex_to_rgb(MEDIUM_GREEN), spaceAfter=2)))
 
     story.append(PageBreak())
 
