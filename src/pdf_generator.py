@@ -49,6 +49,75 @@ OASIS_COLORS = {
 }
 
 
+# ── Human-readable metric labels ───────────────────────────────────────────
+# Maps raw code identifiers (dict keys) to reader-facing labels. Used ONLY for
+# display text; dict keys/access are never changed.
+_METRIC_LABELS = {
+    'relative_ascendency': 'relative ascendency (α)',
+    'ascendency_ratio': 'relative ascendency (α)',
+    'number_of_roles': 'number of functional roles',
+    'functional_diversity': 'functional diversity',
+    'finn_cycling_index': 'resource cycling (Finn cycling index)',
+    'flow_reciprocity': 'flow reciprocity',
+    'regenerative_capacity': 'regenerative capacity',
+    'flow_diversity': 'flow diversity',
+    'connectance': 'network connectance',
+    'clustering_coefficient': 'clustering coefficient',
+    'gini_coefficient': 'resource distribution (Gini coefficient)',
+    'mutualism_ratio': 'mutualism ratio',
+    'robustness': 'robustness',
+    'redundancy': 'pathway redundancy',
+    'overhead_ratio': 'reserve overhead',
+}
+
+
+def humanize_metric_name(name):
+    """Convert a raw metric identifier into a reader-facing label.
+
+    Falls back to a title-cased, underscore-stripped version for any key not in
+    the explicit map, guaranteeing no raw ``snake_case`` identifier reaches the
+    reader.
+    """
+    if not isinstance(name, str):
+        return str(name)
+    key = name.strip()
+    if key in _METRIC_LABELS:
+        return _METRIC_LABELS[key]
+    return key.replace('_', ' ').strip()
+
+
+def build_toc_items():
+    """Table-of-Contents entries mirroring the ACTUAL body headings, in order.
+
+    Kept in sync with :data:`BODY_HEADINGS`; every entry here must correspond to
+    a heading rendered in the report body.
+    """
+    return [
+        ("Executive Summary", ""),
+        ("1. Introduction", ""),
+        ("2. Methodology", ""),
+        ("3. Results", ""),
+        ("   3.1 Core Network Metrics", ""),
+        ("   3.2 Sustainability Assessment", ""),
+        ("   3.3 Visualizations", ""),
+        ("   3.4 Flow Distribution Analysis", ""),
+        ("4. OASIS Organizational Health Assessment", ""),
+        ("5. Benchmarking & Position", ""),
+        ("6. Risk & Resilience Analysis", ""),
+        ("7. Prioritized Action Roadmap", ""),
+        ("8. ESG Framework Mapping", ""),
+        ("9. Discussion", ""),
+        ("10. Conclusions & Recommendations", ""),
+        ("References", ""),
+        ("Appendix: Detailed Data", ""),
+    ]
+
+
+# Canonical list of body headings actually rendered (top-level + subsections),
+# used by the TOC and by proofing tests to guarantee TOC↔body consistency.
+BODY_HEADINGS = [t.strip() for t, _ in build_toc_items()]
+
+
 def _hex_to_rgb(hex_color):
     """Convert hex color string to reportlab Color."""
     from reportlab.lib.colors import HexColor
@@ -719,27 +788,7 @@ def _build_reportlab_pdf(report_generator, calculator, metrics, charts=None):
         width='100%', thickness=1, color=_hex_to_rgb(FOREST_GREEN),
         spaceBefore=0, spaceAfter=16,
     ))
-    toc_items = [
-        ("Executive Summary", ""),
-        ("1. Introduction", ""),
-        ("2. Methodology", ""),
-        ("3. Results", ""),
-        ("   3.1 Network Structure", ""),
-        ("   3.2 Information-Theoretic Analysis", ""),
-        ("   3.3 System Organization", ""),
-        ("   3.4 Sustainability Assessment", ""),
-        ("   3.5 Resilience Metrics", ""),
-        ("   3.6 Flow Distribution", ""),
-        ("4. OASIS Health Assessment", ""),
-        ("5. Benchmarking & Position", ""),
-        ("6. Risk & Resilience Analysis", ""),
-        ("7. Prioritized Action Roadmap", ""),
-        ("8. ESG Framework Mapping", ""),
-        ("9. Discussion", ""),
-        ("10. Conclusions & Recommendations", ""),
-        ("References", ""),
-        ("Appendix", ""),
-    ]
+    toc_items = build_toc_items()
     for item, _ in toc_items:
         indent = 24 if item.startswith('   ') else 0
         toc_style = ParagraphStyle(
@@ -1325,8 +1374,10 @@ def _build_reportlab_pdf(report_generator, calculator, metrics, charts=None):
                 ]
                 metrics_to_improve = rec.get('metrics_to_improve', [])
                 if metrics_to_improve:
+                    _mnames = ', '.join(
+                        humanize_metric_name(_m) for _m in metrics_to_improve)
                     rec_items.append(
-                        f"<b>Metrics to improve:</b> {', '.join(metrics_to_improve)}")
+                        f"<b>Metrics to improve:</b> {_mnames}")
                 for item in rec_items:
                     story.append(Paragraph(f"•  {item}", ParagraphStyle(
                         'ri', parent=s_body, leftIndent=18, firstLineIndent=-12,
@@ -1394,10 +1445,53 @@ def _build_reportlab_pdf(report_generator, calculator, metrics, charts=None):
                 f"optimum &alpha; &asymp; {_bench['optimum']:.2f}). Distance to the "
                 f"robustness optimum is <b>{_bench['distance_to_optimum']:.3f}</b>.",
                 s_body))
+            # ── PRIMARY comparator: organizational anchor (Fath et al. 2019) ──
+            _org_lo, _org_hi = 0.30, 0.45
+            _org_in = _org_lo <= _bench['alpha'] <= _org_hi
             story.append(Paragraph(
-                "Published ecosystem values below are scientific reference points for "
-                "the viability scale&mdash;not organizational targets.", s_body_italic))
-            _anchor_data = [['Reference Network', 'Relative Ascendency (α)', 'Source']]
+                "<b>Primary benchmark &mdash; organizational reference.</b> "
+                "High-performing organizations analyzed with this framework exhibit "
+                "relative ascendency &alpha; in the range "
+                f"<b>0.30&ndash;0.45</b> (Fath et al., 2019). At &alpha; = "
+                f"{_bench['alpha']:.3f}, {org_name} "
+                f"{'sits within' if _org_in else 'sits outside'} this "
+                "organizational band, which is the appropriate headline comparator "
+                "for interpreting these results.", s_body))
+            _org_data = [
+                ['Reference', 'Relative Ascendency (α)', 'Source'],
+                [Paragraph('High-performing organizations', cell_b),
+                 Paragraph('0.30–0.45', cell_s),
+                 Paragraph('Fath et al., 2019', cell_s)],
+                [Paragraph(f'<b>{org_name} (this assessment)</b>', cell_b),
+                 Paragraph(f"<b>{_bench['alpha']:.3f}</b>", cell_s),
+                 Paragraph('—', cell_s)],
+            ]
+            _ot = Table(_org_data, colWidths=[
+                CONTENT_W * 0.40, CONTENT_W * 0.30, CONTENT_W * 0.30])
+            _ot.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), _hex_to_rgb(TABLE_HEADER_BG)),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('TOPPADDING', (0, 0), (-1, -1), 5),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                ('LEFTPADDING', (0, 0), (-1, -1), 6),
+                ('GRID', (0, 0), (-1, -1), 0.3, _hex_to_rgb('#cccccc')),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1),
+                 [colors.white, _hex_to_rgb(TABLE_ALT_ROW)]),
+            ]))
+            story.append(_ot)
+            story.append(Paragraph(
+                "<i>Table 5. Primary benchmark &mdash; organizational reference "
+                "band (Fath et al., 2019).</i>", s_caption))
+            # ── Secondary: ecological anchors, clearly demoted to illustrative ──
+            story.append(Spacer(1, 0.3 * cm))
+            story.append(Paragraph(
+                "The ecological values below are provided only as <b>illustrative "
+                "methodology reference points</b> that calibrate the viability "
+                "scale. They are <b>not</b> the benchmark for this organization and "
+                "should not be read as targets.", s_body_italic))
+            _anchor_data = [['Ecological Reference Point (illustrative)',
+                             'Relative Ascendency (α)', 'Source']]
             for _a in _bench['reference_anchors']:
                 _anchor_data.append([
                     Paragraph(_a['label'], cell_b),
@@ -1407,7 +1501,7 @@ def _build_reportlab_pdf(report_generator, calculator, metrics, charts=None):
                 _at = Table(_anchor_data, colWidths=[
                     CONTENT_W * 0.40, CONTENT_W * 0.30, CONTENT_W * 0.30])
                 _at.setStyle(TableStyle([
-                    ('BACKGROUND', (0, 0), (-1, 0), _hex_to_rgb(TABLE_HEADER_BG)),
+                    ('BACKGROUND', (0, 0), (-1, 0), _hex_to_rgb(MUTED)),
                     ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
                     ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
                     ('TOPPADDING', (0, 0), (-1, -1), 5),
@@ -1419,8 +1513,9 @@ def _build_reportlab_pdf(report_generator, calculator, metrics, charts=None):
                 ]))
                 story.append(_at)
                 story.append(Paragraph(
-                    "<i>Table 5. Published reference networks (relative ascendency). "
-                    "Shown as scientific reference points, not targets.</i>", s_caption))
+                    "<i>Table 5b. Ecological reference points (illustrative). "
+                    "Scientific calibration values for the viability scale, "
+                    "not organizational targets.</i>", s_caption))
             story.append(PageBreak())
 
             # ---- 6. Risk & Resilience Analysis ----
@@ -1464,7 +1559,9 @@ def _build_reportlab_pdf(report_generator, calculator, metrics, charts=None):
                     story.append(Paragraph(f"<b>Action:</b> {_it['action']}", s_body))
                     story.append(Paragraph(
                         f"<b>Expected impact:</b> {_it['expected_impact']}", s_body))
-                    _m = ', '.join(_it['metrics_to_improve']) or 'N/A'
+                    _m = ', '.join(
+                        humanize_metric_name(_x)
+                        for _x in _it['metrics_to_improve']) or 'N/A'
                     story.append(Paragraph(
                         f"<b>Metrics to improve:</b> {_m}", s_body))
             story.append(PageBreak())

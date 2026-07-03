@@ -353,10 +353,10 @@ Network Efficiency              {eff:<11.3f} {self._categorize_efficiency()}
         a_phi_ratio = self.metrics['ascendency'] / self.metrics['overhead'] if self.metrics['overhead'] > 0 else 0
 
         discussion = f"""
-4. DISCUSSION
+9. DISCUSSION
 =============
 
-4.1 Strategic Assessment
+9.1 Strategic Assessment
 -------------------------
 The analysis of {self.org_name} yields a clear overall picture: the organization {"maintains a configuration consistent with sustainable dynamics" if viable else "exhibits structural conditions that require deliberate intervention"}.
 
@@ -369,7 +369,7 @@ The analysis of {self.org_name} yields a clear overall picture: the organization
         if risks:
             discussion += f"""The material risks warranting management attention include {'; '.join(risks)}. {"Left unaddressed, these conditions could erode the organization's capacity to respond to environmental changes or absorb operational shocks." if not viable else "While these do not currently threaten viability, monitoring is warranted to ensure they do not deteriorate."}\n\n"""
 
-        discussion += f"""4.2 Comparative Positioning
+        discussion += f"""9.2 Comparative Positioning
 ----------------------------
 Empirical benchmarks from ecological and organizational literature provide useful context. Sustainable ecological food webs typically exhibit alpha in the range 0.20 to 0.50 (Ulanowicz, 2009). High-performing organizations analyzed using the same framework show alpha between 0.30 and 0.45 (Fath et al., 2019). The current system's alpha of {alpha:.3f} {"aligns with" if 0.30 <= alpha <= 0.45 else "deviates from"} the high-performing organizational benchmark.
 
@@ -377,7 +377,7 @@ The ratio of ascendency to overhead (A/Phi = {a_phi_ratio:.3f}) provides additio
 
 The flow diversity utilization -- the ratio of observed diversity to the theoretical maximum -- stands at {fd_utilization:.1f}%. This indicates that {self.org_name} employs {"a broad range" if fd_utilization > 50 else "a limited fraction"} of its potential communication channels, {"supporting distributed knowledge flow" if fd_utilization > 50 else "suggesting opportunity to broaden information pathways"}.
 
-4.3 Limitations and Caveats
+9.3 Limitations and Caveats
 -----------------------------
 Several limitations should be considered when interpreting these findings.
 
@@ -396,18 +396,18 @@ The analysis represents a single point in time. Organizational networks evolve, 
         _grad_c = _viability_bands().assess_alpha_position(alpha)
 
         conclusions = f"""
-5. CONCLUSIONS AND RECOMMENDATIONS
+10. CONCLUSIONS AND RECOMMENDATIONS
 ===================================
 
-5.1 Summary of Findings
+10.1 Summary of Findings
 -------------------------
 This assessment of {self.org_name} places the organization on the efficiency-resilience gradient as {_grad_c['position']} relative to the indicative reference band, with direction of travel: {_grad_c['direction_of_travel']}. Robustness of R = {rob:.3f} ({self._categorize_robustness().lower()}) and network efficiency of {eff:.3f} ({self._categorize_efficiency().lower()}) together characterize a system that {"is well-positioned for sustained performance in dynamic conditions" if _grad_c['position'] == 'balanced' and rob > 0.2 else "maintains adequate but not exceptional adaptive capacity" if _grad_c['position'] == 'balanced' else "would move toward the indicative band by " + _grad_c['direction_of_travel']}. {_viability_bands().INDICATIVE_REFERENCE_CAVEAT}
 
-5.2 Prioritized Recommendations
+10.2 Prioritized Recommendations
 ---------------------------------
 {self._generate_priority_recommendations()}
 
-5.3 Future Assessment
+10.3 Future Assessment
 ----------------------
 To strengthen the evidence base, the following extensions are recommended: longitudinal tracking of these metrics at regular intervals to identify trends and cycles; comparative benchmarking against industry peers using the same framework; separate analysis of distinct flow types (information, resources, authority) where data permits; and dynamic modeling to develop predictive scenarios for organizational evolution.
 
