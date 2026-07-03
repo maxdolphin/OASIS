@@ -330,3 +330,16 @@ Fourteen recommendations (R1–R14) across three horizons, every one traced to a
 4. **Network-Efficiency-vs-α identity** (Gap #9) — whether "Network Efficiency" and α are intended to be the same quantity (both print 0.066 on TechFlow).
 
 *Scope: presentation, framing, information architecture, and narrative only. No formula, threshold, coefficient, or weighting is changed by this review. All cited code values were verified against source on branch `feat/detailed-ecosystemic-report`.*
+
+### Handoff — from this review to implementation
+
+This document delivers the **plan**, not the implementation. Each recommendation becomes its own downstream spec → plan → build cycle; the redesigns are deliberately out of scope for this review so the diagnosis stays focused and shippable.
+
+**Recommended first follow-on specs** (the Immediate horizon — highest business impact, lowest effort, all pure presentation):
+
+1. **R1 — Reconcile the dual verdict.** One headline verdict; demote the OASIS overall score to a sub-component. This closes the single biggest trust-killer (Gap #1) and unblocks the operator→exec handoff. *Start here.*
+2. **R2 + R3 — Traffic-light and proofing fixes.** Green "Non-Viable" → red; fix the "Non-Viabl/e" split, the mis-numbered §9/§10 headings, and the leaked variable names. One afternoon; removes the "unproofed draft" signal.
+3. **R4 + R5 — Metric contextualization.** Add the α reference band + one-line "so-what" under each headline metric; stop printing α and ascendency-unit bounds in the same table (Gaps #5, #7).
+4. **R6 — Fix benchmarking honesty.** Promote the already-coded Fath 2019 org anchor into the §5 table; demote the wetlands to a methodology footnote (Gap #3).
+
+**Parallel, non-presentation track:** the four `formula-validator` hand-offs above are a *separate* scientific-validation workstream (per `CLAUDE.md`, formulas change only with peer-reviewed support). They should be routed to the `formula-validator` / `research-validator` path, not bundled with the presentation redesign.
