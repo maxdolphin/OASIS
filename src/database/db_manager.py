@@ -98,6 +98,11 @@ class DatabaseManager:
             cursor, 'precomputed_metrics', 'formula_version', 'TEXT'
         )
 
+        # Peer-cohort benchmarking: optional nullable sector tag on the network.
+        # Used to build size/sector-matched peer cohorts. Untagged (NULL) rows are
+        # simply skipped by the sector filter — never fabricated. Idempotent.
+        self._ensure_column(cursor, 'networks', 'sector', 'TEXT')
+
         # HuggingFace Discovery tables
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS discovered_datasets (
@@ -262,7 +267,8 @@ class DatabaseManager:
                      source_file: str,
                      node_count: int,
                      edge_count: int,
-                     network_hash: str) -> int:
+                     network_hash: str,
+                     sector: str = None) -> int:
         """
         Save or update a network record.
 
@@ -272,6 +278,9 @@ class DatabaseManager:
             node_count: Number of nodes
             edge_count: Number of edges
             network_hash: Unique network hash
+            sector: Optional sector tag (for peer-cohort benchmarking). When None,
+                any existing sector on the row is PRESERVED (never overwritten to
+                NULL) so a later re-save without a tag does not wipe the tag.
 
         Returns:
             Network ID
@@ -281,15 +290,16 @@ class DatabaseManager:
 
         try:
             cursor.execute('''
-                INSERT INTO networks (name, source_file, node_count, edge_count, network_hash)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO networks (name, source_file, node_count, edge_count, network_hash, sector)
+                VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(network_hash) DO UPDATE SET
                     name = excluded.name,
                     source_file = excluded.source_file,
                     node_count = excluded.node_count,
                     edge_count = excluded.edge_count,
+                    sector = COALESCE(excluded.sector, networks.sector),
                     updated_at = CURRENT_TIMESTAMP
-            ''', (name, source_file, node_count, edge_count, network_hash))
+            ''', (name, source_file, node_count, edge_count, network_hash, sector))
 
             conn.commit()
 
@@ -309,9 +319,11 @@ class DatabaseManager:
             cursor.execute('''
                 UPDATE networks
                 SET source_file = ?, node_count = ?, edge_count = ?,
-                    network_hash = ?, updated_at = CURRENT_TIMESTAMP
+                    network_hash = ?,
+                    sector = COALESCE(?, sector),
+                    updated_at = CURRENT_TIMESTAMP
                 WHERE name = ?
-            ''', (source_file, node_count, edge_count, network_hash, name))
+            ''', (source_file, node_count, edge_count, network_hash, sector, name))
             conn.commit()
 
             cursor.execute('SELECT id FROM networks WHERE name = ?', (name,))

@@ -1458,7 +1458,38 @@ def _build_reportlab_pdf(report_generator, calculator, metrics, charts=None):
                 f"optimum &alpha; &asymp; {_bench['optimum']:.2f}). Distance to the "
                 f"robustness optimum is <b>{_bench['distance_to_optimum']:.3f}</b>.",
                 s_body))
-            # ── PRIMARY comparator: organizational anchor (Fath et al. 2019) ──
+            # PEER-COHORT benchmark (percentile-vs-peers).
+            # HONEST: only reports a percentile when a size/sector-matched cohort
+            # of >= MIN_COHORT_SIZE peers exists in the store; otherwise renders
+            # an explicit insufficient-cohort note and falls back to the
+            # indicative reference below. Never fabricates peer numbers.
+            try:
+                try:
+                    from database.peer_cohort import (
+                        peer_alpha_benchmark as _pab,
+                        format_peer_benchmark_note as _pbn,
+                    )
+                    from database.db_manager import get_database_manager as _gdb
+                except Exception:
+                    from src.database.peer_cohort import (
+                        peer_alpha_benchmark as _pab,
+                        format_peer_benchmark_note as _pbn,
+                    )
+                    from src.database.db_manager import get_database_manager as _gdb
+                _peer_db = _gdb()
+                _org_nodes = len(calculator.node_names)
+                _org_sector = getattr(report_generator, 'sector', None)
+                _peer = _pab(_peer_db, alpha=_bench['alpha'],
+                             node_count=_org_nodes, sector=_org_sector)
+                _peer_note = _pbn(_peer, _bench['alpha'])
+                _peer_style = s_body if _peer.get('status') == 'ok' else s_body_italic
+                story.append(Paragraph(
+                    f"<b>Peer-cohort benchmark.</b> {_peer_note}", _peer_style))
+            except Exception:
+                # Best-effort; on any failure fall through to the indicative
+                # reference without fabricating anything.
+                pass
+            # PRIMARY comparator: organizational anchor (Fath et al. 2019).
             _org_lo, _org_hi = 0.30, 0.45
             _org_in = _org_lo <= _bench['alpha'] <= _org_hi
             story.append(Paragraph(
