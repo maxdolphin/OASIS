@@ -75,16 +75,30 @@ class AdvancedNetworkAnalyzer:
             return self._cache['centralities']
         
         centralities = {}
-        
+
         # Degree centrality (normalized)
         centralities['in_degree'] = nx.in_degree_centrality(self.G)
         centralities['out_degree'] = nx.out_degree_centrality(self.G)
         centralities['total_degree'] = nx.degree_centrality(self.G)
-        
+
+        # Distance-weighted copy for path-based centralities.
+        # Brandes (2001): weighted betweenness/closeness treat the edge weight as
+        # a DISTANCE/COST, so shortest paths MINIMIZE the summed weight. Our edge
+        # weights are FLOW STRENGTHS (higher = stronger tie), so passing them raw
+        # would make strong high-flow ties look "long/far" and route paths around
+        # them -- the opposite of intent. We therefore build an inverted distance
+        # d = 1/flow (guarding flow > 0) and use THAT for betweenness/closeness.
+        # Eigenvector/PageRank correctly use weight-as-strength and are left as-is.
+        # See validation-EF-network-stats.md (N7) and expert-mathematician.md (M6).
+        G_dist = self.G.copy()
+        for _u, _v, _d in G_dist.edges(data=True):
+            _w = _d.get('weight', 0)
+            _d['distance'] = (1.0 / _w) if _w > 0 else float('inf')
+
         # Betweenness centrality (identifies bridges/brokers)
         try:
             centralities['betweenness'] = nx.betweenness_centrality(
-                self.G, weight='weight', normalized=True
+                G_dist, weight='distance', normalized=True
             )
         except:
             centralities['betweenness'] = {i: 0 for i in range(self.n_nodes)}
@@ -98,10 +112,11 @@ class AdvancedNetworkAnalyzer:
             # Fall back to degree if eigenvector fails
             centralities['eigenvector'] = centralities['total_degree']
         
-        # Closeness centrality (accessibility)
+        # Closeness centrality (accessibility) -- uses inverted distance too
+        # (Brandes 2001): strong flow => short distance => high closeness.
         try:
             centralities['closeness'] = nx.closeness_centrality(
-                self.G, distance='weight'
+                G_dist, distance='distance'
             )
         except:
             centralities['closeness'] = {i: 0 for i in range(self.n_nodes)}
@@ -187,6 +202,35 @@ class AdvancedNetworkAnalyzer:
         self._cache['communities'] = results
         return results
     
+    @staticmethod
+    def _mean_degree(G_undirected) -> float:
+        """Mean degree <k> of an undirected graph = 2m/n.
+
+        Fronczak et al. (2004): the ER random-baseline path length is
+        L_rand ~ ln(n)/ln<k>, where <k> is the MEAN degree 2m/n -- not the
+        avg-neighbour-degree of degree-1 nodes that the previous code pulled
+        from nx.average_degree_connectivity().get(1, 2).
+        """
+        n = G_undirected.number_of_nodes()
+        m = G_undirected.number_of_edges()
+        return (2.0 * m / n) if n > 0 else 0.0
+
+    @staticmethod
+    def _lattice_clustering(k: float) -> float:
+        """Clustering coefficient of an equivalent ring lattice of mean degree k.
+
+        Standard Watts-Strogatz ring-lattice approximation:
+            C_lattice = 3(k-2) / (4(k-1)).
+        This is an APPROXIMATION (it assumes a regular ring lattice where each
+        node connects to its k nearest neighbours) used in Telford's omega. For
+        k <= 2 the ring lattice has no closed triangles, so we clamp to 0; the
+        result is guarded to [0, 1]. See expert review note on omega's lattice term.
+        """
+        if k <= 2:
+            return 0.0
+        c = 3.0 * (k - 2.0) / (4.0 * (k - 1.0))
+        return float(min(1.0, max(0.0, c)))
+
     def calculate_small_world_metrics(self) -> Dict[str, float]:
         """
         Calculate small world metrics.
@@ -221,36 +265,58 @@ class AdvancedNetworkAnalyzer:
         except:
             actual_path_length = float('inf')
         
-        # Random graph comparison (Erdős-Rényi)
+        # Random graph comparison (Erdős-Rényi) on the undirected projection.
+        # Small-world statistics (Humphries sigma, Telford omega) are defined for
+        # undirected graphs, so we legitimately project the directed flow network.
         n = self.n_nodes
         m = G_undirected.number_of_edges()
         p = 2 * m / (n * (n - 1)) if n > 1 else 0
-        
+
+        # Mean degree <k> = 2m/n (Fronczak et al. 2004) -- the correct baseline
+        # for L_rand ~ ln(n)/ln<k>. The previous code used
+        # average_degree_connectivity().get(1, 2), which is NOT the mean degree.
+        mean_degree = self._mean_degree(G_undirected)
+
         # Theoretical random graph values
         random_clustering = p
-        random_path_length = np.log(n) / np.log(nx.average_degree_connectivity(G_undirected).get(1, 2)) if n > 1 else 1
-        
-        # Small world index (sigma)
+        if n > 1 and mean_degree > 1:
+            random_path_length = np.log(n) / np.log(mean_degree)
+        else:
+            random_path_length = 1.0
+
+        # Equivalent ring-lattice clustering for Telford's omega (approximation;
+        # see _lattice_clustering docstring).
+        lattice_clustering = self._lattice_clustering(mean_degree)
+
+        # Small world index (sigma) -- Humphries & Gurney (2008)
         if random_clustering > 0 and random_path_length > 0 and actual_path_length < float('inf'):
             C_ratio = actual_clustering / random_clustering if random_clustering > 0 else 1
             L_ratio = actual_path_length / random_path_length if random_path_length > 0 else 1
             sigma = C_ratio / L_ratio if L_ratio > 0 else 0
         else:
             sigma = 0
-        
-        # Omega small world metric (alternative measure)
-        # Range: -1 (lattice) to 0 (small world) to 1 (random)
-        if actual_path_length < float('inf'):
-            omega = (random_path_length / actual_path_length) - (actual_clustering / random_clustering) \
-                    if random_clustering > 0 else 0
+
+        # Omega small-world metric -- Telford/Bassett et al. (2011):
+        #     omega = L_rand / L  -  C / C_lattice
+        # The SECOND term uses the LATTICE clustering (not random clustering, as
+        # the previous code did). Range: ~ -1 (lattice end) to ~ +1 (random end),
+        # ~0 for a small-world network. Clamped to [-1, 1] to absorb finite-size /
+        # approximation slack.
+        if actual_path_length < float('inf') and actual_path_length > 0:
+            l_term = (random_path_length / actual_path_length) if actual_path_length > 0 else 0
+            c_term = (actual_clustering / lattice_clustering) if lattice_clustering > 0 else 0
+            omega = l_term - c_term
+            omega = float(min(1.0, max(-1.0, omega)))
         else:
             omega = 0
-        
+
         metrics = {
             'clustering_coefficient': actual_clustering,
             'average_path_length': actual_path_length,
             'random_clustering': random_clustering,
             'random_path_length': random_path_length,
+            'lattice_clustering': lattice_clustering,
+            'mean_degree': mean_degree,
             'small_world_sigma': sigma,  # > 1 indicates small world
             'small_world_omega': omega,  # Close to 0 indicates small world
             'is_small_world': sigma > 1
@@ -304,34 +370,62 @@ class AdvancedNetworkAnalyzer:
         Returns:
             Dictionary with rich club metrics
         """
-        # Convert to undirected
+        # Rich-club is an undirected concept; project the directed flow network.
         G_undirected = self.G.to_undirected()
-        
-        # Default k to top 10% degree
+        # Drop self-loops: networkx rich_club_coefficient requires simple graphs.
+        G_undirected.remove_edges_from(nx.selfloop_edges(G_undirected))
+
+        # Default k to the top-10% degree cutoff (90th percentile). This cutoff
+        # is a heuristic choice for "which nodes count as the rich core"; it is
+        # documented as a convention, not a canonical constant.
         if k is None:
             degrees = dict(G_undirected.degree())
             if degrees:
                 k = int(np.percentile(list(degrees.values()), 90))
             else:
                 k = 1
-        
-        try:
-            # Calculate rich club coefficient
-            rc = nx.rich_club_coefficient(G_undirected, normalized=False)
-            
-            # Get the coefficient at threshold k
-            rc_at_k = rc.get(k, 0) if rc else 0
-            
+
+        n = G_undirected.number_of_nodes()
+        n_edges = G_undirected.number_of_edges()
+
+        # Colizza et al. (2006): the meaningful rich-club measure is the NORMALIZED
+        # coefficient phi_norm(k) = phi(k) / phi_random(k), the ratio to a
+        # degree-preserving randomization. The raw (unnormalized) phi(k) is
+        # monotone in k and uninterpretable on its own. Normalization requires a
+        # non-trivial graph (enough nodes/edges to build a random reference and
+        # perform double-edge swaps); on tiny graphs networkx raises. We therefore
+        # guard and return an 'insufficient' sentinel instead of a raw number.
+        MIN_NODES, MIN_EDGES = 10, 15
+        if n < MIN_NODES or n_edges < MIN_EDGES:
             return {
-                'rich_club_coefficient': rc_at_k,
+                'rich_club_coefficient': 'insufficient',
                 'threshold_k': k,
-                'full_spectrum': rc
+                'full_spectrum': {},
+                'normalized': True,
+                'note': (
+                    f'graph too small for a normalized rich-club randomization '
+                    f'(n={n}, m={n_edges}; need >= {MIN_NODES} nodes, {MIN_EDGES} edges)'
+                )
             }
-        except:
+
+        try:
+            # Normalized rich-club coefficient (ratio to degree-preserving null).
+            rc = nx.rich_club_coefficient(G_undirected, normalized=True, seed=42)
+            rc_at_k = rc.get(k, None) if rc else None
             return {
-                'rich_club_coefficient': 0,
+                'rich_club_coefficient': rc_at_k if rc_at_k is not None else 'insufficient',
                 'threshold_k': k,
-                'full_spectrum': {}
+                'full_spectrum': rc,
+                'normalized': True
+            }
+        except Exception as exc:
+            # Randomization can fail on graphs that resist double-edge swaps.
+            return {
+                'rich_club_coefficient': 'insufficient',
+                'threshold_k': k,
+                'full_spectrum': {},
+                'normalized': True,
+                'note': f'normalized rich-club unavailable: {type(exc).__name__}'
             }
     
     def calculate_robustness_metrics(self, num_simulations: int = 10) -> Dict[str, Any]:

@@ -11,6 +11,29 @@ from typing import Dict, Any, List, Optional
 import json
 
 
+def flow_diversity_utilization(flow_diversity: float, n_nodes: int) -> float:
+    """Flow-diversity utilization as a percentage of the theoretical maximum.
+
+    The maximum flow diversity for a network with n nodes (n^2 possible directed
+    flow cells) is H_max = log(n^2). The utilization is fd / H_max * 100.
+
+    IMPORTANT (base match): the Ulanowicz engine computes flow_diversity in NATS
+    (natural log). The denominator MUST use the SAME base, i.e. np.log(n**2)
+    (nats) -- NOT np.log2(n**2) (bits). The previous code mixed a nats numerator
+    with a base-2 denominator, understating utilization by a factor of ln(2) ~=
+    0.693 (a uniform-flow network read ~69% instead of 100%). See
+    validation-EF-network-stats.md (S5).
+
+    Guards n <= 1 (H_max = log(1) = 0) to avoid divide-by-zero.
+    """
+    if n_nodes is None or n_nodes <= 1:
+        return 0.0
+    h_max = np.log(n_nodes ** 2)  # nats, matching flow_diversity's base
+    if h_max <= 0:
+        return 0.0
+    return float(flow_diversity / h_max * 100)
+
+
 class PublicationReportGenerator:
     """
     Generates professional, audit-firm quality reports for organizational
@@ -263,8 +286,8 @@ Network Efficiency              {eff:<11.3f} {self._categorize_efficiency()}
         td = self.metrics['trophic_depth']
         fd = self.metrics['flow_diversity']
         ovh_ratio = self.metrics['overhead_ratio']
-        h_max = np.log2(len(self.node_names) ** 2)
-        fd_utilization = (fd / h_max * 100) if h_max > 0 else 0
+        # Utilization: fd (nats) vs H_max = log(n^2) in the SAME base (nats).
+        fd_utilization = flow_diversity_utilization(fd, len(self.node_names))
 
         # Strengths and risks
         strengths = []

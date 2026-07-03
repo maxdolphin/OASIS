@@ -1049,8 +1049,16 @@ class UlanowiczCalculator:
             
             sum_diff_in = sum(max_in_degree - d for d in in_degrees.values())
             sum_diff_out = sum(max_out_degree - d for d in out_degrees.values())
-            
-            max_possible_diff = (n - 1) * (n - 2)
+
+            # Freeman (1979) directed normalizer. For raw in/out degree of a
+            # DIRECTED graph the theoretical maximum of sum(d* - d_i) is realized
+            # by a perfect in/out-star (one node with degree n-1, the rest 0),
+            # giving (n-1)*(n-1) = (n-1)^2. The classic (n-1)(n-2) denominator is
+            # the UNDIRECTED star maximum and under-normalizes directed degrees
+            # (pushing the coefficient above 1). See
+            # docs/business-revision/evidence/validation-EF-network-stats.md (N4)
+            # and expert-mathematician.md (M6a).
+            max_possible_diff = (n - 1) ** 2
             
             metrics['in_degree_centralization'] = sum_diff_in / max_possible_diff if max_possible_diff > 0 else 0
             metrics['out_degree_centralization'] = sum_diff_out / max_possible_diff if max_possible_diff > 0 else 0
