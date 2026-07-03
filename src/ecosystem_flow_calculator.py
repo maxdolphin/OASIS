@@ -101,50 +101,85 @@ class EcosystemFlowCalculator(UlanowiczCalculator):
     
     def calculate_finn_cycling_index(self) -> float:
         """
-        Calculate Finn's Cycling Index (FCI).
-        
-        FCI measures the fraction of total throughput involved in cycling.
-        Higher values indicate more material/energy recycling.
-        
-        Based on: Finn, J.T. (1976) "Measures of ecosystem structure and function 
-        derived from analysis of flows" J. Theor. Biol. 56:363-380
-        
+        Calculate Finn's Cycling Index (FCI) — canonical Leontief method.
+
+        FCI is the fraction of total system throughput that is cycled, i.e.
+        that revisits at least one compartment. Higher values indicate more
+        material/energy recycling.
+
+        Canonical method (Finn 1976; Ulanowicz 2004 §5 p.330; Fath 2019
+        Principle 2 p.20):
+          1. Column-normalize by throughflow to form the transition matrix G:
+                 G[:, j] = T[:, j] / T_j_in
+             where T_j_in is the total inflow to compartment j (internal column
+             sum + imports if boundary flows are provided; internal column sum
+             only otherwise). Zero-inflow columns are guarded to zero.
+          2. Leontief structure matrix  S = (I - G)^-1  (Simon-Hawkins limit).
+          3. Cycled throughflow  TSTc = Σ_i ((S[i,i] - 1) / S[i,i]) · T_i,
+             where T_i is the throughflow of compartment i. Each diagonal
+             element s_ii is the expected number of visits to i, so
+             (s_ii - 1)/s_ii is the fraction of i's throughflow that is cycled.
+          4. FCI = TSTc / TST.
+
+        NOTE (Track-1 correction): the previous implementation normalized by the
+        scalar TST (making G tiny so S ≈ I and cycling was crushed) and summed
+        the off-diagonal of S. Both are departures from the canonical method and
+        systematically under-estimate cycling (≈ 0.3-0.6× true FCI); a pure ring
+        returned ≈ 0 instead of ≈ 1.
+
         Returns:
             Finn's Cycling Index (0-1)
         """
-        # Create augmented matrix including boundary flows
         n = self.n_nodes
-        augmented = np.zeros((n+2, n+2))
-        
-        # Internal flows
-        augmented[:n, :n] = self.flow_matrix
-        
-        # Imports (from environment node n to compartments)
-        augmented[n, :n] = self.imports
-        
-        # Exports and respiration (from compartments to sink node n+1)
-        augmented[:n, n+1] = self.exports + self.respiration
-        
-        # Calculate cycling using matrix powers
+
+        # Throughflow of each compartment (T_i). Use the receiving-side inflow
+        # including imports where boundary flows are present; internal-only
+        # matrices fall back to the internal column sum.
+        col_sum = self.input_throughput          # internal inflow to j
+        t_in = col_sum + self.imports            # total inflow to j
+        # Compartment throughflow used for weighting TSTc: total input to i.
+        throughflow = t_in
+
+        tst = self.calculate_tst()
+        if tst == 0:
+            return 0.0
+
+        # Column-normalized transition matrix G[:, j] = T[:, j] / T_j_in
+        G = np.zeros((n, n), dtype=np.float64)
+        for j in range(n):
+            if t_in[j] > 0:
+                G[:, j] = self.flow_matrix[:, j] / t_in[j]
+
+        identity = np.eye(n)
+
+        # A perfectly conservative internal structure (no leak to the boundary)
+        # makes (I - G) singular: it is the limit of full recycling, where every
+        # quantum returns to its compartment infinitely often (FCI -> 1). We
+        # evaluate S as the limit of the Leontief inverse under a vanishing leak
+        # so that a pure ring yields FCI -> 1 (Ulanowicz 2004 §5: 0.993 at 1%
+        # leak, -> 1.0 at closure) rather than a division by a singular matrix.
         try:
-            # Normalize by total throughput
-            tst = self.calculate_tst_extended()
-            if tst == 0:
-                return 0
-            
-            # Calculate first-order cycling
-            flow_norm = self.flow_matrix / tst
-            identity = np.eye(n)
-            
-            # Leontief inverse for cycling calculation
-            leontief = np.linalg.inv(identity - flow_norm)
-            cycling = np.sum(leontief) - n  # Subtract diagonal
-            
-            fci = cycling / np.sum(leontief)
-            return max(0, min(1, fci))  # Bound between 0 and 1
-            
+            S = np.linalg.inv(identity - G)
         except np.linalg.LinAlgError:
-            return 0
+            # Regularized limit: shrink G slightly toward zero (tiny leak).
+            eps = 1e-9
+            try:
+                S = np.linalg.inv(identity - (1.0 - eps) * G)
+            except np.linalg.LinAlgError:
+                return 0.0
+
+        # If the inverse is finite but ill-conditioned (near-closed system), the
+        # diagonal blows up and (s_ii - 1)/s_ii -> 1, which is exactly the
+        # full-cycling limit; the arithmetic below handles it directly.
+        diag = np.diag(S)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            cycled_fraction = np.where(np.isfinite(diag) & (diag > 0),
+                                       (diag - 1.0) / diag, 1.0)
+        cycled_fraction = np.clip(cycled_fraction, 0.0, 1.0)
+
+        tst_c = float(np.sum(cycled_fraction * throughflow))
+        fci = tst_c / tst
+        return max(0.0, min(1.0, fci))
     
     def calculate_balance_metrics(self) -> Dict[str, float]:
         """

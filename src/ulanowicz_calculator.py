@@ -694,21 +694,26 @@ class UlanowiczCalculator:
         
         return overhead / development_capacity if development_capacity > 0 else 0
     
-    def calculate_finn_cycling_index(self) -> float:
+    def calculate_short_cycle_proxy(self) -> float:
         """
-        Calculate Finn Cycling Index (FCI).
+        Short-cycle cycling proxy (NOT the full Finn Cycling Index).
 
-        FCI measures the fraction of total system throughput that is involved in cycling.
-        This is a key indicator of system regeneration and resource efficiency.
+        This O(n²) heuristic detects ONLY:
+          1. Self-loops (diagonal elements)
+          2. Two-node reciprocal cycles (A->B and B->A)
 
-        Uses an O(n²) algorithm that detects:
-        1. Self-loops (diagonal elements)
-        2. Two-node reciprocal cycles (A->B and B->A)
+        It therefore MISSES every cycle of length >= 3 and returns ~0 for a
+        pure directed ring whose medium actually recycles ~100%. It is a strict
+        lower bound on cycling, valid only when cycling is dominated by self- and
+        2-cycles.
 
-        Since metrics are precomputed and cached, no size threshold is needed.
+        For the standards-compliant Finn Cycling Index (Finn 1976; Ulanowicz
+        2004 §5), use ``calculate_finn_cycling_index_full`` (internal-only) or
+        ``EcosystemFlowCalculator.calculate_finn_cycling_index`` (with boundary
+        flows), which build the column-normalized Leontief structure matrix.
 
         Returns:
-            Finn Cycling Index value between 0 and 1
+            Short-cycle cycling proxy in [0, 1]
         """
 
         tst = self.calculate_tst()
@@ -725,9 +730,76 @@ class UlanowiczCalculator:
         np.fill_diagonal(reciprocal, 0)  # Don't double-count self-loops
         cycling_flow += np.sum(reciprocal) / 2  # Divide by 2 to avoid double counting
 
-        # FCI = cycling flow / total throughput
-        fci = min(cycling_flow / tst, 1.0) if tst > 0 else 0
-        return fci
+        # proxy = cycling flow / total throughput
+        proxy = min(cycling_flow / tst, 1.0) if tst > 0 else 0
+        return proxy
+
+    # Back-compat alias: the historical name pointed at the short-cycle proxy.
+    # Kept so existing consumers (app.py, precompute_service, oasis_calculator,
+    # reports) do not break. This is the PROXY, not the canonical Finn index.
+    def calculate_finn_cycling_index(self) -> float:
+        """Deprecated alias for :meth:`calculate_short_cycle_proxy`.
+
+        WARNING: despite the name, this is the short-cycle PROXY (self-loops +
+        2-cycles only), not the canonical Finn Cycling Index. For the full,
+        standards-compliant Finn index use
+        :meth:`calculate_finn_cycling_index_full`.
+        """
+        return self.calculate_short_cycle_proxy()
+
+    def calculate_finn_cycling_index_full(self) -> float:
+        """
+        Canonical Finn Cycling Index (internal-only, no boundary flows).
+
+        Builds the column-normalized Leontief structure matrix and reads the
+        diagonal cycling probabilities (Finn 1976; Ulanowicz 2004 §5 p.330;
+        Fath 2019 Principle 2 p.20):
+
+          - G[:, j] = T[:, j] / T_j_in, where T_j_in is the internal inflow to j
+            (column sum of the internal flow matrix; imports are unavailable at
+            this level — use ``EcosystemFlowCalculator.calculate_finn_cycling_index``
+            for boundary-inclusive networks).
+          - S = (I - G)^-1  (Leontief structure matrix).
+          - TSTc = Σ_i ((S[i,i] - 1) / S[i,i]) · T_i.
+          - FCI = TSTc / TST.
+
+        A perfectly conservative internal structure (e.g. a pure ring) is the
+        singular limit of full recycling and yields FCI -> 1; a regularized
+        (vanishing-leak) inverse recovers that limit.
+
+        Returns:
+            Finn Cycling Index in [0, 1]
+        """
+        n = self.n_nodes
+        tst = self.calculate_tst()
+        if tst == 0:
+            return 0.0
+
+        t_in = self.input_throughput  # internal inflow to each compartment (col sum)
+
+        G = np.zeros((n, n), dtype=np.float64)
+        for j in range(n):
+            if t_in[j] > 0:
+                G[:, j] = self.flow_matrix[:, j] / t_in[j]
+
+        identity = np.eye(n)
+        try:
+            S = np.linalg.inv(identity - G)
+        except np.linalg.LinAlgError:
+            eps = 1e-9
+            try:
+                S = np.linalg.inv(identity - (1.0 - eps) * G)
+            except np.linalg.LinAlgError:
+                return 0.0
+
+        diag = np.diag(S)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            cycled_fraction = np.where(np.isfinite(diag) & (diag > 0),
+                                       (diag - 1.0) / diag, 1.0)
+        cycled_fraction = np.clip(cycled_fraction, 0.0, 1.0)
+
+        tst_c = float(np.sum(cycled_fraction * t_in))
+        return max(0.0, min(1.0, tst_c / tst))
 
     def calculate_autocatalytic_index(self) -> Dict[str, Any]:
         """
