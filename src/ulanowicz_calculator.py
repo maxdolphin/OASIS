@@ -443,15 +443,28 @@ class UlanowiczCalculator:
         ascendency = metrics['ascendency']
         lower_bound = metrics['viability_lower_bound']
         upper_bound = metrics['viability_upper_bound']
-        
-        if ascendency < lower_bound:
-            return "UNSUSTAINABLE - Too chaotic (low organization)"
-        elif ascendency > upper_bound:
-            return "UNSUSTAINABLE - Too rigid (over-organized)"
+
+        # Reframed: gradient position + direction-of-travel relative to the
+        # INDICATIVE ecological reference band (single source of truth). Not a
+        # binary pass/fail viability verdict.
+        try:
+            from report_intelligence import assess_alpha_position
+        except ImportError:  # pragma: no cover
+            from src.report_intelligence import assess_alpha_position
+        grad = assess_alpha_position(metrics.get('ascendency_ratio', 0))
+        pos = grad['position']
+        direction = grad['direction_of_travel']
+
+        if pos == 'under-organized':
+            return (f"Under-organized relative to the indicative reference band "
+                    f"— direction of travel: {direction}")
+        elif pos == 'over-organized':
+            return (f"Over-organized relative to the indicative reference band "
+                    f"— direction of travel: {direction}")
         elif ascendency < (lower_bound + upper_bound) / 2:
-            return "VIABLE - Leaning toward flexibility"
+            return "Balanced within the indicative reference band (leaning toward flexibility)"
         else:
-            return "VIABLE - Leaning toward organization"
+            return "Balanced within the indicative reference band (leaning toward organization)"
     
     def calculate_flow_diversity(self) -> float:
         """

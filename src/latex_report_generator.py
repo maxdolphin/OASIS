@@ -54,8 +54,10 @@ class LaTeXReportGenerator:
     def generate_latex_document(self) -> str:
         """Generate complete LaTeX document."""
         
-        # Determine viability status
-        viable = "viable" if self.metrics['is_viable'] else "non-viable"
+        # Gradient position vs. the indicative reference band (reframed; not
+        # a binary pass/fail viability verdict).
+        _grad_doc = self._gradient()
+        viable = _grad_doc['position']
         
         # Format metrics for display
         alpha = f"{self.metrics['ascendency_ratio']:.3f}"
@@ -118,8 +120,8 @@ regenerative economics framework. The analysis examines """ + str(len(self.node_
 connected through """ + str(np.count_nonzero(self.flow_matrix)) + r""" directed flow relationships, 
 representing a total system throughput of """ + tst + r""" units. 
 Key findings indicate that the system exhibits a relative ascendency of $\alpha = """ + alpha + r"""$ 
-and robustness of $R = """ + robustness + r"""$, positioning it as \textbf{""" + viable + r"""} 
-within the theoretical window of viability (0.2 < $\alpha$ < 0.6). 
+and robustness of $R = """ + robustness + r"""$, placing it on the efficiency--resilience gradient as \textbf{""" + viable.replace('-', '--') + r"""}
+relative to the indicative reference band (0.2 $\le \alpha \le$ 0.6). """ + self._escape_latex(_grad_doc['caveat']) + r"""
 The analysis provides quantitative evidence for organizational sustainability assessment and 
 strategic recommendations for system optimization.
 
@@ -191,7 +193,7 @@ The following measures were calculated according to Ulanowicz (1986, 1997) and F
 \toprule
 \textbf{Metric} & \textbf{Value} & \textbf{Status} \\
 \midrule
-Viability Status & $\alpha = """ + alpha + r"""$ & """ + ("Viable" if self.metrics['is_viable'] else "Non-Viable") + r""" \\
+Gradient Position & $\alpha = """ + alpha + r"""$ & """ + self._gradient_position_label() + r""" \\
 Robustness & """ + robustness + r""" & """ + self._categorize_robustness() + r""" \\
 Network Efficiency & """ + efficiency + r""" & """ + self._categorize_efficiency() + r""" \\
 Total Throughput & """ + tst + r""" & """ + str(len(self.node_names)) + r""" nodes \\
@@ -398,20 +400,37 @@ When compared to sustainable reference systems:
         else:
             return f"in the efficiency-favoring regime ({(alpha - 0.37)*100:.1f}\\% above optimum)"
     
+    def _gradient(self):
+        """Gradient classifier — single source of truth from report_intelligence."""
+        try:
+            import report_intelligence as _ri
+        except ImportError:  # pragma: no cover
+            from src import report_intelligence as _ri
+        return _ri.assess_alpha_position(self.metrics['ascendency_ratio'])
+
+    def _gradient_position_label(self) -> str:
+        """Gradient position label (not a pass/fail verdict) for the metrics table."""
+        return self._gradient()['position'].replace('-', '--')
+
     def _generate_viability_discussion_latex(self) -> str:
-        """Generate LaTeX discussion about viability status."""
-        if self.metrics['is_viable']:
-            return """
-The position within the window suggests functional balance between efficiency and flexibility, 
-critical for long-term sustainability."""
-        elif self.metrics['ascendency_ratio'] < self.metrics['viability_lower_bound']:
+        """Generate LaTeX discussion framed as a gradient position + direction."""
+        grad = self._gradient()
+        caveat = grad['caveat']
+        if grad['position'] == 'balanced':
             return f"""
-The sub-viable position ($\\alpha = {self.metrics['ascendency_ratio']:.3f} < {self.metrics['viability_lower_bound']:.3f}$) 
-indicates insufficient organization, leading to inefficient resource utilization and reduced coherence."""
+On the efficiency--resilience gradient the organization sits within the indicative reference band,
+suggesting a functional balance between efficiency and flexibility. Direction of travel: {grad['direction_of_travel']}.
+\\emph{{{caveat}}}"""
+        elif grad['position'] == 'under-organized':
+            return f"""
+On the efficiency--resilience gradient the organization reads as under--organized relative to the indicative
+reference band ($\\alpha = {self.metrics['ascendency_ratio']:.3f}$, below the reference lower edge of {self.metrics['viability_lower_bound']:.3f}).
+Direction of travel: {grad['direction_of_travel']}. \\emph{{{caveat}}}"""
         else:
             return f"""
-The supra-viable position ($\\alpha = {self.metrics['ascendency_ratio']:.3f} > {self.metrics['viability_upper_bound']:.3f}$) 
-indicates over-organization, resulting in brittleness and limited adaptive capacity."""
+On the efficiency--resilience gradient the organization reads as over--organized relative to the indicative
+reference band ($\\alpha = {self.metrics['ascendency_ratio']:.3f}$, above the reference upper edge of {self.metrics['viability_upper_bound']:.3f}).
+Direction of travel: {grad['direction_of_travel']}. \\emph{{{caveat}}}"""
     
     def _generate_recommendations_latex(self) -> str:
         """Generate strategic recommendations in LaTeX format."""

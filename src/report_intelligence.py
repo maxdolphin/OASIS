@@ -15,6 +15,87 @@ VIABILITY_UPPER = 0.6
 ROBUSTNESS_OPTIMUM = 0.367879441  # 1/e, where R = -alpha*ln(alpha) is maximal
 
 # ---------------------------------------------------------------------------
+# INDICATIVE-REFERENCE CAVEAT — single source of truth for the framing note
+# ---------------------------------------------------------------------------
+# The [0.2, 0.6] band and its 1/e optimum are ECOLOGICAL reference points. Their
+# transfer to organizational networks is NOT established (Fath 2019: organizational
+# networks are more redundant and sit elsewhere on the curve; org calibration is an
+# open question). We therefore present the band as an *indicative directional
+# reference*, never as an absolute organizational pass/fail threshold.
+INDICATIVE_REFERENCE_CAVEAT = (
+    "Reference band derived from ecological systems; organizational calibration "
+    "is an active area — read this as a directional indicator, not a compliance "
+    "threshold."
+)
+# The center of the indicative reference band, used only as a neutral gradient
+# anchor for direction-of-travel (NOT a target). This is the midpoint of the
+# existing bounds, introducing no new threshold constant.
+_INDICATIVE_BAND_CENTER = (VIABILITY_LOWER + VIABILITY_UPPER) / 2.0  # 0.4
+
+
+def assess_alpha_position(alpha: float) -> Dict[str, Any]:
+    """
+    Gradient classifier for relative ascendency (alpha) against the INDICATIVE
+    ecological reference band [VIABILITY_LOWER, VIABILITY_UPPER].
+
+    This is the single source of truth for reframing the old binary
+    "Viable / Non-Viable (PASS/FAIL)" verdict into a *position-on-a-gradient*
+    with a *direction-of-travel*. It introduces NO new threshold constants and
+    changes NO score formula — it only classifies an already-computed alpha
+    relative to the existing bounds, framed as an indicative reference.
+
+    Returns a dict with:
+      - position: 'under-organized' (alpha < VIABILITY_LOWER),
+                  'balanced' (VIABILITY_LOWER <= alpha <= VIABILITY_UPPER),
+                  'over-organized' (alpha > VIABILITY_UPPER).
+      - direction_of_travel: plain-language nudge back toward balance.
+      - descriptor: short plain-English phrase describing the position relative
+                    to the indicative reference band.
+      - relative_distance: signed gradient value. Negative = below the lower
+                    edge (by how much); positive = above the upper edge; when
+                    inside the band it is the signed offset from the band center
+                    (negative = below center, positive = above center). This is a
+                    gradient, NOT a pass/fail flag.
+      - lower / upper / center: the indicative reference band bounds/center.
+      - caveat: the indicative-reference caveat string.
+    """
+    alpha = float(alpha)
+
+    if alpha < VIABILITY_LOWER:
+        position = 'under-organized'
+        direction = 'increase structure / coordination'
+        descriptor = ('diffuse / under-structured relative to the indicative '
+                      'reference band')
+        # signed: how far *below* the lower edge (negative)
+        relative_distance = alpha - VIABILITY_LOWER
+    elif alpha > VIABILITY_UPPER:
+        position = 'over-organized'
+        direction = 'increase redundancy / flexibility'
+        descriptor = ('highly streamlined / over-structured relative to the '
+                      'indicative reference band')
+        # signed: how far *above* the upper edge (positive)
+        relative_distance = alpha - VIABILITY_UPPER
+    else:
+        position = 'balanced'
+        direction = 'maintain balance'
+        descriptor = ('within the indicative reference band '
+                      '(balanced structure and flexibility)')
+        # signed offset from the band center (a gradient, not a verdict)
+        relative_distance = alpha - _INDICATIVE_BAND_CENTER
+
+    return {
+        'alpha': alpha,
+        'position': position,
+        'direction_of_travel': direction,
+        'descriptor': descriptor,
+        'relative_distance': relative_distance,
+        'lower': VIABILITY_LOWER,
+        'upper': VIABILITY_UPPER,
+        'center': _INDICATIVE_BAND_CENTER,
+        'caveat': INDICATIVE_REFERENCE_CAVEAT,
+    }
+
+# ---------------------------------------------------------------------------
 # SINGLE SOURCE OF TRUTH — efficiency (alpha) interpretation bands (E-19 fix)
 # ---------------------------------------------------------------------------
 # The efficiency label of alpha (= network_efficiency = A/C) MUST agree with the
@@ -84,6 +165,51 @@ def _alpha(profile: Dict[str, Any], metrics: Dict[str, Any] = None) -> float:
     return float(profile.get('dimension_details', {})
                  .get('sustainable', {}).get('metrics', {})
                  .get('relative_ascendency', 0.0))
+
+
+def sustainable_verdict_narrative(sust_score: float, alpha: float) -> str:
+    """
+    Single source of truth for the SUSTAINABLE-dimension narrative verdict.
+
+    Reframes the old binary "Viable / Non-Viable" language into a
+    position-on-a-gradient + direction-of-travel against the *indicative*
+    ecological reference band. The numeric SUSTAINABLE score is unchanged; only
+    the wording changes. Never renders a bare absolute "Non-Viable" /
+    "UNSUSTAINABLE" pass/fail organizational judgment.
+    """
+    sust_score = float(sust_score)
+    grad = assess_alpha_position(alpha)
+    position = grad['position']
+    direction = grad['direction_of_travel']
+
+    if sust_score >= 75:
+        band_phrase = (
+            "sits within the indicative reference band"
+            if position == 'balanced'
+            else f"sits {position} relative to the indicative reference band"
+        )
+        return (
+            f"Strong sustainability balance (score: {sust_score:.0f}/100). "
+            f"On the efficiency/resilience gradient the organization {band_phrase} "
+            f"(alpha={alpha:.3f}); direction of travel: {direction}. "
+            f"{INDICATIVE_REFERENCE_CAVEAT}"
+        )
+    elif sust_score >= 50:
+        return (
+            f"Moderate sustainability (score: {sust_score:.0f}/100). "
+            f"On the efficiency/resilience gradient the organization reads as "
+            f"{position} relative to the indicative reference band "
+            f"(alpha={alpha:.3f}); direction of travel: {direction}. "
+            f"{INDICATIVE_REFERENCE_CAVEAT}"
+        )
+    else:
+        return (
+            f"Sustainability warrants attention (score: {sust_score:.0f}/100). "
+            f"On the efficiency/resilience gradient the organization reads as "
+            f"{position} relative to the indicative reference band "
+            f"(alpha={alpha:.3f}); direction of travel: {direction}. "
+            f"{INDICATIVE_REFERENCE_CAVEAT}"
+        )
 
 
 def executive_verdict(profile: Dict[str, Any]) -> str:
@@ -199,11 +325,12 @@ def build_risk_view(metrics: Dict[str, Any],
     else:
         items.append({
             'severity': 'LOW',
-            'title': 'System operates within the Window of Viability',
-            'evidence': f'Relative ascendency alpha = {alpha:.3f} lies within '
-                        f'[{VIABILITY_LOWER}, {VIABILITY_UPPER}].',
-            'implication': 'Healthy balance of efficiency and resilience; maintain and '
-                           'monitor.',
+            'title': 'Balanced position within the indicative reference band',
+            'evidence': f'Relative ascendency alpha = {alpha:.3f} lies within the '
+                        f'indicative reference band [{VIABILITY_LOWER}, {VIABILITY_UPPER}]. '
+                        f'{INDICATIVE_REFERENCE_CAVEAT}',
+            'implication': 'Healthy balance of efficiency and resilience; direction of '
+                           'travel: maintain balance.',
         })
 
     # Distance-from-bound early warnings (within window but near an edge)
@@ -344,7 +471,7 @@ def render_window_of_viability_png(alpha: float, robustness: float) -> bytes:
     fig, ax = plt.subplots(figsize=(7.2, 4.0), dpi=150)
     ax.plot(xs, ys, color='#1a5f35', linewidth=2, label='Robustness R(α) = −α·ln(α)')
     ax.axvspan(VIABILITY_LOWER, VIABILITY_UPPER, color='#48c9b0', alpha=0.15,
-               label=f'Window of Viability [{VIABILITY_LOWER}, {VIABILITY_UPPER}]')
+               label=f'Indicative reference band [{VIABILITY_LOWER}, {VIABILITY_UPPER}]')
     ax.axvline(ROBUSTNESS_OPTIMUM, color='#d4a843', linestyle='--', linewidth=1,
                label=f'Optimum α ≈ {ROBUSTNESS_OPTIMUM:.2f}')
 
@@ -355,7 +482,7 @@ def render_window_of_viability_png(alpha: float, robustness: float) -> bytes:
 
     ax.set_xlabel('Relative Ascendency (α = A/C)')
     ax.set_ylabel('Robustness (R)')
-    ax.set_title('Position Relative to the Window of Viability')
+    ax.set_title('Position Relative to the Indicative Reference Band')
     ax.set_facecolor('white')
     fig.patch.set_facecolor('white')
     ax.legend(fontsize=7, loc='upper right')

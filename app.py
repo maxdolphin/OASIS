@@ -89,6 +89,20 @@ def _tip(key: str) -> str:
     entry = DOCS.get(key)
     return entry.get("tooltip", "") if entry else ""
 
+
+def _alpha_gradient(alpha):
+    """Gradient classifier (position + direction-of-travel + caveat) — single
+    source of truth from report_intelligence. Reframes the old binary
+    Viable/Non-Viable pass/fail verdict into a position-on-a-gradient."""
+    import report_intelligence as _ri
+    return _ri.assess_alpha_position(alpha)
+
+
+# Short caveat surfaced next to the indicative reference band in the app UI.
+def _indicative_caveat():
+    import report_intelligence as _ri
+    return _ri.INDICATIVE_REFERENCE_CAVEAT
+
 # Import precomputation service for large network optimization
 try:
     from precompute_service import (
@@ -2593,12 +2607,13 @@ def run_massive_scale_analysis(flow_matrix, node_names, progress_bar, status_tex
 
     # Phase 4: Minimal assessment
     status_text.text("Phase 4/4: Assessment...")
-    if efficiency < 0.2:
-        sustainability = "UNSUSTAINABLE - Too chaotic"
-    elif efficiency > 0.6:
-        sustainability = "UNSUSTAINABLE - Too rigid"
+    _g = _alpha_gradient(efficiency)
+    if _g['position'] == 'under-organized':
+        sustainability = "Under-organized (vs. indicative band) - increase structure / coordination"
+    elif _g['position'] == 'over-organized':
+        sustainability = "Over-organized (vs. indicative band) - increase redundancy / flexibility"
     else:
-        sustainability = "VIABLE - Within sustainable range"
+        sustainability = "Balanced - within the indicative reference band"
 
     assessments = {
         'sustainability': sustainability,
@@ -2642,10 +2657,10 @@ def display_metrics_overview(metrics, assessments):
         st.metric("Robustness", f"{robustness:.2f}", f"{robustness_color} {get_robustness_status(robustness)}")
     
     with col3:
-        viable = "YES" if metrics['is_viable'] else "NO"
-        viable_color = "🟢" if metrics['is_viable'] else "🔴"
-        st.metric("Viable System", viable, f"{viable_color}")
-    
+        _g3 = _alpha_gradient(metrics.get('relative_ascendency', metrics.get('ascendency_ratio', 0)))
+        pos_color = "🟢" if _g3['position'] == 'balanced' else "🧭"
+        st.metric("Gradient Position", _g3['position'], f"{pos_color} vs. indicative band")
+
     with col4:
         regen_capacity = metrics['regenerative_capacity']
         regen_color = "🟢" if regen_capacity > 0.2 else "🟡" if regen_capacity > 0.1 else "🔴"
@@ -2655,12 +2670,12 @@ def display_metrics_overview(metrics, assessments):
     st.subheader("🎯 Overall System Health")
     sustainability_status = assessments['sustainability']
     
-    if "VIABLE" in sustainability_status:
-        st.success(f"✅ {sustainability_status}")
-    elif "MODERATE" in sustainability_status or "GOOD" in sustainability_status:
-        st.warning(f"⚠️ {sustainability_status}")
+    if "Balanced" in sustainability_status:
+        st.success(f"🟢 {sustainability_status}")
     else:
-        st.error(f"❌ {sustainability_status}")
+        # Gradient position outside the indicative band — informational, not a fail
+        st.info(f"🧭 {sustainability_status}")
+    st.caption(_indicative_caveat())
 
 def display_visualizations_enhanced(G, flow_matrix, node_names, metrics, org_name):
     """Display visualizations with network diagram, flow heatmap, and window of viability."""
@@ -2922,9 +2937,9 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
             st.metric("Robustness", f"{metrics['robustness']:.2f}", help=_tip("robustness"))
             st.caption("R = -α·log(α) [nats]")
         with col3:
-            viable = "✅ YES" if metrics['is_viable'] else "❌ NO"
-            st.metric("Viable System", viable, help=_tip("viable_system"))
-            st.caption("α ∈ [0.2, 0.6]")
+            _gc3 = _alpha_gradient(metrics.get('relative_ascendency', metrics.get('ascendency_ratio', 0)))
+            st.metric("Gradient Position", _gc3['position'], help=_tip("viable_system"))
+            st.caption("indicative band α ∈ [0.2, 0.6]")
         with col4:
             st.metric("Network Efficiency", f"{metrics['network_efficiency']:.2f}", help=_tip("network_efficiency"))
             st.caption("η = Eeff/Emax [0-1]")
@@ -3121,19 +3136,21 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
     # Visual representation of window of viability
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        if lower <= ascendency <= upper:
+        _gv = _alpha_gradient(alpha)
+        if _gv['position'] == 'balanced':
             if 0.35 <= alpha <= 0.40:
-                st.success("✅ OPTIMAL - System at peak sustainability (α ~ 0.37)")
+                st.success("🟢 Balanced - near the indicative reference center (α ~ 0.37)")
             elif alpha < 0.35:
-                st.success("✅ VIABLE - Good flexibility, moderate organization")
+                st.success("🟢 Balanced - within indicative band (more flexibility, moderate organization)")
             else:
-                st.success("✅ VIABLE - Good organization, moderate flexibility")
-        elif ascendency < lower:
-            st.error("❌ UNSUSTAINABLE - Too chaotic (α < 0.2)")
-            st.info("💡 Increase structure and coordination")
+                st.success("🟢 Balanced - within indicative band (more organization, moderate flexibility)")
+        elif _gv['position'] == 'under-organized':
+            st.info("🧭 Under-organized relative to the indicative reference band (α < 0.2)")
+            st.info(f"💡 Direction of travel: {_gv['direction_of_travel']}")
         else:
-            st.error("❌ UNSUSTAINABLE - Too rigid (α > 0.6)")
-            st.info("💡 Increase flexibility and redundancy")
+            st.info("🧭 Over-organized relative to the indicative reference band (α > 0.6)")
+            st.info(f"💡 Direction of travel: {_gv['direction_of_travel']}")
+        st.caption(_indicative_caveat())
     
     # Window bounds visualization
     st.markdown("#### Window of Viability Bounds")
@@ -3154,11 +3171,11 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
     with col5:
         st.metric("Current α", f"{alpha:.2f}", help=_tip("relative_ascendency"))
         if 0.35 <= alpha <= 0.40:
-            st.caption("α = A/C ✅ Optimal")
+            st.caption("α = A/C 🟢 near indicative center")
         elif 0.2 <= alpha <= 0.6:
-            st.caption("α = A/C ✅ Viable")
+            st.caption("α = A/C 🟢 within indicative band")
         else:
-            st.caption("α = A/C ❌ Outside")
+            st.caption("α = A/C 🧭 outside indicative band")
     
     # Extended Network Metrics
     st.markdown("---")
@@ -3375,9 +3392,9 @@ def display_core_metrics_simplified(metrics):
         st.caption("Resilience to shocks")
 
     with col3:
-        viable = "✅ YES" if metrics['is_viable'] else "❌ NO"
-        st.metric("Viable System", viable, help=_tip("viable_system"))
-        st.caption("Within sustainability bounds")
+        _g3b = _alpha_gradient(metrics.get('relative_ascendency', metrics.get('ascendency_ratio', 0)))
+        st.metric("Gradient Position", _g3b['position'], help=_tip("viable_system"))
+        st.caption("vs. indicative reference band")
 
     with col4:
         st.metric("Network Efficiency", f"{metrics['network_efficiency']:.2f}", help=_tip("network_efficiency"))
@@ -3391,17 +3408,19 @@ def display_core_metrics_simplified(metrics):
     lower = metrics['viability_lower_bound']
     upper = metrics['viability_upper_bound']
     
-    if lower <= ascendency <= upper:
+    _gs = _alpha_gradient(metrics.get('relative_ascendency', metrics.get('ascendency_ratio', 0)))
+    if _gs['position'] == 'balanced':
         if ascendency < (lower + upper) / 2:
-            st.success("✅ VIABLE - System is sustainable with good flexibility")
+            st.success("🟢 Balanced - within the indicative reference band (more flexibility)")
         else:
-            st.success("✅ VIABLE - System is sustainable with good organization")
-    elif ascendency < lower:
-        st.error("❌ UNSUSTAINABLE - System is too chaotic (low organization)")
-        st.info("💡 Recommendation: Increase structure and coordination")
+            st.success("🟢 Balanced - within the indicative reference band (more organization)")
+    elif _gs['position'] == 'under-organized':
+        st.info("🧭 Under-organized relative to the indicative reference band (low organization)")
+        st.info(f"💡 Direction of travel: {_gs['direction_of_travel']}")
     else:
-        st.error("❌ UNSUSTAINABLE - System is too rigid (over-organized)")
-        st.info("💡 Recommendation: Increase flexibility and redundancy")
+        st.info("🧭 Over-organized relative to the indicative reference band (over-organized)")
+        st.info(f"💡 Direction of travel: {_gs['direction_of_travel']}")
+    st.caption(_indicative_caveat())
     
     # Key ratios
     st.markdown("---")
@@ -4400,17 +4419,17 @@ def display_visual_summary_cards(metrics, assessments):
         """, unsafe_allow_html=True)
     
     with col3:
-        viable = metrics.get('is_viable', False)
+        _gcard = _alpha_gradient(metrics.get('relative_ascendency', metrics.get('ascendency_ratio', 0)))
         viability_window = metrics.get('viability_window_position', 0)
-        color = "green" if viable else "red"
-        icon = "✅" if viable else "❌"
-        color_hex = {'green': '2ecc71', 'red': 'e74c3c'}[color]
+        _balanced = _gcard['position'] == 'balanced'
+        icon = "🟢" if _balanced else "🧭"
+        color_hex = '2ecc71' if _balanced else '3498db'
         st.markdown(f"""
-        <div style="background: linear-gradient(135deg, #{color_hex}22 0%, transparent 100%); 
+        <div style="background: linear-gradient(135deg, #{color_hex}22 0%, transparent 100%);
                     padding: 20px; border-radius: 10px; border-left: 4px solid #{color_hex};">
-            <h4 style="margin: 0; color: #{color_hex};">{icon} Viability</h4>
-            <h2 style="margin: 10px 0;">{'YES' if viable else 'NO'}</h2>
-            <p style="margin: 0; opacity: 0.8; font-size: 12px;">Window: {viability_window:.1%}</p>
+            <h4 style="margin: 0; color: #{color_hex};">{icon} Gradient Position</h4>
+            <h2 style="margin: 10px 0; text-transform: capitalize;">{_gcard['position']}</h2>
+            <p style="margin: 0; opacity: 0.8; font-size: 12px;">Direction: {_gcard['direction_of_travel']}</p>
         </div>
         """, unsafe_allow_html=True)
     
@@ -4974,11 +4993,12 @@ def display_detailed_report(calculator, metrics, assessments, org_name):
             col1, col2, col3, col4 = st.columns(4)
 
             with col1:
-                status_color = "🟢" if metrics['is_viable'] else "🔴"
+                _gk = _alpha_gradient(metrics['ascendency_ratio'])
+                status_color = "🟢" if _gk['position'] == 'balanced' else "🧭"
                 st.metric(
-                    "Viability Status",
-                    f"{status_color} {'Viable' if metrics['is_viable'] else 'Non-Viable'}",
-                    f"α = {metrics['ascendency_ratio']:.2f}"
+                    "Gradient Position",
+                    f"{status_color} {_gk['position']}",
+                    f"α = {metrics['ascendency_ratio']:.2f} (vs. indicative band)"
                 )
 
             with col2:
@@ -5132,12 +5152,14 @@ Ascendency Ratio (A/C): {metrics['ascendency_ratio']:.2f}
 Overhead Ratio (Φ/C): {metrics['overhead_ratio']:.2f}
 Redundancy: {metrics['redundancy']:.2f}
 
-WINDOW OF VIABILITY
-==================
-Lower Bound: {metrics['viability_lower_bound']:.2f}
-Upper Bound: {metrics['viability_upper_bound']:.2f}
+INDICATIVE REFERENCE BAND (gradient position)
+=============================================
+Reference Lower Edge: {metrics['viability_lower_bound']:.2f}
+Reference Upper Edge: {metrics['viability_upper_bound']:.2f}
 Current Position: {metrics['ascendency']:.2f}
-Is Viable: {'YES' if metrics['is_viable'] else 'NO'}
+Gradient Position: {_alpha_gradient(metrics['ascendency_ratio'])['position']}
+Direction of Travel: {_alpha_gradient(metrics['ascendency_ratio'])['direction_of_travel']}
+Note: {_indicative_caveat()}
 
 HEALTH ASSESSMENT
 ================
@@ -8001,18 +8023,19 @@ def formulas_reference_interface():
         st.markdown("""
         ### **Window of Viability**
         ```
-        Lower Bound = 0.2 * C
-        Upper Bound = 0.6 * C
-        Viable = Lower Bound ≤ A ≤ Upper Bound
+        Reference Lower Edge = 0.2 * C
+        Reference Upper Edge = 0.6 * C
+        Within band = Lower Edge ≤ A ≤ Upper Edge
         ```
-        - **Empirical bounds** from Ulanowicz research
-        - Based on natural ecosystem observations
-        
-        ### **Sustainability Classification**
+        - **Indicative reference band** from Ulanowicz ecological research
+        - Based on natural ecosystem observations — organizational calibration is an
+          active area, so read this as a directional indicator, not a compliance threshold
+
+        ### **Gradient Position (direction of travel)**
         ```
-        if α < 0.2:  "Too chaotic (low organization)"
-        if α > 0.6:  "Too rigid (over-organized)" 
-        if 0.2 ≤ α ≤ 0.6:  "Viable system"
+        if α < 0.2:  "under-organized → increase structure / coordination"
+        if α > 0.6:  "over-organized → increase redundancy / flexibility"
+        if 0.2 ≤ α ≤ 0.6:  "balanced → maintain balance"
         ```
         
         ### **Optimal Robustness Point**

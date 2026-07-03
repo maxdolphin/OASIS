@@ -26,6 +26,17 @@ from typing import Dict, List, Any, Optional
 
 import numpy as np
 
+
+def _opr_gradient(alpha):
+    """Gradient classifier (position + direction-of-travel + caveat) — single
+    source of truth from report_intelligence. Reframes binary viability verdict."""
+    try:
+        from src import report_intelligence as _ri
+    except ImportError:  # pragma: no cover
+        import report_intelligence as _ri
+    return _ri.assess_alpha_position(alpha)
+
+
 # ---------------------------------------------------------------------------
 # DESIGN TOKENS
 # ---------------------------------------------------------------------------
@@ -1038,18 +1049,20 @@ class OASISPDFReport:
         # Viability window
         sust = details.get('sustainable', {}).get('metrics', {})
         alpha = sust.get('relative_ascendency', 0)
-        is_viable = sust.get('is_viable', False)
-        if is_viable:
+        _grad = _opr_gradient(alpha)
+        if _grad['position'] == 'balanced':
             bullets.append(
-                f"The organization operates <strong>within the Window of Viability</strong> "
-                f"(alpha = {alpha:.3f}), indicating a sustainable balance between "
-                f"efficiency and resilience."
+                f"On the efficiency/resilience gradient the organization sits "
+                f"<strong>within the indicative reference band</strong> "
+                f"(alpha = {alpha:.3f}); direction of travel: {_grad['direction_of_travel']}. "
+                f"<em>{_grad['caveat']}</em>"
             )
         else:
-            direction = "over-constrained (too rigid)" if alpha > 0.6 else "under-organized (too flexible)"
             bullets.append(
-                f"The organization operates <strong>outside the Window of Viability</strong> "
-                f"(alpha = {alpha:.3f}), appearing {direction}."
+                f"On the efficiency/resilience gradient the organization reads as "
+                f"<strong>{_grad['position']}</strong> relative to the indicative "
+                f"reference band (alpha = {alpha:.3f}); direction of travel: "
+                f"{_grad['direction_of_travel']}. <em>{_grad['caveat']}</em>"
             )
 
         html = "<ul style='margin: 3mm 0 3mm 6mm; line-height: 1.6;'>"

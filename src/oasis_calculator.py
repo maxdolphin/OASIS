@@ -1041,26 +1041,17 @@ class OASISCalculator:
         alpha = sust_metrics.get('relative_ascendency', 0)
         is_viable = sust_metrics.get('is_viable', False)
 
-        if sust_score >= 75:
-            interpretations['sustainable'] = (
-                f"Excellent sustainability balance (score: {sust_score:.0f}/100). "
-                f"The organization operates {'within' if is_viable else 'near'} the Window of Viability "
-                f"(alpha={alpha:.3f}). Order and flexibility are well balanced."
-            )
-        elif sust_score >= 50:
-            direction = "too rigid" if alpha > 0.5 else "too flexible"
-            interpretations['sustainable'] = (
-                f"Moderate sustainability (score: {sust_score:.0f}/100). "
-                f"The organization may be {direction} (alpha={alpha:.3f}). "
-                "Adjust the balance between efficiency and adaptability."
-            )
-        else:
-            direction = "over-optimized and brittle" if alpha > 0.6 else "under-organized and chaotic"
-            interpretations['sustainable'] = (
-                f"Sustainability concerns (score: {sust_score:.0f}/100). "
-                f"The organization appears {direction} (alpha={alpha:.3f}). "
-                "Significant rebalancing is needed for long-term viability."
-            )
+        # Reframed: position-on-a-gradient + direction-of-travel against the
+        # INDICATIVE ecological reference band (single source of truth). The
+        # numeric score is unchanged; is_viable is still computed upstream and
+        # available, but is presented as a gradient position, not a PASS/FAIL.
+        try:
+            from src.report_intelligence import sustainable_verdict_narrative
+        except Exception:
+            from report_intelligence import sustainable_verdict_narrative
+        interpretations['sustainable'] = sustainable_verdict_narrative(
+            sust_score, alpha
+        )
 
         return interpretations
 
@@ -1127,16 +1118,20 @@ class OASISCalculator:
                 recommendations.append({
                     'priority': 'CRITICAL',
                     'dimension': 'SUSTAINABLE',
-                    'issue': 'System too chaotic (alpha < 0.2)',
-                    'action': 'Increase structure, standardize processes, and strengthen coordination',
+                    'issue': 'Under-organized relative to the indicative reference '
+                             'band (alpha < 0.2)',
+                    'action': 'Direction of travel: increase structure / coordination '
+                              '(standardize processes, strengthen coordination)',
                     'metrics_to_improve': ['relative_ascendency', 'robustness']
                 })
             elif alpha > 0.6:
                 recommendations.append({
                     'priority': 'CRITICAL',
                     'dimension': 'SUSTAINABLE',
-                    'issue': 'System too rigid (alpha > 0.6)',
-                    'action': 'Reduce constraints, allow more flexibility, and diversify pathways',
+                    'issue': 'Over-organized relative to the indicative reference '
+                             'band (alpha > 0.6)',
+                    'action': 'Direction of travel: increase redundancy / flexibility '
+                              '(reduce constraints, diversify pathways)',
                     'metrics_to_improve': ['relative_ascendency', 'redundancy', 'overhead_ratio']
                 })
 

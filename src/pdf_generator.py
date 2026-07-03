@@ -12,6 +12,17 @@ import numpy as np
 import plotly.graph_objects as go
 import plotly.io as pio
 
+
+def _pdf_gradient(alpha):
+    """Gradient classifier (position + direction-of-travel) — single source of
+    truth from report_intelligence. Reframes the old binary viability verdict."""
+    try:
+        import report_intelligence as _ri
+    except ImportError:  # pragma: no cover
+        from src import report_intelligence as _ri
+    return _ri.assess_alpha_position(alpha)
+
+
 # ── Color palette ──────────────────────────────────────────────────────────
 FOREST_GREEN = '#1a5f35'
 MEDIUM_GREEN = '#2d8a4e'
@@ -350,9 +361,10 @@ def _build_reportlab_pdf(report_generator, calculator, metrics, charts=None):
     story.append(Spacer(1, 2 * cm))
     n_nodes = len(calculator.node_names)
     n_edges = int(np.count_nonzero(calculator.flow_matrix))
-    viability = 'Viable' if metrics['is_viable'] else 'Non-Viable'
+    viability = _pdf_gradient(metrics.get('relative_ascendency',
+                              metrics.get('ascendency_ratio', 0)))['position']
     cover_data = [
-        ['Network Nodes', 'Active Connections', 'Viability Status', 'Robustness'],
+        ['Network Nodes', 'Active Connections', 'Gradient Position', 'Robustness'],
         [str(n_nodes), str(n_edges), viability, f"{metrics.get('robustness', 0):.3f}"],
     ]
     cover_table = Table(cover_data, colWidths=[CONTENT_W / 4] * 4)
@@ -754,12 +766,12 @@ def _build_reportlab_pdf(report_generator, calculator, metrics, charts=None):
         ['Parameter', 'Value', 'Status'],
         ['Current Position (α)', f"{alpha:.3f}",
          'Optimal' if 0.30 <= alpha <= 0.45 else 'Developing' if alpha < 0.35 else 'Efficient'],
-        ['Lower Bound', f"{metrics['viability_lower_bound']:.3f}",
-         'PASS' if alpha > metrics['viability_lower_bound'] else 'FAIL'],
-        ['Upper Bound', f"{metrics['viability_upper_bound']:.3f}",
-         'PASS' if alpha < metrics['viability_upper_bound'] else 'FAIL'],
-        ['Within Window of Viability', 'Yes' if metrics['is_viable'] else 'No',
-         'Sustainable' if metrics['is_viable'] else 'Needs attention'],
+        ['Reference Lower Edge', f"{metrics['viability_lower_bound']:.3f}",
+         'above' if alpha > metrics['viability_lower_bound'] else 'below'],
+        ['Reference Upper Edge', f"{metrics['viability_upper_bound']:.3f}",
+         'below' if alpha < metrics['viability_upper_bound'] else 'above'],
+        ['Gradient Position', _pdf_gradient(alpha)['position'],
+         'Direction of travel: ' + _pdf_gradient(alpha)['direction_of_travel']],
     ]
     viab_table_data = []
     for ri, row in enumerate(viab_data):
@@ -780,7 +792,9 @@ def _build_reportlab_pdf(report_generator, calculator, metrics, charts=None):
     viab_t.setStyle(TableStyle(viab_style))
     story.append(viab_t)
     story.append(Paragraph(
-        "<i>Table 2. Viability Assessment</i> — Position of the organization relative to the empirically derived window of viability, indicating whether current efficiency-resilience dynamics are sustainable.", s_caption))
+        "<i>Table 2. Gradient Position</i> — Position of the organization on the "
+        "efficiency-resilience gradient relative to the indicative reference band, "
+        "with direction of travel. " + _pdf_gradient(alpha)['caveat'], s_caption))
 
     # ── Charts ──
     # Professional figure caption mapping: chart_name -> interpretive note
