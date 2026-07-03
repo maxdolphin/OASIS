@@ -210,25 +210,47 @@ class EcosystemFlowCalculator(UlanowiczCalculator):
         
         return balance_metrics
     
-    def calculate_lindeman_efficiency(self) -> float:
+    def calculate_respiratory_retention_ratio(self) -> float:
         """
-        Calculate Lindeman trophic efficiency.
-        
-        Efficiency of energy transfer between trophic levels.
-        Based on: Lindeman, R.L. (1942) "The trophic-dynamic aspect of ecology"
-        
+        Respiratory retention ratio (system-wide dissipation retention).
+
+        Formula: 1 - Σ(respiration) / (TST + Σ(imports)).
+
+        This is a single system-wide scalar: one minus the dissipated
+        (respired) fraction of total activity. It is a legitimate, bounded
+        [0, 1] respiratory-retention / dissipation ratio.
+
+        NOTE (Track-1 correction): this quantity was previously mislabeled
+        "Lindeman efficiency". True Lindeman (1942) trophic efficiency is a
+        BETWEEN-LEVEL transfer efficiency (the "~10% rule") obtained from the
+        Lindeman spine [L] (Ulanowicz 2004 §4, Fig. 5) — a per-level ratio of
+        successive throughflows along a virtual straight chain. The metric here
+        is neither between-level nor derived from [L], so it is renamed.
+
+        TODO: implement true between-level transfer efficiency via the Lindeman
+        spine [L] (Lindeman 1942; Ulanowicz 2004 §4) if per-level efficiencies
+        are required.
+
         Returns:
-            Average trophic efficiency
+            Respiratory retention ratio in [0, 1].
         """
-        # Simplified calculation based on respiration losses
         tst = self.calculate_tst()
         if tst == 0:
             return 0
-        
+
         total_respiration = np.sum(self.respiration)
-        efficiency = 1 - (total_respiration / (tst + np.sum(self.imports)))
-        
-        return max(0, min(1, efficiency))
+        retention = 1 - (total_respiration / (tst + np.sum(self.imports)))
+
+        return max(0, min(1, retention))
+
+    def calculate_lindeman_efficiency(self) -> float:
+        """Deprecated alias for :meth:`calculate_respiratory_retention_ratio`.
+
+        WARNING: despite the historical name, this is a system-wide respiratory
+        retention ratio, NOT Lindeman between-level transfer efficiency. Kept as
+        a back-compat alias so existing consumers do not break.
+        """
+        return self.calculate_respiratory_retention_ratio()
     
     def get_ecosystem_metrics(self) -> Dict[str, float]:
         """
@@ -248,7 +270,9 @@ class EcosystemFlowCalculator(UlanowiczCalculator):
             'total_exports': np.sum(self.exports),
             'total_respiration': np.sum(self.respiration),
             'finn_cycling_index': self.calculate_finn_cycling_index(),
-            'lindeman_efficiency': self.calculate_lindeman_efficiency(),
+            'respiratory_retention_ratio': self.calculate_respiratory_retention_ratio(),
+            # Back-compat alias (mislabeled historically; see method docstring).
+            'lindeman_efficiency': self.calculate_respiratory_retention_ratio(),
             'import_dependency': np.sum(self.imports) / self.calculate_tst_extended() if self.calculate_tst_extended() > 0 else 0,
             'export_ratio': np.sum(self.exports) / self.calculate_tst_extended() if self.calculate_tst_extended() > 0 else 0,
             'respiration_ratio': np.sum(self.respiration) / self.calculate_tst_extended() if self.calculate_tst_extended() > 0 else 0,
@@ -383,7 +407,7 @@ if __name__ == "__main__":
     print(f"  Relative Ascendency: {metrics['relative_ascendency']:.3f}")
     print(f"  Robustness: {metrics['robustness']:.3f}")
     print(f"  Finn Cycling Index: {metrics['finn_cycling_index']:.3f}")
-    print(f"  Lindeman Efficiency: {metrics['lindeman_efficiency']:.3f}")
+    print(f"  Respiratory Retention Ratio: {metrics['respiratory_retention_ratio']:.3f}")
     
     print(f"\nEcosystem Health:")
     health = calc.assess_ecosystem_health()
