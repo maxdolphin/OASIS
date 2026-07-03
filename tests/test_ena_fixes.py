@@ -141,6 +141,40 @@ class TestFix2FinnCyclingIndex:
         full = calc.calculate_finn_cycling_index_full()
         assert full == pytest.approx(1.0, abs=0.05), f"full FCI={full}"
 
+    def test_full_finn_consistent_basis_with_imports_and_cycle(self):
+        """Regression: numerator (TSTc) and denominator (TST) must use the SAME
+        throughflow basis — total throughflow T_i = internal inflow + imports —
+        per Finn 1976 / Ulanowicz 2004 §5. If the denominator uses internal-only
+        TST while TSTc is weighted by total throughflow, FCI is biased upward
+        for networks that have BOTH large imports AND real cycling.
+
+        Hand-computed canonical network (3-node cycle 1->2->3->1 with an import
+        into node 1 and an export leak out of node 3, at steady state):
+
+          Internal flows:   1->2 = 10,  2->3 = 10,  3->1 = 6
+          Import:           4 into node 1
+          Export:           4 out of node 3
+          => every node has total throughflow T_i = 10 (in = out).
+
+          Column-normalize by total inflow T_j = 10:
+            S = (I - G)^-1  has diagonal s_ii = 2.5 for all i,
+            cycled fraction (s_ii - 1)/s_ii = 0.6 for all i.
+          TSTc = Σ 0.6 * 10 = 18.0
+          TST  = Σ T_i = 30.0   (total throughflow, NOT internal-only 26.0)
+          FCI  = 18.0 / 30.0 = 0.6   (reconciled basis)
+
+        The mismatched basis (TSTc / internal-TST) would give 18/26 = 0.6923.
+        """
+        T = np.zeros((3, 3))
+        T[0, 1] = 10.0   # 1 -> 2
+        T[1, 2] = 10.0   # 2 -> 3
+        T[2, 0] = 6.0    # 3 -> 1  (cycle back)
+        imports = np.array([4.0, 0.0, 0.0])
+        exports = np.array([0.0, 0.0, 4.0])
+        calc = EcosystemFlowCalculator(T, imports=imports, exports=exports)
+        fci = calc.calculate_finn_cycling_index()
+        assert fci == pytest.approx(0.6, abs=1e-9), f"FCI={fci} (expected 0.6)"
+
 
 # ---------------------------------------------------------------------------
 # FIX 3 — Flow-weighted effective trophic level (Levine)

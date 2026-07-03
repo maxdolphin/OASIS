@@ -116,10 +116,13 @@ class EcosystemFlowCalculator(UlanowiczCalculator):
              only otherwise). Zero-inflow columns are guarded to zero.
           2. Leontief structure matrix  S = (I - G)^-1  (Simon-Hawkins limit).
           3. Cycled throughflow  TSTc = Σ_i ((S[i,i] - 1) / S[i,i]) · T_i,
-             where T_i is the throughflow of compartment i. Each diagonal
+             where T_i is the total throughflow of compartment i. Each diagonal
              element s_ii is the expected number of visits to i, so
              (s_ii - 1)/s_ii is the fraction of i's throughflow that is cycled.
-          4. FCI = TSTc / TST.
+          4. FCI = TSTc / TST, where TST = Σ_i T_i is the total system
+             throughflow — the SAME per-compartment throughflow used to weight
+             TSTc. Numerator and denominator therefore share one consistent
+             basis (Finn 1976; Ulanowicz 2004 §5).
 
         NOTE (Track-1 correction): the previous implementation normalized by the
         scalar TST (making G tiny so S ≈ I and cycling was crushed) and summed
@@ -127,20 +130,28 @@ class EcosystemFlowCalculator(UlanowiczCalculator):
         systematically under-estimate cycling (≈ 0.3-0.6× true FCI); a pure ring
         returned ≈ 0 instead of ≈ 1.
 
+        NOTE (basis reconciliation): TSTc is weighted by the total throughflow
+        T_i = internal inflow + imports, so the denominator must be the total
+        system throughflow Σ_i T_i, NOT the internal-only flow sum
+        (calculate_tst). Using the internal-only sum in the denominator while
+        weighting the numerator by total throughflow biases FCI upward for
+        networks that have both large imports and real cycling.
+
         Returns:
             Finn's Cycling Index (0-1)
         """
         n = self.n_nodes
 
-        # Throughflow of each compartment (T_i). Use the receiving-side inflow
+        # Total throughflow of each compartment (T_i): receiving-side inflow
         # including imports where boundary flows are present; internal-only
-        # matrices fall back to the internal column sum.
+        # matrices fall back to the internal column sum (imports = 0).
         col_sum = self.input_throughput          # internal inflow to j
-        t_in = col_sum + self.imports            # total inflow to j
+        t_in = col_sum + self.imports            # total inflow (throughflow) to j
         # Compartment throughflow used for weighting TSTc: total input to i.
         throughflow = t_in
 
-        tst = self.calculate_tst()
+        # Denominator uses the SAME basis: total system throughflow Σ_i T_i.
+        tst = float(np.sum(throughflow))
         if tst == 0:
             return 0.0
 
