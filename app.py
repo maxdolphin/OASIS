@@ -2343,6 +2343,10 @@ def show_analysis_page():
     if st.sidebar.button("← Back to Data Selection", type="primary", use_container_width=True):
         st.session_state.current_page = 'main'
         st.session_state.analysis_data = None
+        # Clear the remembered dataset selection + precomputed profile so re-entering
+        # a data-source mode starts fresh instead of snapping back to this analysis.
+        st.session_state.selected_dataset_name = None
+        st.session_state.pop('full_profile', None)
         st.rerun()
 
     # Show current network in sidebar
