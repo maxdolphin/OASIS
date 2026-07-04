@@ -266,18 +266,33 @@ class OASISCalculator:
         cycles = []
 
         try:
-            # Use Johnson's algorithm for finding all simple cycles
-            # Limit to reasonable number for large networks
-            cycle_gen = nx.simple_cycles(G)
-            cycle_count = 0
-            max_cycles = 1000  # Limit for large networks
+            # Bound cycle length AT THE GENERATOR LEVEL. nx.simple_cycles is a
+            # lazy Johnson-style generator over ALL simple cycles; on dense/large
+            # graphs it emits exponentially many (mostly long) cycles, so a
+            # post-hoc `len(cycle) <= bound` filter had to iterate through
+            # millions of long cycles before collecting enough short ones — the
+            # airport (100 nodes) profile spent ~119s here and enzyme (336 nodes)
+            # effectively hung. `length_bound` uses the Gupta-Suzumura bounded
+            # algorithm (polynomial in output for fixed bound), so only short
+            # cycles are ever generated. A hard examination cap is retained as a
+            # belt-and-braces guard (and for older networkx without length_bound).
+            try:
+                cycle_gen = nx.simple_cycles(G, length_bound=max_cycle_length)
+            except TypeError:  # pragma: no cover - older networkx
+                cycle_gen = nx.simple_cycles(G)
+
+            max_cycles = 1000       # cap on collected short cycles
+            examine_cap = 200000    # hard cap on generator iterations
+            examined = 0
 
             for cycle in cycle_gen:
+                examined += 1
                 if len(cycle) <= max_cycle_length:
                     cycles.append(cycle)
-                    cycle_count += 1
-                    if cycle_count >= max_cycles:
+                    if len(cycles) >= max_cycles:
                         break
+                if examined >= examine_cap:
+                    break
         except Exception:
             # Fall back to simpler approach for problematic graphs
             cycles = []

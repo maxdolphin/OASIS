@@ -63,13 +63,73 @@ class PublicationReportGenerator:
                 section READS it instead of recomputing via OASISCalculator.
         """
         self.calculator = calculator
-        self.metrics = metrics
+        # Copy so we can safely backfill without mutating the caller's dict.
+        self.metrics = dict(metrics) if isinstance(metrics, dict) else {}
         self.assessments = assessments
         self.org_name = org_name
         self.flow_matrix = flow_matrix
         self.node_names = node_names
         self.oasis_profile = oasis_profile
         self.timestamp = datetime.now()
+        # Robustness: the report bracket-accesses many keys. Depending on the
+        # entry path (fresh get_extended_metrics vs. cache-reconstructed tier-2
+        # metrics) some keys are absent, which previously raised KeyError, and
+        # some may carry sentinel strings ('insufficient') or None which crash
+        # ':.Nf' formatting. Normalize once so every downstream access is safe.
+        self._ensure_metric_defaults()
+
+    def _ensure_metric_defaults(self) -> None:
+        """Backfill missing/sentinel metric keys with sensible numeric defaults.
+
+        Does NOT change any formula: present numeric values are untouched. Only
+        absent keys, None, or sentinel strings ('insufficient', 'skipped_*',
+        'not_computed_*') are replaced so the narrative's f-string formatting
+        (e.g. ``{v:.3f}``) never raises.
+        """
+        m = self.metrics
+        ri = _viability_bands()
+
+        # Indicative reference band edges (single source of truth: E-19/E-20).
+        m.setdefault('viability_lower_bound', getattr(ri, 'VIABILITY_LOWER', 0.2))
+        m.setdefault('viability_upper_bound', getattr(ri, 'VIABILITY_UPPER', 0.6))
+
+        # alpha alias parity (report uses ascendency_ratio; pipeline uses
+        # relative_ascendency).
+        if m.get('ascendency_ratio') is None:
+            m['ascendency_ratio'] = m.get('relative_ascendency', 0.0)
+        if m.get('relative_ascendency') is None:
+            m['relative_ascendency'] = m.get('ascendency_ratio', 0.0)
+
+        alpha = m.get('ascendency_ratio', 0.0)
+        try:
+            alpha = float(alpha)
+        except (TypeError, ValueError):
+            alpha = 0.0
+        if 'is_viable' not in m or not isinstance(m.get('is_viable'), (bool, int, float)):
+            m['is_viable'] = bool(
+                m['viability_lower_bound'] <= alpha <= m['viability_upper_bound'])
+
+        # Numeric metrics the narrative formats with ':.Nf'. Coerce any missing
+        # key / None / sentinel string to a float default so formatting is safe.
+        _numeric_defaults = {
+            'robustness': 0.0, 'redundancy': 0.0, 'overhead': 0.0,
+            'overhead_ratio': 0.0, 'network_efficiency': 0.0, 'ascendency': 0.0,
+            'development_capacity': 0.0, 'trophic_depth': 0.0,
+            'effective_link_density': 0.0, 'flow_diversity': 0.0,
+            'regenerative_capacity': 0.0, 'structural_information': 0.0,
+            'total_system_throughput': 0.0, 'average_mutual_information': 0.0,
+            'reserve': 0.0, 'reserve_ratio': 0.0, 'connectance': 0.0,
+        }
+        for key, default in _numeric_defaults.items():
+            val = m.get(key, default)
+            if isinstance(val, bool) or not isinstance(val, (int, float)):
+                # None, str sentinels ('insufficient', 'skipped_large_graph'),
+                # numpy strings, etc. -> fall back to the numeric default.
+                try:
+                    val = float(val)
+                except (TypeError, ValueError):
+                    val = default
+            m[key] = val
 
     # ==================================================================
     # Public report sections
@@ -78,25 +138,31 @@ class PublicationReportGenerator:
     def generate_abstract(self) -> str:
         """Generate a two-paragraph executive abstract."""
 
-        alpha = self.metrics['ascendency_ratio']
-        rob = self.metrics['robustness']
-        viable = self.metrics['is_viable']
+        alpha = self.metrics.get('ascendency_ratio', self.metrics.get('relative_ascendency', 0))
+        rob = self.metrics.get('robustness', 0)
+        lower = self.metrics.get('viability_lower_bound_alpha', 0.2)
+        upper = self.metrics.get('viability_upper_bound_alpha', 0.6)
+        # Absolute (capacity-unit) bounds are stored under viability_lower/upper_bound; the
+        # indicative band on the alpha scale is [0.2, 0.6]. Present the alpha band.
+        in_band = bool(self.metrics.get('is_viable', lower <= alpha <= upper))
         n_nodes = len(self.node_names)
         n_edges = np.count_nonzero(self.flow_matrix)
         tst = np.sum(self.flow_matrix)
+        overhead_ratio = self.metrics.get('overhead_ratio', 0)
 
-        viability_word = "within" if viable else "outside"
-        sustainability_clause = (
-            "sustainable operational characteristics consistent with long-term adaptive capacity"
-            if viable else
-            "structural conditions that warrant management attention and targeted intervention"
-        )
+        if alpha < lower:
+            position, direction = "under-organized", "increase structure / coordination"
+        elif alpha > upper:
+            position, direction = "over-organized", "increase redundancy / flexibility"
+        else:
+            position, direction = "balanced", "maintain balance"
+        band_word = "within" if in_band else "outside"
 
         abstract = f"""
 ABSTRACT
 ========
 
-{self.org_name} {"demonstrates" if viable else "presents"} a network whose relative ascendency of alpha = {alpha:.3f} places it {viability_word} the empirically derived window of viability ({self.metrics['viability_lower_bound']:.2f} < alpha < {self.metrics['viability_upper_bound']:.2f}), indicating {sustainability_clause}. This assessment applies the Ulanowicz-Fath regenerative economics framework to a directed network of {n_nodes} organizational units connected through {n_edges} active flow relationships, representing a total system throughput of {tst:.1f} units. The system achieves a robustness of R = {rob:.3f} ({self._categorize_robustness().lower()}) and utilizes {alpha * 100:.1f}% of its development capacity for organized behavior while retaining {self.metrics['overhead_ratio'] * 100:.1f}% as overhead reserves for adaptability.
+{self.org_name} presents a network whose relative ascendency of alpha = {alpha:.3f} places it {band_word} the indicative reference band ({lower:.2f} < alpha < {upper:.2f}) on the efficiency/resilience gradient — a {position} position (direction of travel: {direction}). The reference band is derived from ecological systems and is an indicative directional reference for organizations, not a compliance threshold. This assessment applies the Ulanowicz-Fath regenerative economics framework to a directed network of {n_nodes} organizational units connected through {n_edges} active flow relationships, representing a total system throughput of {tst:.1f} units. The system achieves a robustness of R = {rob:.3f} ({self._categorize_robustness().lower()}) and utilizes {alpha * 100:.1f}% of its development capacity for organized behavior while retaining {overhead_ratio * 100:.1f}% as overhead reserves for adaptability.
 
 The analysis reveals {self._categorize_efficiency().lower()} network efficiency and {"a hierarchically layered" if self.metrics.get('trophic_depth', 0) > 2 else "a relatively flat"} information flow architecture with an effective link density of {self.metrics.get('effective_link_density', 0):.3f} and trophic depth of {self.metrics.get('trophic_depth', 0):.3f}. A flow diversity index of H = {self.metrics.get('flow_diversity', 0):.3f} bits indicates {"substantial" if self.metrics.get('flow_diversity', 0) > 3 else "moderate" if self.metrics.get('flow_diversity', 0) > 2 else "limited"} information distribution complexity. These quantitative findings provide an evidence base for strategic decisions regarding organizational design, resilience investment, and sustainable growth.
 """

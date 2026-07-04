@@ -41,12 +41,32 @@ class AdvancedNetworkAnalyzer:
         self.flow_matrix = np.array(flow_matrix, dtype=float)
         self.node_names = node_names
         self.n_nodes = len(node_names)
-        
+
         # Create NetworkX graph
         self.G = self._create_graph()
-        
+
         # Cache for expensive computations
         self._cache = {}
+
+        # --- Scale-aware guards -------------------------------------------
+        # Several network-science metrics are super-linear (exact betweenness /
+        # closeness are O(n*m); all-pairs shortest paths for small-world are
+        # O(n*m); normalized rich-club does degree-preserving double-edge swaps;
+        # simple-path enumeration can blow up on dense graphs). Above these
+        # thresholds we approximate (k-sample) or skip with an explicit sentinel
+        # so get_all_metrics() stays responsive on large networks instead of
+        # hanging. Sentinels are surfaced via `computation_mode`/
+        # `approximated_metrics` and the app formats them defensively.
+        self.APPROX_THRESHOLD = 150   # above this: approximate expensive metrics
+        self.SKIP_THRESHOLD = 600     # above this: skip the very costly ones
+        self.computation_mode = 'full'
+        self.approximated_metrics = []
+
+    def _mark_approx(self, metric_name: str) -> None:
+        """Record that a metric was approximated/skipped for scale reasons."""
+        if metric_name not in self.approximated_metrics:
+            self.approximated_metrics.append(metric_name)
+        self.computation_mode = 'approximate'
     
     def _create_graph(self) -> nx.DiGraph:
         """Create NetworkX directed graph from flow matrix."""
@@ -95,12 +115,22 @@ class AdvancedNetworkAnalyzer:
             _w = _d.get('weight', 0)
             _d['distance'] = (1.0 / _w) if _w > 0 else float('inf')
 
-        # Betweenness centrality (identifies bridges/brokers)
+        # Betweenness centrality (identifies bridges/brokers).
+        # Exact betweenness is O(n*m); for large graphs use Brandes' k-sample
+        # approximation (Brandes & Pich 2007), which estimates the same quantity
+        # from min(n, 100) pivot sources with a fixed seed for reproducibility.
         try:
-            centralities['betweenness'] = nx.betweenness_centrality(
-                G_dist, weight='distance', normalized=True
-            )
-        except:
+            if self.n_nodes > self.APPROX_THRESHOLD:
+                k = min(self.n_nodes, 100)
+                centralities['betweenness'] = nx.betweenness_centrality(
+                    G_dist, k=k, seed=42, weight='distance', normalized=True
+                )
+                self._mark_approx('betweenness_centrality')
+            else:
+                centralities['betweenness'] = nx.betweenness_centrality(
+                    G_dist, weight='distance', normalized=True
+                )
+        except Exception:
             centralities['betweenness'] = {i: 0 for i in range(self.n_nodes)}
         
         # Eigenvector centrality (influence measure)
@@ -114,11 +144,24 @@ class AdvancedNetworkAnalyzer:
         
         # Closeness centrality (accessibility) -- uses inverted distance too
         # (Brandes 2001): strong flow => short distance => high closeness.
+        # Full closeness is all-pairs (O(n*m)); for large graphs compute it for a
+        # deterministic k-sample of nodes only (others default to 0 downstream).
         try:
-            centralities['closeness'] = nx.closeness_centrality(
-                G_dist, distance='distance'
-            )
-        except:
+            if self.n_nodes > self.APPROX_THRESHOLD:
+                import random as _random
+                k = min(self.n_nodes, 100)
+                _rng = _random.Random(42)
+                _sample = _rng.sample(list(self.G.nodes()), k)
+                centralities['closeness'] = {
+                    node: nx.closeness_centrality(G_dist, u=node, distance='distance')
+                    for node in _sample
+                }
+                self._mark_approx('closeness_centrality')
+            else:
+                centralities['closeness'] = nx.closeness_centrality(
+                    G_dist, distance='distance'
+                )
+        except Exception:
             centralities['closeness'] = {i: 0 for i in range(self.n_nodes)}
         
         # PageRank (Google's algorithm, variant of eigenvector)
@@ -296,16 +339,27 @@ class AdvancedNetworkAnalyzer:
         except:
             weighted_clustering = 0
 
-        try:
-            if nx.is_connected(G_undirected):
-                actual_path_length = nx.average_shortest_path_length(G_undirected)
-            else:
-                # Use largest connected component
-                largest_cc = max(nx.connected_components(G_undirected), key=len)
-                subgraph = G_undirected.subgraph(largest_cc)
-                actual_path_length = nx.average_shortest_path_length(subgraph)
-        except:
-            actual_path_length = float('inf')
+        # Average shortest path length is all-pairs (O(n*m)); skip on large
+        # graphs with a sentinel so sigma/omega are marked not-computed rather
+        # than blocking. Clustering (above) stays exact — it is cheap.
+        if self.n_nodes > self.APPROX_THRESHOLD:
+            actual_path_length = 'not_computed_large_graph'
+            self._mark_approx('average_shortest_path_length')
+        else:
+            try:
+                if nx.is_connected(G_undirected):
+                    actual_path_length = nx.average_shortest_path_length(G_undirected)
+                else:
+                    # Use largest connected component
+                    largest_cc = max(nx.connected_components(G_undirected), key=len)
+                    subgraph = G_undirected.subgraph(largest_cc)
+                    actual_path_length = nx.average_shortest_path_length(subgraph)
+            except Exception:
+                actual_path_length = float('inf')
+
+        # Is the path length a usable finite number? (Guards str-vs-float
+        # comparisons below when the large-graph sentinel is in play.)
+        _pl_ok = isinstance(actual_path_length, (int, float)) and actual_path_length < float('inf')
         
         # Random graph comparison (Erdős-Rényi) on the undirected projection.
         # Small-world statistics (Humphries sigma, Telford omega) are defined for
@@ -331,7 +385,10 @@ class AdvancedNetworkAnalyzer:
         lattice_clustering = self._lattice_clustering(mean_degree)
 
         # Small world index (sigma) -- Humphries & Gurney (2008)
-        if random_clustering > 0 and random_path_length > 0 and actual_path_length < float('inf'):
+        if not _pl_ok:
+            # Path length skipped (large graph): sigma/omega are undefined.
+            sigma = 'not_computed_large_graph'
+        elif random_clustering > 0 and random_path_length > 0:
             C_ratio = actual_clustering / random_clustering if random_clustering > 0 else 1
             L_ratio = actual_path_length / random_path_length if random_path_length > 0 else 1
             sigma = C_ratio / L_ratio if L_ratio > 0 else 0
@@ -344,7 +401,9 @@ class AdvancedNetworkAnalyzer:
         # the previous code did). Range: ~ -1 (lattice end) to ~ +1 (random end),
         # ~0 for a small-world network. Clamped to [-1, 1] to absorb finite-size /
         # approximation slack.
-        if actual_path_length < float('inf') and actual_path_length > 0:
+        if not _pl_ok:
+            omega = 'not_computed_large_graph'
+        elif actual_path_length > 0:
             l_term = (random_path_length / actual_path_length) if actual_path_length > 0 else 0
             c_term = (actual_clustering / lattice_clustering) if lattice_clustering > 0 else 0
             omega = l_term - c_term
@@ -362,7 +421,7 @@ class AdvancedNetworkAnalyzer:
             'mean_degree': mean_degree,
             'small_world_sigma': sigma,  # > 1 indicates small world
             'small_world_omega': omega,  # Close to 0 indicates small world
-            'is_small_world': sigma > 1
+            'is_small_world': (isinstance(sigma, (int, float)) and sigma > 1)
         }
         
         self._cache['small_world'] = metrics
@@ -431,6 +490,22 @@ class AdvancedNetworkAnalyzer:
         n = G_undirected.number_of_nodes()
         n_edges = G_undirected.number_of_edges()
 
+        # Scale guard: the normalized coefficient requires a degree-preserving
+        # randomization (repeated double-edge swaps), which is expensive on large
+        # graphs. Above APPROX_THRESHOLD, skip with an explicit sentinel.
+        if self.n_nodes > self.APPROX_THRESHOLD:
+            self._mark_approx('rich_club_coefficient')
+            return {
+                'rich_club_coefficient': 'skipped_large_graph',
+                'threshold_k': k if k is not None else 'N/A',
+                'full_spectrum': {},
+                'normalized': True,
+                'note': (
+                    f'normalized rich-club skipped for scale '
+                    f'(n={self.n_nodes} > {self.APPROX_THRESHOLD})'
+                ),
+            }
+
         # Colizza et al. (2006): the meaningful rich-club measure is the NORMALIZED
         # coefficient phi_norm(k) = phi(k) / phi_random(k), the ratio to a
         # degree-preserving randomization. The raw (unnormalized) phi(k) is
@@ -482,7 +557,14 @@ class AdvancedNetworkAnalyzer:
             Dictionary with robustness metrics
         """
         metrics = {}
-        
+
+        # Scale guard: the failure simulations rebuild/component-scan the graph
+        # O(n) times per run, so cost grows ~O(n^2). Reduce the number of random
+        # simulations on large graphs (10 -> 3) to keep it responsive.
+        if self.n_nodes > self.APPROX_THRESHOLD and num_simulations > 3:
+            num_simulations = 3
+            self._mark_approx('random_failure_robustness')
+
         # Original giant component size
         if nx.is_weakly_connected(self.G):
             original_gcc_size = self.n_nodes
@@ -549,19 +631,25 @@ class AdvancedNetworkAnalyzer:
         avg_degree = 2 * self.G.number_of_edges() / self.n_nodes if self.n_nodes > 0 else 0
         metrics['percolation_threshold'] = 1 / avg_degree if avg_degree > 0 else 1
         
-        # Redundancy (alternative paths)
-        path_redundancy = []
-        for i in range(min(10, self.n_nodes)):
-            for j in range(min(10, self.n_nodes)):
-                if i != j:
-                    try:
-                        paths = list(nx.all_simple_paths(self.G, i, j, cutoff=3))
-                        if len(paths) > 1:
-                            path_redundancy.append(len(paths))
-                    except:
-                        pass
-        
-        metrics['path_redundancy'] = np.mean(path_redundancy) if path_redundancy else 0
+        # Redundancy (alternative paths). Enumerating simple paths (even with
+        # cutoff=3) can explode on large/dense graphs, so skip with a sentinel
+        # above the approximation threshold.
+        if self.n_nodes > self.APPROX_THRESHOLD:
+            metrics['path_redundancy'] = 'skipped_large_graph'
+            self._mark_approx('path_redundancy')
+        else:
+            path_redundancy = []
+            for i in range(min(10, self.n_nodes)):
+                for j in range(min(10, self.n_nodes)):
+                    if i != j:
+                        try:
+                            paths = list(nx.all_simple_paths(self.G, i, j, cutoff=3))
+                            if len(paths) > 1:
+                                path_redundancy.append(len(paths))
+                        except Exception:
+                            pass
+
+            metrics['path_redundancy'] = np.mean(path_redundancy) if path_redundancy else 0
         
         return metrics
     
@@ -648,7 +736,13 @@ class AdvancedNetworkAnalyzer:
         
         # Flow metrics
         all_metrics['flow'] = self.calculate_flow_metrics()
-        
+
+        # Scale-mode summary: 'full' when everything was computed exactly, or
+        # 'approximate' when one or more metrics were k-sampled / skipped for
+        # size. Lets the UI/report annotate "approximate mode (large network)".
+        all_metrics['computation_mode'] = self.computation_mode
+        all_metrics['approximated_metrics'] = list(self.approximated_metrics)
+
         return all_metrics
     
     def get_summary_report(self) -> str:
@@ -659,7 +753,16 @@ class AdvancedNetworkAnalyzer:
             Formatted text report
         """
         metrics = self.get_all_metrics()
-        
+
+        def _sf(v, spec='.2f'):
+            # Sentinel-safe format: sentinel strings / None pass through as text.
+            if isinstance(v, bool) or not isinstance(v, (int, float)):
+                return str(v)
+            try:
+                return format(v, spec)
+            except (ValueError, TypeError):
+                return str(v)
+
         report = "=" * 60 + "\n"
         report += "NETWORK ANALYSIS REPORT\n"
         report += "=" * 60 + "\n\n"
@@ -672,9 +775,9 @@ class AdvancedNetworkAnalyzer:
         # Small world
         sw = metrics['small_world']
         report += "SMALL WORLD PROPERTIES:\n"
-        report += f"  Clustering: {sw['clustering_coefficient']:.3f} (random: {sw['random_clustering']:.3f})\n"
-        report += f"  Path Length: {sw['average_path_length']:.2f} (random: {sw['random_path_length']:.2f})\n"
-        report += f"  Small World σ: {sw['small_world_sigma']:.2f} {'✓ Small World' if sw['is_small_world'] else '✗ Not Small World'}\n\n"
+        report += f"  Clustering: {_sf(sw['clustering_coefficient'], '.3f')} (random: {_sf(sw['random_clustering'], '.3f')})\n"
+        report += f"  Path Length: {_sf(sw['average_path_length'])} (random: {_sf(sw['random_path_length'])})\n"
+        report += f"  Small World σ: {_sf(sw['small_world_sigma'])} {'✓ Small World' if sw['is_small_world'] else '✗ Not Small World'}\n\n"
         
         # Communities
         comm = metrics['communities']
@@ -686,9 +789,9 @@ class AdvancedNetworkAnalyzer:
         # Robustness
         rob = metrics['robustness']
         report += "ROBUSTNESS:\n"
-        report += f"  Random Failure: {rob['random_failure_robustness']:.3f}\n"
-        report += f"  Targeted Attack: {rob['targeted_attack_robustness']:.3f}\n"
-        report += f"  Path Redundancy: {rob['path_redundancy']:.2f}\n\n"
+        report += f"  Random Failure: {_sf(rob['random_failure_robustness'], '.3f')}\n"
+        report += f"  Targeted Attack: {_sf(rob['targeted_attack_robustness'], '.3f')}\n"
+        report += f"  Path Redundancy: {_sf(rob['path_redundancy'])}\n\n"
         
         # Flow
         flow = metrics['flow']

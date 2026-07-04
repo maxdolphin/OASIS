@@ -4156,6 +4156,55 @@ def create_flow_heatmap(flow_matrix, node_names, max_size=100):
     return fig
 
 
+def _safe_fmt(value, spec: str = ".2f", default: str = "N/A") -> str:
+    """Format a number, but pass through sentinel strings / None safely.
+
+    Network-analysis metrics may be numeric OR carry a sentinel string
+    ('insufficient', 'skipped_large_graph', 'not_computed_large_graph') or None
+    when a metric was approximated/skipped on a large graph. Applying ``:.2f``
+    to those raises ``ValueError``; this helper returns a readable string
+    instead of crashing.
+    """
+    if isinstance(value, bool):
+        return str(value)
+    if isinstance(value, (int, float)):
+        try:
+            return format(value, spec)
+        except (ValueError, TypeError):
+            return str(value)
+    if value is None:
+        return default
+    return str(value)
+
+
+def _coerce_int_keys(d: dict) -> dict:
+    """Return a copy of ``d`` with integer-like string keys coerced to int.
+
+    JSON serialization of the precomputed profile turns integer node-index keys
+    into strings ('0', '1', ...). Downstream code indexes ``node_names[idx]``
+    and does ``.get(i)`` with integer ``i``; without this coercion those lookups
+    raise ``TypeError`` (str index) or silently miss (returning the default for
+    every node). Non-integer keys are preserved as-is.
+    """
+    if not isinstance(d, dict):
+        return d
+    out = {}
+    for k, v in d.items():
+        try:
+            out[int(k)] = v
+        except (ValueError, TypeError):
+            out[k] = v
+    return out
+
+
+def _node_label(node_names, key) -> str:
+    """Resolve a (possibly stringified) node-index key to its display label."""
+    try:
+        return node_names[int(key)]
+    except (ValueError, TypeError, IndexError, KeyError):
+        return str(key)
+
+
 def _format_network_summary(metrics: dict) -> str:
     """
     Format the network-science summary text from an already-computed metrics dict.
@@ -4174,9 +4223,9 @@ def _format_network_summary(metrics: dict) -> str:
 
     sw = metrics.get('small_world', {})
     report += "SMALL WORLD PROPERTIES:\n"
-    report += f"  Clustering: {sw.get('clustering_coefficient', 0):.3f} (random: {sw.get('random_clustering', 0):.3f})\n"
-    report += f"  Path Length: {sw.get('average_path_length', 0):.2f} (random: {sw.get('random_path_length', 0):.2f})\n"
-    report += f"  Small World σ: {sw.get('small_world_sigma', 0):.2f} {'✓ Small World' if sw.get('is_small_world') else '✗ Not Small World'}\n\n"
+    report += f"  Clustering: {_safe_fmt(sw.get('clustering_coefficient', 0), '.3f')} (random: {_safe_fmt(sw.get('random_clustering', 0), '.3f')})\n"
+    report += f"  Path Length: {_safe_fmt(sw.get('average_path_length', 0), '.2f')} (random: {_safe_fmt(sw.get('random_path_length', 0), '.2f')})\n"
+    report += f"  Small World σ: {_safe_fmt(sw.get('small_world_sigma', 0), '.2f')} {'✓ Small World' if sw.get('is_small_world') else '✗ Not Small World'}\n\n"
 
     comm = metrics.get('communities', {})
     if 'louvain' in comm and comm['louvain'].get('modularity', 0) > 0:
@@ -4186,15 +4235,15 @@ def _format_network_summary(metrics: dict) -> str:
 
     rob = metrics.get('robustness', {})
     report += "ROBUSTNESS:\n"
-    report += f"  Random Failure: {rob.get('random_failure_robustness', 0):.3f}\n"
-    report += f"  Targeted Attack: {rob.get('targeted_attack_robustness', 0):.3f}\n"
-    report += f"  Path Redundancy: {rob.get('path_redundancy', 0):.2f}\n\n"
+    report += f"  Random Failure: {_safe_fmt(rob.get('random_failure_robustness', 0), '.3f')}\n"
+    report += f"  Targeted Attack: {_safe_fmt(rob.get('targeted_attack_robustness', 0), '.3f')}\n"
+    report += f"  Path Redundancy: {_safe_fmt(rob.get('path_redundancy', 0), '.2f')}\n\n"
 
     flow = metrics.get('flow', {})
     report += "FLOW CHARACTERISTICS:\n"
-    report += f"  Flow Inequality (Gini): {flow.get('flow_gini_coefficient', 0):.3f}\n"
-    report += f"  Flow Reciprocity: {flow.get('flow_reciprocity', 0):.3f}\n"
-    report += f"  Throughput Efficiency: {flow.get('throughput_efficiency', 0):.3f}\n"
+    report += f"  Flow Inequality (Gini): {_safe_fmt(flow.get('flow_gini_coefficient', 0), '.3f')}\n"
+    report += f"  Flow Reciprocity: {_safe_fmt(flow.get('flow_reciprocity', 0), '.3f')}\n"
+    report += f"  Throughput Efficiency: {_safe_fmt(flow.get('throughput_efficiency', 0), '.3f')}\n"
 
     report += "\n" + "=" * 60
     return report
@@ -4239,14 +4288,14 @@ def display_network_analysis(calculator, metrics, flow_matrix, node_names):
         st.metric("Components", network_metrics['basic']['num_components'], help=_tip("communities"))
         st.caption("Weakly connected")
     with col3:
-        st.metric("Clustering", f"{network_metrics['small_world']['clustering_coefficient']:.2f}", help=_tip("clustering_coefficient"))
+        st.metric("Clustering", _safe_fmt(network_metrics['small_world'].get('clustering_coefficient', 0)), help=_tip("clustering_coefficient"))
         st.caption("CC [0-1]")
-        st.metric("Path Length", f"{network_metrics['small_world']['average_path_length']:.2f}", help=_tip("avg_path_length"))
+        st.metric("Path Length", _safe_fmt(network_metrics['small_world'].get('average_path_length', 0)), help=_tip("avg_path_length"))
         st.caption("⟨l⟩ [steps]")
     with col4:
-        st.metric("Small World σ", f"{network_metrics['small_world']['small_world_sigma']:.2f}", help=_tip("small_world_sigma"))
+        st.metric("Small World σ", _safe_fmt(network_metrics['small_world'].get('small_world_sigma', 0)), help=_tip("small_world_sigma"))
         st.caption("σ > 1 = small world")
-        is_sw = "✅ Yes" if network_metrics['small_world']['is_small_world'] else "❌ No"
+        is_sw = "✅ Yes" if network_metrics['small_world'].get('is_small_world') else "❌ No"
         st.metric("Is Small World?", is_sw)
         st.caption("High CC, short paths")
     
@@ -4255,31 +4304,36 @@ def display_network_analysis(calculator, metrics, flow_matrix, node_names):
     st.subheader("⭐ Centrality Analysis")
     st.markdown("*Identifying important nodes through various centrality measures*")
     
-    centralities = network_metrics['centralities']
-    
+    # JSON round-trips integer node-index keys to strings; coerce back so
+    # node_names[idx] lookups and .get(i) reads below work correctly.
+    centralities = {name: _coerce_int_keys(cdict) if isinstance(cdict, dict) else cdict
+                    for name, cdict in network_metrics['centralities'].items()}
+
     # Get top 5 nodes for each centrality
     def get_top_nodes(cent_dict, n=5):
+        if not isinstance(cent_dict, dict):
+            return []
         return sorted(cent_dict.items(), key=lambda x: x[1], reverse=True)[:n]
-    
+
     col1, col2, col3 = st.columns(3)
-    
+
     with col1:
         st.markdown("#### Degree Centrality")
         st.caption("Most connected nodes")
-        for node_id, score in get_top_nodes(centralities['total_degree'], 3):
-            st.write(f"• {node_names[node_id]}: {score:.2f}")
-    
+        for node_id, score in get_top_nodes(centralities.get('total_degree', {}), 3):
+            st.write(f"• {_node_label(node_names, node_id)}: {_safe_fmt(score)}")
+
     with col2:
         st.markdown("#### Betweenness Centrality")
         st.caption("Bridge nodes (bottlenecks)")
-        for node_id, score in get_top_nodes(centralities['betweenness'], 3):
-            st.write(f"• {node_names[node_id]}: {score:.2f}")
-    
+        for node_id, score in get_top_nodes(centralities.get('betweenness', {}), 3):
+            st.write(f"• {_node_label(node_names, node_id)}: {_safe_fmt(score)}")
+
     with col3:
         st.markdown("#### PageRank")
         st.caption("Most influential nodes")
-        for node_id, score in get_top_nodes(centralities['pagerank'], 3):
-            st.write(f"• {node_names[node_id]}: {score:.2f}")
+        for node_id, score in get_top_nodes(centralities.get('pagerank', {}), 3):
+            st.write(f"• {_node_label(node_names, node_id)}: {_safe_fmt(score)}")
     
     # Community Structure
     st.markdown("---")
@@ -4300,23 +4354,23 @@ def display_network_analysis(calculator, metrics, flow_matrix, node_names):
         st.metric("Modularity", f"{louvain.get('modularity', 0):.2f}", help=_tip("modularity"))
         st.caption("Q ∈ [-0.5, 1]")
     with col3:
-        # Assortativity
-        assort = network_metrics['assortativity']
-        st.metric("Degree Assortativity", f"{assort['degree_assortativity']:.2f}", help=_tip("degree_assortativity"))
+        # Assortativity (may be a sentinel / None on degenerate graphs)
+        assort = network_metrics.get('assortativity', {})
+        st.metric("Degree Assortativity", _safe_fmt(assort.get('degree_assortativity', 0)), help=_tip("degree_assortativity"))
         st.caption("r ∈ [-1, 1]")
     with col4:
-        # Rich club
-        rc = network_metrics['rich_club']
-        st.metric("Rich Club", f"{rc['rich_club_coefficient']:.2f}", help=_tip("rich_club"))
-        st.caption(f"k = {rc['threshold_k']}")
-    
+        # Rich club (may be the 'insufficient'/'skipped_large_graph' sentinel)
+        rc = network_metrics.get('rich_club', {})
+        st.metric("Rich Club", _safe_fmt(rc.get('rich_club_coefficient')), help=_tip("rich_club"))
+        st.caption(f"k = {rc.get('threshold_k', 'N/A')}")
+
     # Display community membership if available
     if louvain.get('communities'):
         st.markdown("#### Community Membership")
         community_dict = {}
         for i, comm in enumerate(louvain['communities']):
             for node in comm:
-                community_dict[node_names[node]] = f"Community {i+1}"
+                community_dict[_node_label(node_names, node)] = f"Community {i+1}"
         
         # Create two columns of community assignments
         comm_items = list(community_dict.items())
@@ -4335,28 +4389,30 @@ def display_network_analysis(calculator, metrics, flow_matrix, node_names):
     st.subheader("🛡️ Robustness & Resilience")
     st.markdown("*Network vulnerability and attack tolerance*")
     
-    robustness = network_metrics['robustness']
-    
+    robustness = network_metrics.get('robustness', {})
+
     col1, col2, col3, col4 = st.columns(4)
-    
+
     with col1:
-        st.metric("Random Failure", f"{robustness['random_failure_robustness']:.2f}", help=_tip("random_failure_robustness"))
+        st.metric("Random Failure", _safe_fmt(robustness.get('random_failure_robustness', 0)), help=_tip("random_failure_robustness"))
         st.caption("Robustness [0-1]")
     with col2:
-        st.metric("Targeted Attack", f"{robustness['targeted_attack_robustness']:.2f}", help=_tip("targeted_attack_robustness"))
+        st.metric("Targeted Attack", _safe_fmt(robustness.get('targeted_attack_robustness', 0)), help=_tip("targeted_attack_robustness"))
         st.caption("Hub removal [0-1]")
     with col3:
-        st.metric("Percolation", f"{robustness['percolation_threshold']:.2f}", help=_tip("percolation_threshold"))
+        st.metric("Percolation", _safe_fmt(robustness.get('percolation_threshold', 0)), help=_tip("percolation_threshold"))
         st.caption("Critical threshold")
     with col4:
-        st.metric("Path Redundancy", f"{robustness['path_redundancy']:.2f}", help=_tip("path_redundancy"))
+        st.metric("Path Redundancy", _safe_fmt(robustness.get('path_redundancy', 0)), help=_tip("path_redundancy"))
         st.caption("Alternative paths")
-    
-    # Vulnerability assessment
+
+    # Vulnerability assessment (guard against sentinel/non-numeric values)
+    _tar = robustness.get('targeted_attack_robustness', 0)
+    _tar = _tar if isinstance(_tar, (int, float)) and not isinstance(_tar, bool) else 1.0
     vulnerability = "Low"
-    if robustness['targeted_attack_robustness'] < 0.3:
+    if _tar < 0.3:
         vulnerability = "High"
-    elif robustness['targeted_attack_robustness'] < 0.5:
+    elif _tar < 0.5:
         vulnerability = "Medium"
     
     if vulnerability == "High":
@@ -4371,21 +4427,21 @@ def display_network_analysis(calculator, metrics, flow_matrix, node_names):
     st.subheader("💧 Flow Characteristics")
     st.markdown("*Flow distribution and efficiency patterns*")
     
-    flow_metrics = network_metrics['flow']
-    
+    flow_metrics = network_metrics.get('flow', {})
+
     col1, col2, col3, col4 = st.columns(4)
-    
+
     with col1:
-        st.metric("Flow Gini", f"{flow_metrics['flow_gini_coefficient']:.2f}", help=_tip("flow_gini"))
+        st.metric("Flow Gini", _safe_fmt(flow_metrics.get('flow_gini_coefficient', 0)), help=_tip("flow_gini"))
         st.caption("Inequality [0-1]")
     with col2:
-        st.metric("Flow Heterogeneity", f"{flow_metrics['flow_heterogeneity']:.2f}", help=_tip("flow_heterogeneity"))
+        st.metric("Flow Heterogeneity", _safe_fmt(flow_metrics.get('flow_heterogeneity', 0)), help=_tip("flow_heterogeneity"))
         st.caption("CV of flows")
     with col3:
-        st.metric("Throughput Eff.", f"{flow_metrics['throughput_efficiency']:.2f}", help=_tip("throughput_efficiency"))
+        st.metric("Throughput Eff.", _safe_fmt(flow_metrics.get('throughput_efficiency', 0)), help=_tip("throughput_efficiency"))
         st.caption("Actual/Max [0-1]")
     with col4:
-        st.metric("Reciprocity", f"{flow_metrics['flow_reciprocity']:.2f}", help=_tip("flow_reciprocity"))
+        st.metric("Reciprocity", _safe_fmt(flow_metrics.get('flow_reciprocity', 0)), help=_tip("flow_reciprocity"))
         st.caption("Bidirectional [0-1]")
     
     # Node Rankings
@@ -4394,14 +4450,24 @@ def display_network_analysis(calculator, metrics, flow_matrix, node_names):
     st.markdown("*Comprehensive node importance across multiple metrics*")
     
     # Create node ranking dataframe
+    # centralities was key-coerced to int keys above; guard sentinel scores.
+    _deg = centralities.get('total_degree', {})
+    _btw = centralities.get('betweenness', {})
+    _pr = centralities.get('pagerank', {})
+    _cls = centralities.get('closeness', {})
+
+    def _num(d, i):
+        v = d.get(i, 0) if isinstance(d, dict) else 0
+        return v if isinstance(v, (int, float)) and not isinstance(v, bool) else 0
+
     node_data = []
     for i in range(len(node_names)):
         node_data.append({
             'Node': node_names[i],
-            'Degree': centralities['total_degree'].get(i, 0),
-            'Betweenness': centralities['betweenness'].get(i, 0),
-            'PageRank': centralities['pagerank'].get(i, 0),
-            'Closeness': centralities['closeness'].get(i, 0),
+            'Degree': _num(_deg, i),
+            'Betweenness': _num(_btw, i),
+            'PageRank': _num(_pr, i),
+            'Closeness': _num(_cls, i),
             'In-Flow': np.sum(flow_matrix[:, i]),
             'Out-Flow': np.sum(flow_matrix[i, :])
         })
@@ -4426,12 +4492,15 @@ def display_network_analysis(calculator, metrics, flow_matrix, node_names):
     st.subheader("🏥 Network Health Summary")
     
     # Calculate overall network health metrics
+    def _numv(v, default=0.0):
+        return v if isinstance(v, (int, float)) and not isinstance(v, bool) else default
+
     health_scores = {
-        'Connectivity': min(network_metrics['basic']['density'] * 3, 1.0),  # Scale density
-        'Small World': 1.0 if network_metrics['small_world']['is_small_world'] else 0.3,
-        'Modularity': max(0, louvain.get('modularity', 0)),
-        'Robustness': robustness['random_failure_robustness'],
-        'Efficiency': flow_metrics['throughput_efficiency']
+        'Connectivity': min(_numv(network_metrics.get('basic', {}).get('density', 0)) * 3, 1.0),  # Scale density
+        'Small World': 1.0 if network_metrics.get('small_world', {}).get('is_small_world') else 0.3,
+        'Modularity': max(0, _numv(louvain.get('modularity', 0))),
+        'Robustness': _numv(robustness.get('random_failure_robustness', 0)),
+        'Efficiency': _numv(flow_metrics.get('throughput_efficiency', 0))
     }
     
     col1, col2, col3, col4, col5 = st.columns(5)
@@ -4639,8 +4708,10 @@ def display_visual_summary_cards(metrics, assessments):
     with col3:
         st.markdown("**Viability Window**")
         viability_pct = metrics.get('viability_window_position', 0)
+        _alpha = metrics.get('relative_ascendency', metrics.get('ascendency_ratio', 0))
+        in_band = metrics.get('is_viable', 0.2 <= _alpha <= 0.6)
         st.progress(viability_pct)
-        st.caption(f"{viability_pct:.1%} - {'In window' if viable else 'Outside window'}")
+        st.caption(f"{viability_pct:.1%} - {'In indicative band' if in_band else 'Outside indicative band'}")
 
 
 def display_oasis_health(calculator, metrics, flow_matrix, node_names, org_name):
