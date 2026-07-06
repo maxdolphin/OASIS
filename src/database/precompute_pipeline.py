@@ -14,6 +14,11 @@ from pathlib import Path
 from typing import Dict, Optional, Any, List, Callable
 
 from .db_manager import DatabaseManager, get_database_manager
+from . import full_profile as _full_profile_mod
+from .full_profile import FORMULA_VERSION
+
+# Tier used to persist the full-index profile JSON blob.
+FULL_PROFILE_TIER = 3
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -112,10 +117,14 @@ class PrecomputePipeline:
             pass
 
         # Basic network structure
+        # E-27: one "density" definition only. Self-loops are disallowed in these
+        # flow networks, so density == directed connectance = m / (n(n-1)), which
+        # also matches nx.density(G) used elsewhere. The prior m/n^2 duplicate
+        # (which double-counted the disallowed diagonal) is removed.
         num_edges = int(np.sum(flow_matrix > 0))
         metrics['num_edges'] = num_edges
-        metrics['network_density'] = num_edges / (n_nodes * n_nodes) if n_nodes > 0 else 0
         metrics['connectance'] = num_edges / (n_nodes * (n_nodes - 1)) if n_nodes > 1 else 0
+        metrics['network_density'] = metrics['connectance']  # single density definition
         metrics['link_density'] = num_edges / n_nodes if n_nodes > 0 else 0
 
         # Additional metrics
@@ -296,6 +305,100 @@ class PrecomputePipeline:
             'cached': False,
             'network_id': network_id,
             'computation_time_ms': computation_time_ms
+        }
+
+    def get_full_profile(self,
+                         flow_matrix: np.ndarray,
+                         node_names: List[str] = None,
+                         org_name: str = None) -> Dict[str, Any]:
+        """
+        Full-index profile: compute ONCE, read thereafter.
+
+        Looks up the stored tier=3 profile for this network's hash. Returns it as a
+        cache HIT iff it exists AND its formula_version matches FORMULA_VERSION.
+        Otherwise computes the full profile, persists it (tier=3 + version), and
+        returns it as a MISS. A version mismatch is treated as a miss (forces
+        recompute + overwrite), so stale profiles from older formulas are never
+        served.
+
+        Args:
+            flow_matrix: Square flow matrix.
+            node_names:  Optional node labels.
+            org_name:    Optional organization name.
+
+        Returns:
+            {
+              'profile': <nested full-profile dict>,
+              'cache_hit': bool,
+              'network_id': int,
+              'formula_version': FORMULA_VERSION,
+              'computation_time_ms': int (0 on hit),
+            }
+        """
+        flow_matrix = np.asarray(flow_matrix, dtype=np.float64)
+        network_hash = self.db.compute_network_hash(flow_matrix, node_names)
+
+        # --- Cache lookup (version-guarded) ---------------------------------
+        existing = self.db.get_network_by_hash(network_hash)
+        if existing:
+            stored = self.db.get_precomputed_metrics(
+                existing['id'],
+                tier=FULL_PROFILE_TIER,
+                required_version=FORMULA_VERSION,
+            )
+            if stored is not None:
+                # Genuine HIT: correct version, do NOT recompute.
+                logger.debug(
+                    f"Full-profile cache HIT for hash {network_hash} "
+                    f"(version {FORMULA_VERSION})"
+                )
+                return {
+                    'profile': stored,
+                    'cache_hit': True,
+                    'network_id': existing['id'],
+                    'formula_version': FORMULA_VERSION,
+                    'computation_time_ms': 0,
+                }
+
+        # --- MISS (absent or version mismatch): compute + persist -----------
+        n_nodes = int(flow_matrix.shape[0]) if flow_matrix.ndim == 2 else 0
+        n_edges = int(np.sum(flow_matrix > 0))
+
+        network_id = self.db.save_network(
+            name=org_name or f"network_{network_hash}",
+            source_file='',
+            node_count=n_nodes,
+            edge_count=n_edges,
+            network_hash=network_hash,
+        )
+
+        start_time = time.time()
+        # Call via the module so tests can spy on precompute_full_profile.
+        profile = _full_profile_mod.precompute_full_profile(
+            flow_matrix, node_names, org_name=org_name
+        )
+        computation_time_ms = int((time.time() - start_time) * 1000)
+
+        self.db.save_precomputed_metrics(
+            network_id=network_id,
+            tier=FULL_PROFILE_TIER,
+            metrics=profile,
+            computation_time_ms=computation_time_ms,
+            formula_version=FORMULA_VERSION,
+        )
+
+        logger.info(
+            f"Computed full profile for {org_name or network_hash} "
+            f"({n_nodes} nodes) in {computation_time_ms}ms "
+            f"[version {FORMULA_VERSION}]"
+        )
+
+        return {
+            'profile': profile,
+            'cache_hit': False,
+            'network_id': network_id,
+            'formula_version': FORMULA_VERSION,
+            'computation_time_ms': computation_time_ms,
         }
 
     def precompute_all_existing(self,

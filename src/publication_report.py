@@ -11,6 +11,39 @@ from typing import Dict, Any, List, Optional
 import json
 
 
+def _viability_bands():
+    """Import the report_intelligence module holding the single-source-of-truth
+    viability / efficiency / robustness band constants (E-19, E-20)."""
+    try:
+        import report_intelligence as _ri
+    except ImportError:  # pragma: no cover - package-path fallback
+        from src import report_intelligence as _ri
+    return _ri
+
+
+def flow_diversity_utilization(flow_diversity: float, n_nodes: int) -> float:
+    """Flow-diversity utilization as a percentage of the theoretical maximum.
+
+    The maximum flow diversity for a network with n nodes (n^2 possible directed
+    flow cells) is H_max = log(n^2). The utilization is fd / H_max * 100.
+
+    IMPORTANT (base match): the Ulanowicz engine computes flow_diversity in NATS
+    (natural log). The denominator MUST use the SAME base, i.e. np.log(n**2)
+    (nats) -- NOT np.log2(n**2) (bits). The previous code mixed a nats numerator
+    with a base-2 denominator, understating utilization by a factor of ln(2) ~=
+    0.693 (a uniform-flow network read ~69% instead of 100%). See
+    validation-EF-network-stats.md (S5).
+
+    Guards n <= 1 (H_max = log(1) = 0) to avoid divide-by-zero.
+    """
+    if n_nodes is None or n_nodes <= 1:
+        return 0.0
+    h_max = np.log(n_nodes ** 2)  # nats, matching flow_diversity's base
+    if h_max <= 0:
+        return 0.0
+    return float(flow_diversity / h_max * 100)
+
+
 class PublicationReportGenerator:
     """
     Generates professional, audit-firm quality reports for organizational
@@ -20,15 +53,83 @@ class PublicationReportGenerator:
     """
 
     def __init__(self, calculator, metrics: Dict[str, Any], assessments: Dict[str, str],
-                 org_name: str, flow_matrix: np.ndarray, node_names: List[str]):
-        """Initialize report generator with analysis data."""
+                 org_name: str, flow_matrix: np.ndarray, node_names: List[str],
+                 oasis_profile: Dict[str, Any] = None):
+        """Initialize report generator with analysis data.
+
+        Args:
+            oasis_profile: optional precomputed OASIS profile (from the full
+                profile computed once at provision). When provided, the OASIS
+                section READS it instead of recomputing via OASISCalculator.
+        """
         self.calculator = calculator
-        self.metrics = metrics
+        # Copy so we can safely backfill without mutating the caller's dict.
+        self.metrics = dict(metrics) if isinstance(metrics, dict) else {}
         self.assessments = assessments
         self.org_name = org_name
         self.flow_matrix = flow_matrix
         self.node_names = node_names
+        self.oasis_profile = oasis_profile
         self.timestamp = datetime.now()
+        # Robustness: the report bracket-accesses many keys. Depending on the
+        # entry path (fresh get_extended_metrics vs. cache-reconstructed tier-2
+        # metrics) some keys are absent, which previously raised KeyError, and
+        # some may carry sentinel strings ('insufficient') or None which crash
+        # ':.Nf' formatting. Normalize once so every downstream access is safe.
+        self._ensure_metric_defaults()
+
+    def _ensure_metric_defaults(self) -> None:
+        """Backfill missing/sentinel metric keys with sensible numeric defaults.
+
+        Does NOT change any formula: present numeric values are untouched. Only
+        absent keys, None, or sentinel strings ('insufficient', 'skipped_*',
+        'not_computed_*') are replaced so the narrative's f-string formatting
+        (e.g. ``{v:.3f}``) never raises.
+        """
+        m = self.metrics
+        ri = _viability_bands()
+
+        # Indicative reference band edges (single source of truth: E-19/E-20).
+        m.setdefault('viability_lower_bound', getattr(ri, 'VIABILITY_LOWER', 0.2))
+        m.setdefault('viability_upper_bound', getattr(ri, 'VIABILITY_UPPER', 0.6))
+
+        # alpha alias parity (report uses ascendency_ratio; pipeline uses
+        # relative_ascendency).
+        if m.get('ascendency_ratio') is None:
+            m['ascendency_ratio'] = m.get('relative_ascendency', 0.0)
+        if m.get('relative_ascendency') is None:
+            m['relative_ascendency'] = m.get('ascendency_ratio', 0.0)
+
+        alpha = m.get('ascendency_ratio', 0.0)
+        try:
+            alpha = float(alpha)
+        except (TypeError, ValueError):
+            alpha = 0.0
+        if 'is_viable' not in m or not isinstance(m.get('is_viable'), (bool, int, float)):
+            m['is_viable'] = bool(
+                m['viability_lower_bound'] <= alpha <= m['viability_upper_bound'])
+
+        # Numeric metrics the narrative formats with ':.Nf'. Coerce any missing
+        # key / None / sentinel string to a float default so formatting is safe.
+        _numeric_defaults = {
+            'robustness': 0.0, 'redundancy': 0.0, 'overhead': 0.0,
+            'overhead_ratio': 0.0, 'network_efficiency': 0.0, 'ascendency': 0.0,
+            'development_capacity': 0.0, 'trophic_depth': 0.0,
+            'effective_link_density': 0.0, 'flow_diversity': 0.0,
+            'regenerative_capacity': 0.0, 'structural_information': 0.0,
+            'total_system_throughput': 0.0, 'average_mutual_information': 0.0,
+            'reserve': 0.0, 'reserve_ratio': 0.0, 'connectance': 0.0,
+        }
+        for key, default in _numeric_defaults.items():
+            val = m.get(key, default)
+            if isinstance(val, bool) or not isinstance(val, (int, float)):
+                # None, str sentinels ('insufficient', 'skipped_large_graph'),
+                # numpy strings, etc. -> fall back to the numeric default.
+                try:
+                    val = float(val)
+                except (TypeError, ValueError):
+                    val = default
+            m[key] = val
 
     # ==================================================================
     # Public report sections
@@ -37,25 +138,31 @@ class PublicationReportGenerator:
     def generate_abstract(self) -> str:
         """Generate a two-paragraph executive abstract."""
 
-        alpha = self.metrics['ascendency_ratio']
-        rob = self.metrics['robustness']
-        viable = self.metrics['is_viable']
+        alpha = self.metrics.get('ascendency_ratio', self.metrics.get('relative_ascendency', 0))
+        rob = self.metrics.get('robustness', 0)
+        lower = self.metrics.get('viability_lower_bound_alpha', 0.2)
+        upper = self.metrics.get('viability_upper_bound_alpha', 0.6)
+        # Absolute (capacity-unit) bounds are stored under viability_lower/upper_bound; the
+        # indicative band on the alpha scale is [0.2, 0.6]. Present the alpha band.
+        in_band = bool(self.metrics.get('is_viable', lower <= alpha <= upper))
         n_nodes = len(self.node_names)
         n_edges = np.count_nonzero(self.flow_matrix)
         tst = np.sum(self.flow_matrix)
+        overhead_ratio = self.metrics.get('overhead_ratio', 0)
 
-        viability_word = "within" if viable else "outside"
-        sustainability_clause = (
-            "sustainable operational characteristics consistent with long-term adaptive capacity"
-            if viable else
-            "structural conditions that warrant management attention and targeted intervention"
-        )
+        if alpha < lower:
+            position, direction = "under-organized", "increase structure / coordination"
+        elif alpha > upper:
+            position, direction = "over-organized", "increase redundancy / flexibility"
+        else:
+            position, direction = "balanced", "maintain balance"
+        band_word = "within" if in_band else "outside"
 
         abstract = f"""
 ABSTRACT
 ========
 
-{self.org_name} {"demonstrates" if viable else "presents"} a network whose relative ascendency of alpha = {alpha:.3f} places it {viability_word} the empirically derived window of viability ({self.metrics['viability_lower_bound']:.2f} < alpha < {self.metrics['viability_upper_bound']:.2f}), indicating {sustainability_clause}. This assessment applies the Ulanowicz-Fath regenerative economics framework to a directed network of {n_nodes} organizational units connected through {n_edges} active flow relationships, representing a total system throughput of {tst:.1f} units. The system achieves a robustness of R = {rob:.3f} ({self._categorize_robustness().lower()}) and utilizes {alpha * 100:.1f}% of its development capacity for organized behavior while retaining {self.metrics['overhead_ratio'] * 100:.1f}% as overhead reserves for adaptability.
+{self.org_name} presents a network whose relative ascendency of alpha = {alpha:.3f} places it {band_word} the indicative reference band ({lower:.2f} < alpha < {upper:.2f}) on the efficiency/resilience gradient — a {position} position (direction of travel: {direction}). The reference band is derived from ecological systems and is an indicative directional reference for organizations, not a compliance threshold. This assessment applies the Ulanowicz-Fath regenerative economics framework to a directed network of {n_nodes} organizational units connected through {n_edges} active flow relationships, representing a total system throughput of {tst:.1f} units. The system achieves a robustness of R = {rob:.3f} ({self._categorize_robustness().lower()}) and utilizes {alpha * 100:.1f}% of its development capacity for organized behavior while retaining {overhead_ratio * 100:.1f}% as overhead reserves for adaptability.
 
 The analysis reveals {self._categorize_efficiency().lower()} network efficiency and {"a hierarchically layered" if self.metrics.get('trophic_depth', 0) > 2 else "a relatively flat"} information flow architecture with an effective link density of {self.metrics.get('effective_link_density', 0):.3f} and trophic depth of {self.metrics.get('trophic_depth', 0):.3f}. A flow diversity index of H = {self.metrics.get('flow_diversity', 0):.3f} bits indicates {"substantial" if self.metrics.get('flow_diversity', 0) > 3 else "moderate" if self.metrics.get('flow_diversity', 0) > 2 else "limited"} information distribution complexity. These quantitative findings provide an evidence base for strategic decisions regarding organizational design, resilience investment, and sustainable growth.
 """
@@ -115,7 +222,7 @@ Total System Throughput (TST) measures the aggregate volume of all flows -- the 
 Ascendency (A) quantifies how much of the network's activity is organized into purposeful, constrained pathways. Development Capacity (C) represents the theoretical maximum organization the network could achieve. The ratio alpha = A / C expresses current organization as a fraction of potential. Overhead (Phi = C - A) measures the reserve capacity available for adaptation, learning, and recovery from disruption.
 
 2.2.3 Sustainability Position
-The Window of Viability defines the range of alpha values associated with sustainable system dynamics, empirically bounded at 0.20 (minimum coherence) and 0.60 (maximum efficiency before brittleness onset). Robustness (R = -alpha x log2(alpha)) peaks at alpha approximately equal to 0.37, the theoretical optimum for balancing order with flexibility.
+The indicative reference band spans the range of alpha values empirically associated with sustainable system dynamics in ecological networks, bounded at 0.20 (minimum coherence) and 0.60 (maximum efficiency before brittleness onset). Robustness (R = -alpha x log2(alpha)) peaks at alpha approximately equal to 0.37. """ + _viability_bands().INDICATIVE_REFERENCE_CAVEAT + """
 
 2.2.4 Network Architecture
 Effective Link Density measures the proportion of possible connections that are active. Trophic Depth indicates how many hierarchical levels information traverses. Redundancy captures the availability of alternative pathways should primary channels be disrupted. Regenerative Capacity integrates overhead with proximity to the optimal balance point.
@@ -154,26 +261,32 @@ All calculations conform to the theoretical bounds established in the literature
         cv_flow = std_flow / mean_flow if mean_flow > 0 else 0
         gini = self._calculate_gini()
 
-        # Viability interpretation
-        if viable:
+        # Viability interpretation — reframed as position-on-a-gradient +
+        # direction-of-travel against the INDICATIVE ecological reference band.
+        _ri = _viability_bands()
+        _grad = _ri.assess_alpha_position(alpha)
+        if _grad['position'] == 'balanced':
             viability_narrative = (
-                f"The organization operates within the window of viability, confirming that its "
-                f"current configuration balances constraining efficiency with adaptive flexibility "
-                f"in a manner consistent with long-term sustainability."
+                f"On the efficiency/resilience gradient the organization sits within the "
+                f"indicative reference band (alpha = {alpha:.3f}), a configuration that "
+                f"balances constraining efficiency with adaptive flexibility. "
+                f"Direction of travel: {_grad['direction_of_travel']}. {_ri.INDICATIVE_REFERENCE_CAVEAT}"
             )
-        elif alpha < self.metrics['viability_lower_bound']:
+        elif _grad['position'] == 'under-organized':
             viability_narrative = (
-                f"The organization falls below the lower bound of the window of viability "
-                f"(alpha = {alpha:.3f} vs. threshold of {self.metrics['viability_lower_bound']:.2f}), "
-                f"indicating insufficient organizational coherence. Flows are dispersed across "
-                f"too many weakly constrained pathways, reducing collective effectiveness."
+                f"On the efficiency/resilience gradient the organization reads as under-organized "
+                f"relative to the indicative reference band (alpha = {alpha:.3f} vs. the reference "
+                f"lower edge of {self.metrics['viability_lower_bound']:.2f}). Flows are dispersed "
+                f"across many weakly constrained pathways. Direction of travel: "
+                f"{_grad['direction_of_travel']}. {_ri.INDICATIVE_REFERENCE_CAVEAT}"
             )
         else:
             viability_narrative = (
-                f"The organization exceeds the upper bound of the window of viability "
-                f"(alpha = {alpha:.3f} vs. threshold of {self.metrics['viability_upper_bound']:.2f}), "
-                f"indicating over-constraint. Flows are concentrated through too few dominant "
-                f"pathways, leaving insufficient reserves for adaptation and recovery."
+                f"On the efficiency/resilience gradient the organization reads as over-organized "
+                f"relative to the indicative reference band (alpha = {alpha:.3f} vs. the reference "
+                f"upper edge of {self.metrics['viability_upper_bound']:.2f}). Flows are concentrated "
+                f"through a few dominant pathways, leaving thinner reserves for adaptation. "
+                f"Direction of travel: {_grad['direction_of_travel']}. {_ri.INDICATIVE_REFERENCE_CAVEAT}"
             )
 
         # Robustness distance from optimum
@@ -210,13 +323,15 @@ All calculations conform to the theoretical bounds established in the literature
 
 The relative ascendency of alpha = {alpha:.3f} indicates that {self.org_name} channels {alpha * 100:.1f}% of its development capacity into organized, purposeful flows. This positions the system as {self._interpret_position().lower()} on the organization spectrum. The viability assessment is summarized below.
 
-Table 1. Viability Assessment Summary
---------------------------------------
-Parameter                       Value       Status
+Table 1. Gradient Position Summary (vs. indicative reference band)
+------------------------------------------------------------------
+Parameter                       Value       Position / Note
 Relative Ascendency (alpha)     {alpha:<11.3f} {self._interpret_position()}
-Window Lower Bound              {self.metrics['viability_lower_bound']:<11.3f} {'PASS' if alpha > self.metrics['viability_lower_bound'] else 'FAIL'}
-Window Upper Bound              {self.metrics['viability_upper_bound']:<11.3f} {'PASS' if alpha < self.metrics['viability_upper_bound'] else 'FAIL'}
-Within Window of Viability      {'Yes':<11} {self._get_viability_interpretation()}
+Reference Lower Edge            {self.metrics['viability_lower_bound']:<11.3f} {'above' if alpha > self.metrics['viability_lower_bound'] else 'below'} lower edge
+Reference Upper Edge            {self.metrics['viability_upper_bound']:<11.3f} {'below' if alpha < self.metrics['viability_upper_bound'] else 'above'} upper edge
+Gradient Position               {'':<11} {self._get_viability_interpretation()}
+
+Note: {_viability_bands().INDICATIVE_REFERENCE_CAVEAT}
 
 3.2 Efficiency-Resilience Balance
 ----------------------------------
@@ -263,21 +378,25 @@ Network Efficiency              {eff:<11.3f} {self._categorize_efficiency()}
         td = self.metrics['trophic_depth']
         fd = self.metrics['flow_diversity']
         ovh_ratio = self.metrics['overhead_ratio']
-        h_max = np.log2(len(self.node_names) ** 2)
-        fd_utilization = (fd / h_max * 100) if h_max > 0 else 0
+        # Utilization: fd (nats) vs H_max = log(n^2) in the SAME base (nats).
+        fd_utilization = flow_diversity_utilization(fd, len(self.node_names))
 
         # Strengths and risks
         strengths = []
         risks = []
 
-        if viable:
+        _ri_sr = _viability_bands()
+        _grad_sr = _ri_sr.assess_alpha_position(alpha)
+        if _grad_sr['position'] == 'balanced':
             strengths.append(
-                f"viability positioning (alpha = {alpha:.3f} within the sustainable window)"
+                f"gradient position (alpha = {alpha:.3f} within the indicative reference band)"
             )
         else:
             risks.append(
-                f"viability positioning (alpha = {alpha:.3f} outside the window bounds of "
-                f"{self.metrics['viability_lower_bound']:.2f} to {self.metrics['viability_upper_bound']:.2f})"
+                f"gradient position (alpha = {alpha:.3f} reads {_grad_sr['position']} relative to "
+                f"the indicative reference band {self.metrics['viability_lower_bound']:.2f}"
+                f"–{self.metrics['viability_upper_bound']:.2f}; direction of travel: "
+                f"{_grad_sr['direction_of_travel']})"
             )
 
         if rob > 0.20:
@@ -300,10 +419,10 @@ Network Efficiency              {eff:<11.3f} {self._categorize_efficiency()}
         a_phi_ratio = self.metrics['ascendency'] / self.metrics['overhead'] if self.metrics['overhead'] > 0 else 0
 
         discussion = f"""
-4. DISCUSSION
+9. DISCUSSION
 =============
 
-4.1 Strategic Assessment
+9.1 Strategic Assessment
 -------------------------
 The analysis of {self.org_name} yields a clear overall picture: the organization {"maintains a configuration consistent with sustainable dynamics" if viable else "exhibits structural conditions that require deliberate intervention"}.
 
@@ -316,7 +435,7 @@ The analysis of {self.org_name} yields a clear overall picture: the organization
         if risks:
             discussion += f"""The material risks warranting management attention include {'; '.join(risks)}. {"Left unaddressed, these conditions could erode the organization's capacity to respond to environmental changes or absorb operational shocks." if not viable else "While these do not currently threaten viability, monitoring is warranted to ensure they do not deteriorate."}\n\n"""
 
-        discussion += f"""4.2 Comparative Positioning
+        discussion += f"""9.2 Comparative Positioning
 ----------------------------
 Empirical benchmarks from ecological and organizational literature provide useful context. Sustainable ecological food webs typically exhibit alpha in the range 0.20 to 0.50 (Ulanowicz, 2009). High-performing organizations analyzed using the same framework show alpha between 0.30 and 0.45 (Fath et al., 2019). The current system's alpha of {alpha:.3f} {"aligns with" if 0.30 <= alpha <= 0.45 else "deviates from"} the high-performing organizational benchmark.
 
@@ -324,7 +443,7 @@ The ratio of ascendency to overhead (A/Phi = {a_phi_ratio:.3f}) provides additio
 
 The flow diversity utilization -- the ratio of observed diversity to the theoretical maximum -- stands at {fd_utilization:.1f}%. This indicates that {self.org_name} employs {"a broad range" if fd_utilization > 50 else "a limited fraction"} of its potential communication channels, {"supporting distributed knowledge flow" if fd_utilization > 50 else "suggesting opportunity to broaden information pathways"}.
 
-4.3 Limitations and Caveats
+9.3 Limitations and Caveats
 -----------------------------
 Several limitations should be considered when interpreting these findings.
 
@@ -340,20 +459,21 @@ The analysis represents a single point in time. Organizational networks evolve, 
         viable = self.metrics['is_viable']
         eff = self.metrics['network_efficiency']
         ovh_ratio = self.metrics['overhead_ratio']
+        _grad_c = _viability_bands().assess_alpha_position(alpha)
 
         conclusions = f"""
-5. CONCLUSIONS AND RECOMMENDATIONS
+10. CONCLUSIONS AND RECOMMENDATIONS
 ===================================
 
-5.1 Summary of Findings
+10.1 Summary of Findings
 -------------------------
-This assessment of {self.org_name} establishes that the organization {"operates within the window of viability, demonstrating" if viable else "falls outside the window of viability, lacking"} the efficiency-resilience balance associated with sustainable network dynamics. Robustness of R = {rob:.3f} ({self._categorize_robustness().lower()}) and network efficiency of {eff:.3f} ({self._categorize_efficiency().lower()}) together characterize a system that {"is well-positioned for sustained performance in dynamic conditions" if viable and rob > 0.2 else "maintains adequate but not exceptional adaptive capacity" if viable else "requires structural adjustment to restore sustainable dynamics"}.
+This assessment of {self.org_name} places the organization on the efficiency-resilience gradient as {_grad_c['position']} relative to the indicative reference band, with direction of travel: {_grad_c['direction_of_travel']}. Robustness of R = {rob:.3f} ({self._categorize_robustness().lower()}) and network efficiency of {eff:.3f} ({self._categorize_efficiency().lower()}) together characterize a system that {"is well-positioned for sustained performance in dynamic conditions" if _grad_c['position'] == 'balanced' and rob > 0.2 else "maintains adequate but not exceptional adaptive capacity" if _grad_c['position'] == 'balanced' else "would move toward the indicative band by " + _grad_c['direction_of_travel']}. {_viability_bands().INDICATIVE_REFERENCE_CAVEAT}
 
-5.2 Prioritized Recommendations
+10.2 Prioritized Recommendations
 ---------------------------------
 {self._generate_priority_recommendations()}
 
-5.3 Future Assessment
+10.3 Future Assessment
 ----------------------
 To strengthen the evidence base, the following extensions are recommended: longitudinal tracking of these metrics at regular intervals to identify trends and cycles; comparative benchmarking against industry peers using the same framework; separate analysis of distinct flow types (information, resources, authority) where data permits; and dynamic modeling to develop predictive scenarios for organizational evolution.
 
@@ -429,7 +549,7 @@ Effective Link Density (ELD): ELD = (number of non-zero F_ij) / n^2
 
 Trophic Depth: Average path length weighted by flow magnitude
 
-Network Efficiency: A / (C x log2(n))
+Network Efficiency: alpha = A / C
 
 Regenerative Capacity: (Phi / C) x (1 - |alpha - 0.37|)
 
@@ -506,11 +626,21 @@ Table A3. Assessment Summary
         """Generate OASIS Organizational Health Assessment section with narrative interpretation."""
 
         try:
-            from oasis_calculator import OASISCalculator
-            oasis = OASISCalculator(self.calculator)
-            profile = oasis.get_oasis_profile()
-            interpretations = oasis.get_oasis_interpretation()
-            recommendations = oasis.get_recommendations()
+            # Prefer the precomputed OASIS profile (computed once at provision).
+            profile = self.oasis_profile if isinstance(self.oasis_profile, dict) \
+                and 'dimension_scores' in self.oasis_profile else None
+            if profile is not None:
+                interpretations = profile.get('interpretation')
+                recommendations = profile.get('recommendations')
+            if profile is None or interpretations is None or recommendations is None:
+                from oasis_calculator import OASISCalculator
+                oasis = OASISCalculator(self.calculator)
+                if profile is None:
+                    profile = oasis.get_oasis_profile()
+                if interpretations is None:
+                    interpretations = oasis.get_oasis_interpretation()
+                if recommendations is None:
+                    recommendations = oasis.get_recommendations()
         except Exception as e:
             return f"""
 6. OASIS ORGANIZATIONAL HEALTH ASSESSMENT
@@ -640,44 +770,22 @@ END OF REPORT
     # ==================================================================
 
     def _categorize_efficiency(self) -> str:
-        """Categorize network efficiency level."""
+        """Categorize network efficiency (alpha = A/C) using the viability-anchored
+        single-source-of-truth bands (E-19). HIGH efficiency reads as
+        over-organized/brittle (NOT "good"), consistent with the risk framing."""
         eff = self.metrics['network_efficiency']
-        if eff < 0.2:
-            return "Low"
-        elif eff < 0.4:
-            return "Moderate"
-        elif eff < 0.6:
-            return "High"
-        else:
-            return "Very High"
+        return _viability_bands().categorize_efficiency_label(eff)
 
     def _categorize_robustness(self) -> str:
-        """Categorize robustness level."""
+        """Categorize robustness using the shared threshold constant (E-20)."""
         rob = self.metrics['robustness']
-        if rob < 0.1:
-            return "Very Low"
-        elif rob < 0.15:
-            return "Low"
-        elif rob < 0.2:
-            return "Moderate"
-        elif rob < 0.25:
-            return "High"
-        else:
-            return "Very High"
+        return _viability_bands().categorize_robustness_label(rob)
 
     def _interpret_position(self) -> str:
-        """Interpret position in window of viability."""
+        """Interpret alpha's position in the window of viability. Shares the
+        single-source-of-truth efficiency bands (E-19)."""
         alpha = self.metrics['ascendency_ratio']
-        if alpha < 0.2:
-            return "Under-organized"
-        elif alpha < 0.35:
-            return "Developing"
-        elif alpha < 0.45:
-            return "Optimal"
-        elif alpha < 0.6:
-            return "Efficient"
-        else:
-            return "Over-constrained"
+        return _viability_bands().categorize_efficiency_label(alpha)
 
     def _calculate_gini(self) -> float:
         """Calculate Gini coefficient for flow distribution."""
@@ -694,13 +802,14 @@ END OF REPORT
     # ==================================================================
 
     def _get_viability_interpretation(self) -> str:
-        """Get interpretation of viability status."""
-        if self.metrics['is_viable']:
-            return "Sustainable"
-        elif self.metrics['ascendency_ratio'] < self.metrics['viability_lower_bound']:
-            return "Too chaotic"
-        else:
-            return "Too rigid"
+        """Gradient position vs. the indicative reference band (not pass/fail)."""
+        grad = _viability_bands().assess_alpha_position(
+            self.metrics['ascendency_ratio'])
+        return {
+            'balanced': 'within indicative band',
+            'under-organized': 'under-organized (below band)',
+            'over-organized': 'over-organized (above band)',
+        }[grad['position']]
 
     def _interpret_redundancy(self) -> str:
         """Interpret redundancy level."""

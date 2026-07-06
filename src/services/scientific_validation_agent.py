@@ -43,7 +43,31 @@ from src.services.published_metrics_db import (
     list_networks,
     list_metrics,
     get_network_info,
+    is_base_dependent,
 )
+
+
+# ln(2), precomputed once. Used to reconcile the engine's natural-log (nats)
+# information magnitudes against published values quoted in bits (log base 2).
+_LN2 = math.log(2)
+
+
+def nats_to_bits(value_nats: float) -> float:
+    """Convert an information-theoretic magnitude from nats to bits.
+
+    The engine (:class:`UlanowiczCalculator`) computes Ascendency, Development
+    Capacity, Overhead, AMI and flow diversity with the natural logarithm, so
+    those magnitudes are in **nats**. Papers such as Ulanowicz & Norden (1990)
+    report them in **bits** (log base 2). Since ``log2(x) = ln(x) / ln(2)`` and
+    ``ln(2) < 1``, dividing a nats value by ``ln(2)`` (equivalently multiplying
+    by ``log2(e)``) *increases* its magnitude -- the correct nats->bits
+    direction.
+
+    This is applied ONLY to base-dependent magnitudes; ratios/indices such as
+    relative ascendency and robustness are base-invariant and must be left
+    untouched.
+    """
+    return value_nats / _LN2
 
 
 class ValidationStatus(Enum):
@@ -142,33 +166,43 @@ class ScientificValidationAgent:
         """
         Compute all metrics for a flow matrix.
 
+        The engine always computes information-theoretic magnitudes in nats
+        (natural log). Base reconciliation against published values is done
+        per-metric at comparison time via :meth:`_convert_engine_value`, so this
+        method returns the raw engine metrics unchanged regardless of
+        ``log_base``.
+
         Args:
             flow_matrix: The network flow matrix
-            log_base: The logarithm base to use (for comparison with published values)
+            log_base: The logarithm base of the published values (unused here;
+                kept for signature stability / callers).
 
         Returns:
-            Dictionary of computed metrics
+            Dictionary of computed metrics (magnitudes in nats).
         """
         calc = UlanowiczCalculator(flow_matrix)
+        return calc.get_extended_metrics()
 
-        # Get extended metrics
-        metrics = calc.get_extended_metrics()
+    def _convert_engine_value(
+        self,
+        metric_name: str,
+        value: float,
+        log_base: LogBase,
+    ) -> float:
+        """Reconcile an engine value (nats) to the published value's log base.
 
-        # If paper used log base 2, we need to convert our natural log results
-        # Conversion: log2(x) = ln(x) / ln(2)
-        if log_base == LogBase.LOG2:
-            ln2 = math.log(2)
-            # Scale information-theoretic metrics
-            if 'development_capacity' in metrics:
-                metrics['development_capacity_log2'] = metrics['development_capacity'] / ln2
-            if 'ascendency' in metrics:
-                metrics['ascendency_log2'] = metrics['ascendency'] / ln2
-            if 'reserve' in metrics:
-                metrics['reserve_log2'] = metrics['reserve'] / ln2
-            if 'average_mutual_information' in metrics:
-                metrics['ami_log2'] = metrics['average_mutual_information'] / ln2
-
-        return metrics
+        Base-dependent magnitudes are converted nats->bits ONLY when the
+        published value is in log base 2. Base-invariant metrics (ratios,
+        indices, raw flow sums) and any non-LOG2 / unknown base are returned
+        unchanged -- the engine already computes in nats, and force-applying a
+        conversion to a NATURAL-base network or a base-invariant ratio would
+        corrupt a correct value.
+        """
+        if value is None:
+            return value
+        if log_base == LogBase.LOG2 and is_base_dependent(metric_name):
+            return nats_to_bits(value)
+        return value
 
     def _compare_metric(
         self,
@@ -341,6 +375,27 @@ class ScientificValidationAgent:
                 summary=f"Network '{network_id}' not found in published metrics database"
             )
 
+        # Reference-only anchors are published-literature values (e.g. a
+        # benchmark alpha quoted from a paper's prose) with no recomputable flow
+        # matrix. They are not validated computationally; skip cleanly instead
+        # of erroring on a missing data file.
+        pub_entry = PUBLISHED_METRICS.get(network_id)
+        if pub_entry is not None and getattr(pub_entry, "reference_only", False):
+            return NetworkValidationResult(
+                network_id=network_id,
+                network_name=network_info.get('source', network_id),
+                source=network_info['source'],
+                timestamp=timestamp,
+                computed_metrics={},
+                metric_comparisons=[],
+                validation_checks=[],
+                overall_status=ValidationStatus.SKIP,
+                summary=(
+                    f"Network '{network_id}' is a published-literature reference "
+                    f"anchor (reference_only); no recomputable flow matrix to validate."
+                )
+            )
+
         # Load network data
         network_data = self._load_network_data(network_id)
         if network_data is None:
@@ -371,19 +426,22 @@ class ScientificValidationAgent:
         metric_comparisons = []
         published_metrics = network_info['metrics']
 
-        # Map metric names for comparison
+        # Map a published metric name to the engine key that holds the same
+        # quantity, where they differ. The engine calls the flow-based Shannon
+        # entropy H = C/TST "flow_diversity"; the papers call it statistical
+        # entropy. Base reconciliation (nats->bits) is handled separately, per
+        # metric, by _convert_engine_value -- NOT by name-mangled keys.
         metric_mapping = {
-            'total_system_throughput': 'total_system_throughput',
-            'development_capacity': 'development_capacity_log2' if log_base == LogBase.LOG2 else 'development_capacity',
-            'ascendency': 'ascendency_log2' if log_base == LogBase.LOG2 else 'ascendency',
-            'reserve': 'reserve_log2' if log_base == LogBase.LOG2 else 'reserve',
-            'relative_ascendency': 'relative_ascendency',
-            'average_mutual_information': 'ami_log2' if log_base == LogBase.LOG2 else 'average_mutual_information',
+            'statistical_entropy': 'flow_diversity',
+            'overhead': 'reserve',
         }
 
         for pub_name, pub_data in published_metrics.items():
             computed_name = metric_mapping.get(pub_name, pub_name)
-            computed_value = computed_metrics.get(computed_name, computed_metrics.get(pub_name, 0))
+            raw_computed = computed_metrics.get(computed_name, computed_metrics.get(pub_name, 0))
+            # Reconcile the engine's nats magnitude to the published value's log
+            # base. Base-invariant metrics and NATURAL/unknown bases pass through.
+            computed_value = self._convert_engine_value(pub_name, raw_computed, log_base)
             published_value = pub_data['value'] if pub_data['reported'] else None
 
             comparison = self._compare_metric(

@@ -520,23 +520,29 @@ DOCS: Dict[str, Dict[str, Any]] = {
     },
 
     "viable_system": {
-        "label": "Viable System",
+        "label": "Gradient Position",
         "tooltip": (
-            "Whether the organization falls inside the Window of "
-            "Viability — the sustainable operating zone (α between 0.2 and 0.6)."
+            "Where the organization sits on the efficiency/resilience gradient "
+            "relative to the indicative reference band (α between 0.2 and 0.6) — "
+            "under-organized, balanced, or over-organized."
         ),
         "definition": (
-            "A system is 'viable' when its Relative Ascendency (α) falls "
-            "within the Window of Viability: 0.2 ≤ α ≤ 0.6. This means "
-            "the balance between efficiency and redundancy is sustainable."
+            "The gradient position classifies Relative Ascendency (α) against the "
+            "indicative reference band [0.2, 0.6]: under-organized (α < 0.2), "
+            "balanced (0.2 ≤ α ≤ 0.6), or over-organized (α > 0.6). The band is "
+            "derived from ecological systems; organizational calibration is an "
+            "active area, so read it as a directional indicator, not a compliance "
+            "threshold."
         ),
         "interpret": (
-            "**Yes / ✅**: The organization is in a sustainable operating "
-            "zone. "
-            "**No / ❌**: The organization needs rebalancing — it is either "
-            "too rigid or too chaotic."
+            "**Balanced**: within the indicative band — direction of travel: "
+            "maintain balance. "
+            "**Under-organized**: below the band — direction of travel: increase "
+            "structure / coordination. "
+            "**Over-organized**: above the band — direction of travel: increase "
+            "redundancy / flexibility."
         ),
-        "formula": "Viable \\iff 0.2 \\leq \\alpha \\leq 0.6",
+        "formula": "\\text{balanced} \\iff 0.2 \\leq \\alpha \\leq 0.6",
         "citation": REF_ULANOWICZ_2009,
         "doi": DOI_ULANOWICZ_2009,
         "category": CAT_SUSTAIN,
@@ -1998,9 +2004,10 @@ DOCS: Dict[str, Dict[str, Any]] = {
             "for each efficiency level."
         ),
         "interpret": (
-            "**Near the peak**: Optimal balance. "
-            "**Far left**: Too chaotic. "
-            "**Far right**: Too rigid."
+            "**Near the peak**: balanced. "
+            "**Far left**: under-organized (direction of travel: increase structure / coordination). "
+            "**Far right**: over-organized (direction of travel: increase redundancy / flexibility). "
+            "Read against the indicative ecological reference band, not as a compliance threshold."
         ),
         "citation": REF_ULANOWICZ_2009,
         "doi": DOI_ULANOWICZ_2009,

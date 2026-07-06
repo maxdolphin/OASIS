@@ -443,15 +443,28 @@ class UlanowiczCalculator:
         ascendency = metrics['ascendency']
         lower_bound = metrics['viability_lower_bound']
         upper_bound = metrics['viability_upper_bound']
-        
-        if ascendency < lower_bound:
-            return "UNSUSTAINABLE - Too chaotic (low organization)"
-        elif ascendency > upper_bound:
-            return "UNSUSTAINABLE - Too rigid (over-organized)"
+
+        # Reframed: gradient position + direction-of-travel relative to the
+        # INDICATIVE ecological reference band (single source of truth). Not a
+        # binary pass/fail viability verdict.
+        try:
+            from report_intelligence import assess_alpha_position
+        except ImportError:  # pragma: no cover
+            from src.report_intelligence import assess_alpha_position
+        grad = assess_alpha_position(metrics.get('ascendency_ratio', 0))
+        pos = grad['position']
+        direction = grad['direction_of_travel']
+
+        if pos == 'under-organized':
+            return (f"Under-organized relative to the indicative reference band "
+                    f"— direction of travel: {direction}")
+        elif pos == 'over-organized':
+            return (f"Over-organized relative to the indicative reference band "
+                    f"— direction of travel: {direction}")
         elif ascendency < (lower_bound + upper_bound) / 2:
-            return "VIABLE - Leaning toward flexibility"
+            return "Balanced within the indicative reference band (leaning toward flexibility)"
         else:
-            return "VIABLE - Leaning toward organization"
+            return "Balanced within the indicative reference band (leaning toward organization)"
     
     def calculate_flow_diversity(self) -> float:
         """
@@ -596,61 +609,83 @@ class UlanowiczCalculator:
         
         return (active_links / max_links) * (ami / max_ami)
     
-    def calculate_trophic_depth(self) -> float:
+    def calculate_effective_trophic_levels(self) -> np.ndarray:
         """
-        Calculate average Trophic Depth (hierarchical levels) of the network.
+        Flow-weighted effective trophic level of each compartment (Levine 1980).
 
-        Trophic depth measures the average number of steps/levels in the
-        network hierarchy, similar to trophic levels in ecology.
-        Uses unweighted path lengths to count actual hierarchical steps.
+        Levine (1980), as presented in Ulanowicz 2004 §4 (p.327), defines the
+        effective trophic level of a compartment as the corresponding COLUMN-SUM
+        of the Leontief structure matrix [S] built from the diet/inflow
+        proportions:
+
+          - G[:, j] = T[:, j] / T_j_in  (column-normalized by inflow; each
+            column of G is the fractional diet composition of compartment j).
+          - S = (I - G)^-1.
+          - effective trophic level of j = Σ_i S[i, j]  (column-sum of S).
+
+        Because the levels are FLOW-WEIGHTED they can be fractional: a
+        compartment fed 60% from level 2, 30% from level 3 and 10% from level 4
+        has effective level 0.6·2 + 0.3·3 + 0.1·4 = 2.5 (Ulanowicz 2004 Fig. 4),
+        which an unweighted shortest-path hop count cannot reproduce.
 
         Returns:
-            Average Trophic Depth value (typically 1-10 for real networks)
+            1-D array of effective trophic levels, one per compartment.
         """
-        # Skip for networks > 50 nodes (computationally expensive)
+        n = self.n_nodes
+        if n == 0:
+            return np.zeros(0)
+
+        t_in = self.input_throughput  # internal inflow to each compartment (col sum)
+
+        G = np.zeros((n, n), dtype=np.float64)
+        for j in range(n):
+            if t_in[j] > 0:
+                G[:, j] = self.flow_matrix[:, j] / t_in[j]
+
+        identity = np.eye(n)
+        try:
+            S = np.linalg.inv(identity - G)
+        except np.linalg.LinAlgError:
+            eps = 1e-9
+            try:
+                S = np.linalg.inv(identity - (1.0 - eps) * G)
+            except np.linalg.LinAlgError:
+                return np.ones(n)
+
+        levels = np.sum(S, axis=0)
+        # Guard against numerical noise / non-finite entries in near-singular nets
+        levels = np.where(np.isfinite(levels), levels, 1.0)
+        return levels
+
+    def calculate_trophic_depth(self) -> float:
+        """
+        Trophic depth = maximum flow-weighted effective trophic level.
+
+        Trophic depth measures how many hierarchical levels the network spans.
+        It is the maximum of the flow-weighted effective trophic levels (Levine
+        1980; Ulanowicz 2004 §4), NOT an unweighted shortest-path hop count.
+
+        NOTE (Track-1 correction): the previous implementation used
+        ``nx.average_shortest_path_length``, an UNWEIGHTED topological hop count
+        that ignores flow magnitudes and can never reproduce the fractional
+        effective levels the ENA literature requires (e.g. 2.5 in Ulanowicz 2004
+        Fig. 4). It is replaced by the flow-weighted Levine effective trophic
+        level (column-sums of the Leontief structure matrix).
+
+        Returns:
+            Trophic depth (max effective trophic level; >= 1 for a live network).
+        """
+        # Skip for networks > 50 nodes (matrix inverse; keep the guard cheap)
         if self.n_nodes > 50:
             return 0.0
 
-        # Create networkx graph for path analysis (unweighted for level counting)
-        G = nx.DiGraph()
-
-        for i in range(self.n_nodes):
-            G.add_node(i)
-            for j in range(self.n_nodes):
-                if self.flow_matrix[i, j] > 0:
-                    G.add_edge(i, j)  # No weight - count hops, not flow magnitude
-
-        if G.number_of_edges() == 0:
+        if self._tst == 0:
             return 0.0
 
-        # Calculate average shortest path length (unweighted = number of levels)
-        try:
-            avg_path_length = nx.average_shortest_path_length(G)
-            return avg_path_length
-        except nx.NetworkXError:
-            # Graph is not strongly connected
-            # Calculate for weakly connected component or return estimate
-            try:
-                # Try largest strongly connected component
-                largest_scc = max(nx.strongly_connected_components(G), key=len, default=set())
-                if len(largest_scc) > 1:
-                    subgraph = G.subgraph(largest_scc)
-                    return nx.average_shortest_path_length(subgraph)
-            except:
-                pass
-
-            # Fallback: estimate from graph diameter or density
-            try:
-                # Use weakly connected component
-                largest_wcc = max(nx.weakly_connected_components(G), key=len, default=set())
-                if len(largest_wcc) > 1:
-                    subgraph = G.subgraph(largest_wcc).to_undirected()
-                    if nx.is_connected(subgraph):
-                        return nx.average_shortest_path_length(subgraph)
-            except:
-                pass
-
+        levels = self.calculate_effective_trophic_levels()
+        if levels.size == 0:
             return 0.0
+        return float(np.max(levels))
 
     def calculate_conditional_entropy(self) -> float:
         """
@@ -694,21 +729,26 @@ class UlanowiczCalculator:
         
         return overhead / development_capacity if development_capacity > 0 else 0
     
-    def calculate_finn_cycling_index(self) -> float:
+    def calculate_short_cycle_proxy(self) -> float:
         """
-        Calculate Finn Cycling Index (FCI).
+        Short-cycle cycling proxy (NOT the full Finn Cycling Index).
 
-        FCI measures the fraction of total system throughput that is involved in cycling.
-        This is a key indicator of system regeneration and resource efficiency.
+        This O(n²) heuristic detects ONLY:
+          1. Self-loops (diagonal elements)
+          2. Two-node reciprocal cycles (A->B and B->A)
 
-        Uses an O(n²) algorithm that detects:
-        1. Self-loops (diagonal elements)
-        2. Two-node reciprocal cycles (A->B and B->A)
+        It therefore MISSES every cycle of length >= 3 and returns ~0 for a
+        pure directed ring whose medium actually recycles ~100%. It is a strict
+        lower bound on cycling, valid only when cycling is dominated by self- and
+        2-cycles.
 
-        Since metrics are precomputed and cached, no size threshold is needed.
+        For the standards-compliant Finn Cycling Index (Finn 1976; Ulanowicz
+        2004 §5), use ``calculate_finn_cycling_index_full`` (internal-only) or
+        ``EcosystemFlowCalculator.calculate_finn_cycling_index`` (with boundary
+        flows), which build the column-normalized Leontief structure matrix.
 
         Returns:
-            Finn Cycling Index value between 0 and 1
+            Short-cycle cycling proxy in [0, 1]
         """
 
         tst = self.calculate_tst()
@@ -725,9 +765,76 @@ class UlanowiczCalculator:
         np.fill_diagonal(reciprocal, 0)  # Don't double-count self-loops
         cycling_flow += np.sum(reciprocal) / 2  # Divide by 2 to avoid double counting
 
-        # FCI = cycling flow / total throughput
-        fci = min(cycling_flow / tst, 1.0) if tst > 0 else 0
-        return fci
+        # proxy = cycling flow / total throughput
+        proxy = min(cycling_flow / tst, 1.0) if tst > 0 else 0
+        return proxy
+
+    # Back-compat alias: the historical name pointed at the short-cycle proxy.
+    # Kept so existing consumers (app.py, precompute_service, oasis_calculator,
+    # reports) do not break. This is the PROXY, not the canonical Finn index.
+    def calculate_finn_cycling_index(self) -> float:
+        """Deprecated alias for :meth:`calculate_short_cycle_proxy`.
+
+        WARNING: despite the name, this is the short-cycle PROXY (self-loops +
+        2-cycles only), not the canonical Finn Cycling Index. For the full,
+        standards-compliant Finn index use
+        :meth:`calculate_finn_cycling_index_full`.
+        """
+        return self.calculate_short_cycle_proxy()
+
+    def calculate_finn_cycling_index_full(self) -> float:
+        """
+        Canonical Finn Cycling Index (internal-only, no boundary flows).
+
+        Builds the column-normalized Leontief structure matrix and reads the
+        diagonal cycling probabilities (Finn 1976; Ulanowicz 2004 §5 p.330;
+        Fath 2019 Principle 2 p.20):
+
+          - G[:, j] = T[:, j] / T_j_in, where T_j_in is the internal inflow to j
+            (column sum of the internal flow matrix; imports are unavailable at
+            this level — use ``EcosystemFlowCalculator.calculate_finn_cycling_index``
+            for boundary-inclusive networks).
+          - S = (I - G)^-1  (Leontief structure matrix).
+          - TSTc = Σ_i ((S[i,i] - 1) / S[i,i]) · T_i.
+          - FCI = TSTc / TST.
+
+        A perfectly conservative internal structure (e.g. a pure ring) is the
+        singular limit of full recycling and yields FCI -> 1; a regularized
+        (vanishing-leak) inverse recovers that limit.
+
+        Returns:
+            Finn Cycling Index in [0, 1]
+        """
+        n = self.n_nodes
+        tst = self.calculate_tst()
+        if tst == 0:
+            return 0.0
+
+        t_in = self.input_throughput  # internal inflow to each compartment (col sum)
+
+        G = np.zeros((n, n), dtype=np.float64)
+        for j in range(n):
+            if t_in[j] > 0:
+                G[:, j] = self.flow_matrix[:, j] / t_in[j]
+
+        identity = np.eye(n)
+        try:
+            S = np.linalg.inv(identity - G)
+        except np.linalg.LinAlgError:
+            eps = 1e-9
+            try:
+                S = np.linalg.inv(identity - (1.0 - eps) * G)
+            except np.linalg.LinAlgError:
+                return 0.0
+
+        diag = np.diag(S)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            cycled_fraction = np.where(np.isfinite(diag) & (diag > 0),
+                                       (diag - 1.0) / diag, 1.0)
+        cycled_fraction = np.clip(cycled_fraction, 0.0, 1.0)
+
+        tst_c = float(np.sum(cycled_fraction * t_in))
+        return max(0.0, min(1.0, tst_c / tst))
 
     def calculate_autocatalytic_index(self) -> Dict[str, Any]:
         """
@@ -815,7 +922,14 @@ class UlanowiczCalculator:
         expected_cycles = self.n_nodes * (self.n_nodes - 1) / 2  # Rough expectation
         count_factor = min(1, len(cycles) / max(1, expected_cycles))
 
-        autocatalytic_index = 0.5 * count_factor + 0.5 * min(1, cycle_flow_ratio * 10)
+        # Flow component: use cycle_flow_ratio DIRECTLY (already a proportion in
+        # [0, 1]). The former `* 10` amplifier had no basis and saturated the
+        # component for any network with >10% cycled flow; removing it
+        # de-saturates the term. Clamp retained only as a numerical guard.
+        # (Kept in sync with OASISCalculator.calculate_autocatalytic_index.)
+        flow_component = min(1.0, cycle_flow_ratio)
+
+        autocatalytic_index = 0.5 * count_factor + 0.5 * flow_component
 
         return {
             'count': len(cycles),
@@ -955,8 +1069,16 @@ class UlanowiczCalculator:
             
             sum_diff_in = sum(max_in_degree - d for d in in_degrees.values())
             sum_diff_out = sum(max_out_degree - d for d in out_degrees.values())
-            
-            max_possible_diff = (n - 1) * (n - 2)
+
+            # Freeman (1979) directed normalizer. For raw in/out degree of a
+            # DIRECTED graph the theoretical maximum of sum(d* - d_i) is realized
+            # by a perfect in/out-star (one node with degree n-1, the rest 0),
+            # giving (n-1)*(n-1) = (n-1)^2. The classic (n-1)(n-2) denominator is
+            # the UNDIRECTED star maximum and under-normalizes directed degrees
+            # (pushing the coefficient above 1). See
+            # docs/business-revision/evidence/validation-EF-network-stats.md (N4)
+            # and expert-mathematician.md (M6a).
+            max_possible_diff = (n - 1) ** 2
             
             metrics['in_degree_centralization'] = sum_diff_in / max_possible_diff if max_possible_diff > 0 else 0
             metrics['out_degree_centralization'] = sum_diff_out / max_possible_diff if max_possible_diff > 0 else 0
@@ -1046,13 +1168,24 @@ class UlanowiczCalculator:
         """
         Calculate effective connectivity (C).
 
-        Based on Zorach & Ulanowicz (2003), effective connectivity is
-        calculated directly from the flow distribution.
+        Based on Zorach & Ulanowicz (2003), effective connectivity is the
+        number of effective flows per effective node.
 
-        Formula: C = exp(0.5 * Σ((Tij/T••) * log(Tij²/(Ti•*T•j))))
+        Formula: C = F / N  (Zorach & Ulanowicz 2003, p.72: "C ≡ F/N").
+        This is the average number of flows per node and is bounded below by
+        1.0 for a connected network (Ulanowicz 2004, p.334: the lower limit of
+        the window of vitality is 1.0). The identities R = F/C² = N/C follow.
+
+        NOTE (Track-1 correction): the previous implementation used the literal
+        product-form C = exp(0.5·Σ w·ln(Tij²/(Ti·Tj))), which carries a POSITIVE
+        exponent. The canonical form (Z-U 2003 Appendix p.76) has a NEGATIVE
+        exponent; the positive form equals N/F (the reciprocal, always < 1) and
+        violates the C ≥ 1 connectivity floor. Computing C = F/N directly is the
+        cleanest form and guarantees the identity block holds to machine
+        precision.
 
         Returns:
-            Effective connectivity in flows per node
+            Effective connectivity in flows per node (>= 1.0 for a connected net)
         """
         # Use vectorized version if enabled
         if self.use_vectorized:
@@ -1065,25 +1198,11 @@ class UlanowiczCalculator:
                 )
             return self._vectorized_cache['effective_connectivity']
 
-        # Original implementation - now using precomputed sums
-        tst = self._tst
-        if tst == 0:
+        # Original implementation: C = F / N (Zorach & Ulanowicz 2003, p.72)
+        eff_nodes = self.calculate_effective_nodes()
+        if eff_nodes <= 0:
             return 0
-
-        sum_term = 0
-        for i in range(self.n_nodes):
-            for j in range(self.n_nodes):
-                if self.flow_matrix[i, j] > 0:
-                    tij = self.flow_matrix[i, j]
-                    # Use precomputed throughputs instead of recomputing
-                    ti_out = self.output_throughput[i]
-                    tj_in = self.input_throughput[j]
-
-                    if ti_out > 0 and tj_in > 0:
-                        weight = tij / tst
-                        sum_term += weight * np.log(tij**2 / (ti_out * tj_in))
-
-        return np.exp(0.5 * sum_term)
+        return self.calculate_effective_flows() / eff_nodes
     
     def calculate_number_of_roles(self) -> float:
         """

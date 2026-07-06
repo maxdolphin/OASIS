@@ -352,10 +352,20 @@ def vectorized_effective_connectivity(flow_matrix: np.ndarray,
     """
     Calculate effective connectivity (C) using vectorized operations.
 
-    Based on Zorach & Ulanowicz (2003), effective connectivity is
-    calculated directly from the flow distribution.
+    Based on Zorach & Ulanowicz (2003), effective connectivity is the number
+    of effective flows per effective node.
 
-    Formula: C = exp(0.5 * Σ((T_ij/T··) * ln(T_ij² / (T_i· * T_·j))))
+    Formula: C = F / N  (Zorach & Ulanowicz 2003, p.72: "C ≡ F/N").
+    This is the average number of flows per node, bounded below by 1.0 for a
+    connected network (Ulanowicz 2004, p.334). The identities R = F/C² = N/C
+    follow.
+
+    NOTE (Track-1 correction): the previous form C = exp(0.5·Σ w·ln(Tij²/…))
+    carries a positive exponent; the canonical form (Z-U 2003 Appendix p.76)
+    has a NEGATIVE exponent. The positive form equals N/F (the reciprocal,
+    always < 1) and violates the C ≥ 1 floor. Computing C = F/N directly keeps
+    this vectorized path in exact agreement with the loop implementation and
+    guarantees the identity block.
 
     Args:
         flow_matrix: Square matrix of flows between nodes
@@ -364,7 +374,7 @@ def vectorized_effective_connectivity(flow_matrix: np.ndarray,
         tst: Precomputed total system throughput
 
     Returns:
-        Effective connectivity in flows per node
+        Effective connectivity in flows per node (>= 1.0 for a connected net)
     """
     flow_matrix = np.asarray(flow_matrix, dtype=np.float64)
 
@@ -374,26 +384,12 @@ def vectorized_effective_connectivity(flow_matrix: np.ndarray,
     if tst == 0:
         return 0.0
 
-    # Outer product: T_i· * T_·j
-    outer_product = np.outer(row_sums, col_sums)
+    eff_nodes = vectorized_effective_nodes(flow_matrix, row_sums, col_sums, tst)
+    if eff_nodes <= 0:
+        return 0.0
 
-    with np.errstate(divide='ignore', invalid='ignore'):
-        valid_mask = (flow_matrix > 0) & (outer_product > 0)
-
-        # Weight: T_ij / T··
-        weights = flow_matrix / tst
-
-        # Ratio: T_ij² / (T_i· * T_·j)
-        ratios = np.zeros_like(flow_matrix)
-        ratios[valid_mask] = (flow_matrix[valid_mask] ** 2) / outer_product[valid_mask]
-
-        # Log terms
-        log_ratios = np.where(ratios > 0, np.log(ratios), 0)
-
-        # Weighted sum
-        sum_term = np.sum(np.where(valid_mask, weights * log_ratios, 0))
-
-    return np.exp(0.5 * sum_term)
+    eff_flows = vectorized_effective_flows(flow_matrix, tst)
+    return eff_flows / eff_nodes
 
 
 def vectorized_number_of_roles(flow_matrix: np.ndarray,

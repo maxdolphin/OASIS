@@ -89,6 +89,20 @@ def _tip(key: str) -> str:
     entry = DOCS.get(key)
     return entry.get("tooltip", "") if entry else ""
 
+
+def _alpha_gradient(alpha):
+    """Gradient classifier (position + direction-of-travel + caveat) — single
+    source of truth from report_intelligence. Reframes the old binary
+    Viable/Non-Viable pass/fail verdict into a position-on-a-gradient."""
+    import report_intelligence as _ri
+    return _ri.assess_alpha_position(alpha)
+
+
+# Short caveat surfaced next to the indicative reference band in the app UI.
+def _indicative_caveat():
+    import report_intelligence as _ri
+    return _ri.INDICATIVE_REFERENCE_CAVEAT
+
 # Import precomputation service for large network optimization
 try:
     from precompute_service import (
@@ -247,6 +261,106 @@ def get_cached_metrics(flow_matrix: np.ndarray, node_names: list) -> tuple:
         service.save_to_cache(cache_key, metrics, tier='tier2')
 
     return metrics, False
+
+
+def provision_network(network_data: dict) -> dict:
+    """
+    Compute the full-index profile ONCE at provision time and stash it.
+
+    Called from every provision path (JSON/CSV upload, sample data, ecosystem
+    samples, synthetic generation, user-saved networks, HuggingFace, direct
+    analysis entry) right when ``analysis_data`` is built. The heavy computation
+    happens here, so every subsequent render/report READS the stored profile
+    instead of recomputing.
+
+    Supports both key conventions: ``flow_matrix``/``flows`` and
+    ``node_names``/``nodes``.
+
+    Args:
+        network_data: dict with the flow matrix, node names and (optionally) an
+                      organization name.
+
+    Returns:
+        The full-profile dict (also stashed in ``st.session_state['full_profile']``),
+        or ``None`` if no pipeline is available or the matrix is empty.
+    """
+    raw_matrix = network_data.get('flow_matrix', network_data.get('flows'))
+    if raw_matrix is None:
+        return None
+    flow_matrix = np.asarray(raw_matrix, dtype=np.float64)
+    if flow_matrix.size == 0:
+        return None
+
+    node_names = network_data.get('node_names', network_data.get('nodes'))
+    if node_names is None or len(node_names) == 0:
+        node_names = [f"N{i}" for i in range(flow_matrix.shape[0])]
+    org_name = network_data.get('org_name',
+                                network_data.get('organization',
+                                                 network_data.get('name', 'Unknown')))
+
+    profile = None
+    if DATABASE_AVAILABLE:
+        pipeline = get_cached_pipeline()
+        if pipeline is not None:
+            try:
+                result = pipeline.get_full_profile(flow_matrix, node_names, org_name=org_name)
+                profile = result.get('profile')
+            except Exception as e:
+                # Never break a provision path — fall back to lazy compute on read.
+                import logging as _logging
+                _logging.getLogger(__name__).warning(f"provision_network failed: {e}")
+                profile = None
+
+    if profile is not None:
+        st.session_state['full_profile'] = profile
+    return profile
+
+
+def get_active_profile(flow_matrix=None, node_names=None, org_name=None) -> dict:
+    """
+    Return the full-index profile for the active network — READ, don't recompute.
+
+    Common path: returns ``st.session_state['full_profile']`` (populated at
+    provision by ``provision_network``). Safe fallback: on a miss (e.g. a
+    provision path was not wired, or the session was restored), compute+store
+    via ``pipeline.get_full_profile`` and cache in session_state so subsequent
+    reads hit the store. Never raises for a missing profile.
+
+    Args:
+        flow_matrix / node_names / org_name: only needed for the fallback
+            compute path; if omitted they are pulled from
+            ``st.session_state.analysis_data``.
+
+    Returns:
+        The full-profile dict, or ``None`` if it cannot be produced.
+    """
+    profile = st.session_state.get('full_profile')
+    if profile is not None:
+        return profile
+
+    # Fallback: pull the network from analysis_data if not supplied.
+    if flow_matrix is None:
+        data = st.session_state.get('analysis_data') or {}
+        flow_matrix = data.get('flow_matrix', data.get('flows'))
+        node_names = node_names or data.get('node_names', data.get('nodes'))
+        org_name = org_name or data.get('org_name', data.get('organization'))
+
+    if flow_matrix is None or not DATABASE_AVAILABLE:
+        return None
+
+    pipeline = get_cached_pipeline()
+    if pipeline is None:
+        return None
+    try:
+        result = pipeline.get_full_profile(np.asarray(flow_matrix, dtype=np.float64),
+                                           node_names, org_name=org_name)
+        profile = result.get('profile')
+    except Exception:
+        return None
+    if profile is not None:
+        st.session_state['full_profile'] = profile
+    return profile
+
 
 # Configure page
 st.set_page_config(
@@ -872,7 +986,8 @@ def show_main_page():
     mode_list = [
         "📊 Upload Data",
         "🧪 Use Sample Data",
-        "⚡ Generate Synthetic Data"
+        "⚡ Generate Synthetic Data",
+        "🔌 Connect Gmail"
     ]
     if DISCOVERY_AVAILABLE:
         mode_list.append("🔍 Discover Datasets")
@@ -895,6 +1010,8 @@ def show_main_page():
         sample_data_interface()
     elif analysis_mode == "⚡ Generate Synthetic Data":
         synthetic_data_interface()
+    elif analysis_mode == "🔌 Connect Gmail":
+        connect_gmail_interface()
     elif analysis_mode == "🔍 Discover Datasets":
         discovery_interface()
     elif analysis_mode == "📖 Documentation":
@@ -915,23 +1032,42 @@ def upload_data_interface():
     
     col1, col2 = st.columns([2, 1])
     
+    from network_ingestion import (
+        parse_network_csv, NetworkIngestionError,
+        matrix_template_csv, edgelist_template_csv,
+    )
+
     with col1:
         st.markdown("""
         ### Supported Formats
         - **JSON**: Flow matrix with node names
-        - **CSV**: Square matrix (with or without headers)
-        
+        - **CSV — Adjacency matrix**: square table, identical row/column labels
+        - **CSV — Edge list**: `source, target, weight` (one row per flow)
+
         ### Expected Structure
-        Your data should represent communication flows between departments/teams.
-        Values can be emails per month, document exchanges, or any flow metric.
+        Your data should represent directed flows between departments/teams.
+        Values can be emails per month, messages, document exchanges, or any flow metric.
+        Edge lists are the easiest export from email, Teams, Slack, or Jira.
         """)
-        
+
+        tcol1, tcol2 = st.columns(2)
+        with tcol1:
+            st.download_button(
+                "⬇️ Matrix CSV template", data=matrix_template_csv(),
+                file_name="network_matrix_template.csv", mime="text/csv",
+                use_container_width=True)
+        with tcol2:
+            st.download_button(
+                "⬇️ Edge-list CSV template", data=edgelist_template_csv(),
+                file_name="network_edgelist_template.csv", mime="text/csv",
+                use_container_width=True)
+
         uploaded_file = st.file_uploader(
             "Choose a file",
             type=['json', 'csv'],
             help="Upload a JSON or CSV file containing your organizational flow data"
         )
-        
+
         if uploaded_file is not None:
             try:
                 if uploaded_file.name.endswith('.json'):
@@ -943,19 +1079,28 @@ def upload_data_interface():
                     else:
                         st.error("JSON file must contain 'flows' and 'nodes' keys")
                         return
-                elif uploaded_file.name.endswith('.csv'):
-                    df = pd.read_csv(uploaded_file, index_col=0)
-                    flow_matrix = df.values
-                    node_names = df.columns.tolist()
+                else:  # CSV — auto-detect matrix vs edge list, with validation
+                    try:
+                        result = parse_network_csv(uploaded_file.getvalue())
+                    except NetworkIngestionError as ie:
+                        st.error(f"❌ {ie}")
+                        return
+                    flow_matrix = result.flow_matrix
+                    node_names = result.node_names
                     org_name = uploaded_file.name.replace('.csv', '').replace('_', ' ').title()
-                
+                    fmt_label = ('adjacency matrix' if result.fmt == 'matrix'
+                                 else 'edge list')
+                    st.info(f"Detected format: **{fmt_label}**.")
+                    for w in result.warnings:
+                        st.warning(f"⚠️ {w}")
+
                 st.success(f"✅ Data loaded successfully! Found {len(node_names)} departments/teams")
-                
+
                 # Show preview
                 st.subheader("📋 Data Preview")
                 preview_df = pd.DataFrame(flow_matrix, index=node_names, columns=node_names)
                 st.dataframe(preview_df.round(2))
-                
+
                 # Run analysis button
                 if st.button("🚀 Run Analysis", type="primary"):
                     # Store data in session state and navigate to analysis page
@@ -965,9 +1110,11 @@ def upload_data_interface():
                         'org_name': org_name,
                         'source': 'uploaded'
                     }
+                    # Compute the full profile ONCE at provision (read thereafter).
+                    provision_network(st.session_state.analysis_data)
                     st.session_state.current_page = 'analysis'
                     st.rerun()
-                
+
             except Exception as e:
                 st.error(f"Error loading file: {str(e)}")
     
@@ -987,7 +1134,7 @@ def upload_data_interface():
         }
         ```
         
-        ### 📋 CSV Format
+        ### 📋 CSV — Adjacency Matrix
         ```
         ,Sales,Marketing,IT,HR
         Sales,0.0,8.0,3.0,2.0
@@ -995,6 +1142,16 @@ def upload_data_interface():
         IT,4.0,5.0,0.0,3.0
         HR,3.0,2.0,4.0,0.0
         ```
+
+        ### 🔗 CSV — Edge List
+        ```
+        source,target,weight
+        Sales,Marketing,8
+        Sales,IT,3
+        Marketing,Sales,6
+        IT,HR,3
+        ```
+        Headers like `from`/`to`/`count` are also recognized.
         """)
 
 def sample_data_interface():
@@ -1314,6 +1471,8 @@ def sample_data_interface():
                 'org_name': org_name_data,
                 'source': 'sample_data'
             }
+            # Compute the full profile ONCE at provision (read thereafter).
+            provision_network(st.session_state.analysis_data)
             st.session_state.current_page = 'analysis'
             st.rerun()
             return True
@@ -1578,11 +1737,123 @@ def sample_data_interface():
                 'org_name': org_name,
                 'source': 'sample_data'
             }
+            # Compute the full profile ONCE at provision (read thereafter).
+            provision_network(st.session_state.analysis_data)
             st.session_state.current_page = 'analysis'
             st.rerun()
-            
+
         except Exception as e:
             st.error(f"Error loading sample data: {str(e)}")
+
+def connect_gmail_interface():
+    """Self-provisioning Gmail connector: admin OAuth -> sync -> build -> analyze."""
+    from datetime import datetime, timedelta, timezone
+    from src.network_ingestion import NetworkIngestionError
+    st.header("🔌 Connect Gmail")
+    st.info(
+        "OASIS reads only **who-emailed-whom and when** — never subjects or "
+        "message contents. Requires a Google Workspace **admin** to authorize the "
+        "app (domain-wide delegation)."
+    )
+
+    try:
+        from src.connectors import GmailConnector, GmailInteractionStore, build_flow_matrix
+    except Exception as exc:
+        st.error(f"Connector unavailable: {exc}")
+        return
+
+    # 1) Credentials come from Streamlit secrets (never hard-coded / committed).
+    # st.secrets raises StreamlitSecretNotFoundError when no secrets.toml exists,
+    # so guard the access rather than the attribute.
+    try:
+        creds = dict(st.secrets.get("gmail", {}))
+    except Exception:
+        creds = {}
+    if not creds.get("service_account_file"):
+        st.warning(
+            "No Gmail credentials configured. Add a `[gmail]` block to "
+            "`.streamlit/secrets.toml` with `service_account_file`, `subject` "
+            "(admin email), and `domain`."
+        )
+        return
+
+    if st.button("🔗 Connect", type="primary"):
+        conn = GmailConnector()
+        if conn.authenticate(creds):
+            st.session_state["gmail_domain"] = creds["domain"]
+            org = conn.get_organization_structure()
+            st.success(
+                f"Connected to **{creds['domain']}** — "
+                f"{org['total_users']} users."
+            )
+        else:
+            st.error("Authentication failed. Check the service account, admin "
+                     "subject, and that domain-wide delegation is granted.")
+
+    if not st.session_state.get("gmail_domain"):
+        return
+
+    domain = st.session_state["gmail_domain"]
+
+    # 2) Sync controls
+    st.subheader("1 · Sync mailbox metadata")
+    win_days = st.selectbox("Pull window (days)", [30, 90, 180, 365], index=1)
+    if st.button("⬇️ Sync now"):
+        conn = GmailConnector()
+        if not conn.authenticate(creds):
+            st.error("Re-authentication failed.")
+            return
+        now = int(datetime.now(timezone.utc).timestamp())
+        start = now - win_days * 86400
+        run_id = f"sync-{now}"
+        with st.spinner(f"Syncing last {win_days} days…"):
+            n = conn.sync(start, now, sync_run_id=run_id)
+        st.session_state["gmail_last_sync"] = now
+        st.success(f"Synced {n} directed interactions.")
+
+    if not st.session_state.get("gmail_last_sync"):
+        return
+
+    # 3) Build controls
+    st.subheader("2 · Build the network")
+    granularity = st.radio("Granularity", ["individual", "department"], index=1)
+    half_life_days = st.slider("Recency half-life (days)", 7, 180, 30)
+    beta = st.slider("Sustained-engagement weight (β)", 0.0, 2.0, 0.5, 0.1,
+                     help="Calibration parameter — boosts relationships active "
+                          "across many weeks. Not a scientific metric formula.")
+    build_win_days = st.selectbox("Analysis window (days)", [30, 90, 180, 365],
+                                  index=1, key="build_win")
+    if st.button("🧮 Build & Analyze", type="primary"):
+        store = GmailInteractionStore()
+        conn = GmailConnector()
+        conn.authenticate(creds)
+        org = conn.get_organization_structure()
+        now = int(datetime.now(timezone.utc).timestamp())
+        rows = store.query_window(domain, now - build_win_days * 86400, now)
+        try:
+            parsed, dropped = build_flow_matrix(
+                rows, org_users=org["org_users"], now_utc=now,
+                window_seconds=build_win_days * 86400,
+                half_life_seconds=half_life_days * 86400,
+                beta=beta, granularity=granularity)
+        except NetworkIngestionError as exc:
+            st.warning(
+                f"No internal network could be built for this window: {exc} "
+                "Try a longer window or a different granularity."
+            )
+            return
+        if dropped:
+            st.caption(f"Dropped {dropped} external-address interactions.")
+        st.session_state.analysis_data = {
+            "flow_matrix": parsed.flow_matrix,
+            "node_names": parsed.node_names,
+            "org_name": f"{domain} (Gmail · {granularity})",
+            "source": "gmail_connector",
+        }
+        provision_network(st.session_state.analysis_data)
+        st.session_state.current_page = "analysis"
+        st.rerun()
+
 
 def synthetic_data_interface():
     """Visual Network Generator Interface."""
@@ -1716,8 +1987,10 @@ def synthetic_data_interface():
                 'network': G_weighted,
                 'source': 'synthetic'
             }
+            # Compute the full profile ONCE at provision (read thereafter).
+            provision_network(st.session_state.analysis_data)
             st.session_state.current_page = 'analysis'
-            
+
             st.success("✅ Network generated successfully! Navigating to analysis...")
             st.rerun()
 
@@ -2047,6 +2320,12 @@ def show_analysis_page():
     org_name = data['org_name']
     n_nodes = len(node_names)
 
+    # Safety net: ensure the full profile is provisioned for this network.
+    # Every provision path calls provision_network(), but if one was missed
+    # (or the session was restored) this computes+stores it once here.
+    if st.session_state.get('full_profile') is None:
+        provision_network(data)
+
     # Try to use precomputed/cached metrics from database or disk cache
     precomputed_metrics = None
     cache_hit = False
@@ -2056,6 +2335,23 @@ def show_analysis_page():
         if cache_hit:
             st.toast("Loaded from cache", icon="⚡")
 
+    # Extended SI/ELD/TD: prefer the precomputed profile's `core` (no recompute);
+    # fall back to the live calculator only if the profile lacks a usable value.
+    def _fill_extended_from_profile(ext, calc):
+        prof = st.session_state.get('full_profile')
+        core = prof.get('core', {}) if isinstance(prof, dict) else {}
+        for key, method in (
+            ('structural_information', 'calculate_structural_information'),
+            ('effective_link_density', 'calculate_effective_link_density'),
+            ('trophic_depth', 'calculate_trophic_depth'),
+        ):
+            if key not in ext or ext.get(key, 0) == 0:
+                stored = core.get(key)
+                if stored is not None and stored != 0:
+                    ext[key] = stored
+                else:
+                    ext[key] = getattr(calc, method)()
+
     # Check if we already have calculated metrics (session caching)
     if 'extended_metrics' in data and 'assessments' in data and 'calculator' in data:
         # Use session-cached results - no notification needed on re-render
@@ -2063,13 +2359,8 @@ def show_analysis_page():
         assessments = data['assessments']
         calculator = data['calculator']
 
-        # Ensure missing extended metrics are computed (SI, ELD, TD)
-        if 'structural_information' not in extended_metrics or extended_metrics.get('structural_information', 0) == 0:
-            extended_metrics['structural_information'] = calculator.calculate_structural_information()
-        if 'effective_link_density' not in extended_metrics or extended_metrics.get('effective_link_density', 0) == 0:
-            extended_metrics['effective_link_density'] = calculator.calculate_effective_link_density()
-        if 'trophic_depth' not in extended_metrics or extended_metrics.get('trophic_depth', 0) == 0:
-            extended_metrics['trophic_depth'] = calculator.calculate_trophic_depth()
+        # Ensure missing extended metrics are present (SI, ELD, TD) — read from profile.
+        _fill_extended_from_profile(extended_metrics, calculator)
 
     # If we have cache hit but no session cache, use cache to reconstruct
     elif cache_hit and precomputed_metrics:
@@ -2084,13 +2375,8 @@ def show_analysis_page():
             alpha = extended_metrics.get('relative_ascendency', 0)
             extended_metrics['is_viable'] = 0.2 <= alpha <= 0.6
 
-        # Compute missing extended metrics if not in cache (SI, ELD, TD)
-        if 'structural_information' not in extended_metrics or extended_metrics.get('structural_information', 0) == 0:
-            extended_metrics['structural_information'] = calculator.calculate_structural_information()
-        if 'effective_link_density' not in extended_metrics or extended_metrics.get('effective_link_density', 0) == 0:
-            extended_metrics['effective_link_density'] = calculator.calculate_effective_link_density()
-        if 'trophic_depth' not in extended_metrics or extended_metrics.get('trophic_depth', 0) == 0:
-            extended_metrics['trophic_depth'] = calculator.calculate_trophic_depth()
+        # Extended metrics (SI, ELD, TD) — read from profile, fall back to calc.
+        _fill_extended_from_profile(extended_metrics, calculator)
 
         # Generate assessments from cached metrics
         assessments = calculator.assess_regenerative_health()
@@ -2170,6 +2456,10 @@ def show_analysis_page():
     if st.sidebar.button("← Back to Data Selection", type="primary", use_container_width=True):
         st.session_state.current_page = 'main'
         st.session_state.analysis_data = None
+        # Clear the remembered dataset selection + precomputed profile so re-entering
+        # a data-source mode starts fresh instead of snapping back to this analysis.
+        st.session_state.selected_dataset_name = None
+        st.session_state.pop('full_profile', None)
         st.rerun()
 
     # Show current network in sidebar
@@ -2555,12 +2845,13 @@ def run_massive_scale_analysis(flow_matrix, node_names, progress_bar, status_tex
 
     # Phase 4: Minimal assessment
     status_text.text("Phase 4/4: Assessment...")
-    if efficiency < 0.2:
-        sustainability = "UNSUSTAINABLE - Too chaotic"
-    elif efficiency > 0.6:
-        sustainability = "UNSUSTAINABLE - Too rigid"
+    _g = _alpha_gradient(efficiency)
+    if _g['position'] == 'under-organized':
+        sustainability = "Under-organized (vs. indicative band) - increase structure / coordination"
+    elif _g['position'] == 'over-organized':
+        sustainability = "Over-organized (vs. indicative band) - increase redundancy / flexibility"
     else:
-        sustainability = "VIABLE - Within sustainable range"
+        sustainability = "Balanced - within the indicative reference band"
 
     assessments = {
         'sustainability': sustainability,
@@ -2585,6 +2876,8 @@ def run_analysis(flow_matrix, node_names, org_name):
         'org_name': org_name,
         'source': 'direct'
     }
+    # Compute the full profile ONCE at provision (read thereafter).
+    provision_network(st.session_state.analysis_data)
     st.session_state.current_page = 'analysis'
     st.rerun()
 
@@ -2604,10 +2897,10 @@ def display_metrics_overview(metrics, assessments):
         st.metric("Robustness", f"{robustness:.2f}", f"{robustness_color} {get_robustness_status(robustness)}")
     
     with col3:
-        viable = "YES" if metrics['is_viable'] else "NO"
-        viable_color = "🟢" if metrics['is_viable'] else "🔴"
-        st.metric("Viable System", viable, f"{viable_color}")
-    
+        _g3 = _alpha_gradient(metrics.get('relative_ascendency', metrics.get('ascendency_ratio', 0)))
+        pos_color = "🟢" if _g3['position'] == 'balanced' else "🧭"
+        st.metric("Gradient Position", _g3['position'], f"{pos_color} vs. indicative band")
+
     with col4:
         regen_capacity = metrics['regenerative_capacity']
         regen_color = "🟢" if regen_capacity > 0.2 else "🟡" if regen_capacity > 0.1 else "🔴"
@@ -2617,12 +2910,12 @@ def display_metrics_overview(metrics, assessments):
     st.subheader("🎯 Overall System Health")
     sustainability_status = assessments['sustainability']
     
-    if "VIABLE" in sustainability_status:
-        st.success(f"✅ {sustainability_status}")
-    elif "MODERATE" in sustainability_status or "GOOD" in sustainability_status:
-        st.warning(f"⚠️ {sustainability_status}")
+    if "Balanced" in sustainability_status:
+        st.success(f"🟢 {sustainability_status}")
     else:
-        st.error(f"❌ {sustainability_status}")
+        # Gradient position outside the indicative band — informational, not a fail
+        st.info(f"🧭 {sustainability_status}")
+    st.caption(_indicative_caveat())
 
 def display_visualizations_enhanced(G, flow_matrix, node_names, metrics, org_name):
     """Display visualizations with network diagram, flow heatmap, and window of viability."""
@@ -2884,9 +3177,9 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
             st.metric("Robustness", f"{metrics['robustness']:.2f}", help=_tip("robustness"))
             st.caption("R = -α·log(α) [nats]")
         with col3:
-            viable = "✅ YES" if metrics['is_viable'] else "❌ NO"
-            st.metric("Viable System", viable, help=_tip("viable_system"))
-            st.caption("α ∈ [0.2, 0.6]")
+            _gc3 = _alpha_gradient(metrics.get('relative_ascendency', metrics.get('ascendency_ratio', 0)))
+            st.metric("Gradient Position", _gc3['position'], help=_tip("viable_system"))
+            st.caption("indicative band α ∈ [0.2, 0.6]")
         with col4:
             st.metric("Network Efficiency", f"{metrics['network_efficiency']:.2f}", help=_tip("network_efficiency"))
             st.caption("η = Eeff/Emax [0-1]")
@@ -3083,19 +3376,21 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
     # Visual representation of window of viability
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        if lower <= ascendency <= upper:
+        _gv = _alpha_gradient(alpha)
+        if _gv['position'] == 'balanced':
             if 0.35 <= alpha <= 0.40:
-                st.success("✅ OPTIMAL - System at peak sustainability (α ~ 0.37)")
+                st.success("🟢 Balanced - near the indicative reference center (α ~ 0.37)")
             elif alpha < 0.35:
-                st.success("✅ VIABLE - Good flexibility, moderate organization")
+                st.success("🟢 Balanced - within indicative band (more flexibility, moderate organization)")
             else:
-                st.success("✅ VIABLE - Good organization, moderate flexibility")
-        elif ascendency < lower:
-            st.error("❌ UNSUSTAINABLE - Too chaotic (α < 0.2)")
-            st.info("💡 Increase structure and coordination")
+                st.success("🟢 Balanced - within indicative band (more organization, moderate flexibility)")
+        elif _gv['position'] == 'under-organized':
+            st.info("🧭 Under-organized relative to the indicative reference band (α < 0.2)")
+            st.info(f"💡 Direction of travel: {_gv['direction_of_travel']}")
         else:
-            st.error("❌ UNSUSTAINABLE - Too rigid (α > 0.6)")
-            st.info("💡 Increase flexibility and redundancy")
+            st.info("🧭 Over-organized relative to the indicative reference band (α > 0.6)")
+            st.info(f"💡 Direction of travel: {_gv['direction_of_travel']}")
+        st.caption(_indicative_caveat())
     
     # Window bounds visualization
     st.markdown("#### Window of Viability Bounds")
@@ -3116,11 +3411,11 @@ def display_core_metrics_combined(metrics, assessments, org_name, flow_matrix, n
     with col5:
         st.metric("Current α", f"{alpha:.2f}", help=_tip("relative_ascendency"))
         if 0.35 <= alpha <= 0.40:
-            st.caption("α = A/C ✅ Optimal")
+            st.caption("α = A/C 🟢 near indicative center")
         elif 0.2 <= alpha <= 0.6:
-            st.caption("α = A/C ✅ Viable")
+            st.caption("α = A/C 🟢 within indicative band")
         else:
-            st.caption("α = A/C ❌ Outside")
+            st.caption("α = A/C 🧭 outside indicative band")
     
     # Extended Network Metrics
     st.markdown("---")
@@ -3337,9 +3632,9 @@ def display_core_metrics_simplified(metrics):
         st.caption("Resilience to shocks")
 
     with col3:
-        viable = "✅ YES" if metrics['is_viable'] else "❌ NO"
-        st.metric("Viable System", viable, help=_tip("viable_system"))
-        st.caption("Within sustainability bounds")
+        _g3b = _alpha_gradient(metrics.get('relative_ascendency', metrics.get('ascendency_ratio', 0)))
+        st.metric("Gradient Position", _g3b['position'], help=_tip("viable_system"))
+        st.caption("vs. indicative reference band")
 
     with col4:
         st.metric("Network Efficiency", f"{metrics['network_efficiency']:.2f}", help=_tip("network_efficiency"))
@@ -3353,17 +3648,19 @@ def display_core_metrics_simplified(metrics):
     lower = metrics['viability_lower_bound']
     upper = metrics['viability_upper_bound']
     
-    if lower <= ascendency <= upper:
+    _gs = _alpha_gradient(metrics.get('relative_ascendency', metrics.get('ascendency_ratio', 0)))
+    if _gs['position'] == 'balanced':
         if ascendency < (lower + upper) / 2:
-            st.success("✅ VIABLE - System is sustainable with good flexibility")
+            st.success("🟢 Balanced - within the indicative reference band (more flexibility)")
         else:
-            st.success("✅ VIABLE - System is sustainable with good organization")
-    elif ascendency < lower:
-        st.error("❌ UNSUSTAINABLE - System is too chaotic (low organization)")
-        st.info("💡 Recommendation: Increase structure and coordination")
+            st.success("🟢 Balanced - within the indicative reference band (more organization)")
+    elif _gs['position'] == 'under-organized':
+        st.info("🧭 Under-organized relative to the indicative reference band (low organization)")
+        st.info(f"💡 Direction of travel: {_gs['direction_of_travel']}")
     else:
-        st.error("❌ UNSUSTAINABLE - System is too rigid (over-organized)")
-        st.info("💡 Recommendation: Increase flexibility and redundancy")
+        st.info("🧭 Over-organized relative to the indicative reference band (over-organized)")
+        st.info(f"💡 Direction of travel: {_gs['direction_of_travel']}")
+    st.caption(_indicative_caveat())
     
     # Key ratios
     st.markdown("---")
@@ -3976,21 +4273,121 @@ def create_flow_heatmap(flow_matrix, node_names, max_size=100):
     return fig
 
 
+def _safe_fmt(value, spec: str = ".2f", default: str = "N/A") -> str:
+    """Format a number, but pass through sentinel strings / None safely.
+
+    Network-analysis metrics may be numeric OR carry a sentinel string
+    ('insufficient', 'skipped_large_graph', 'not_computed_large_graph') or None
+    when a metric was approximated/skipped on a large graph. Applying ``:.2f``
+    to those raises ``ValueError``; this helper returns a readable string
+    instead of crashing.
+    """
+    if isinstance(value, bool):
+        return str(value)
+    if isinstance(value, (int, float)):
+        try:
+            return format(value, spec)
+        except (ValueError, TypeError):
+            return str(value)
+    if value is None:
+        return default
+    return str(value)
+
+
+def _coerce_int_keys(d: dict) -> dict:
+    """Return a copy of ``d`` with integer-like string keys coerced to int.
+
+    JSON serialization of the precomputed profile turns integer node-index keys
+    into strings ('0', '1', ...). Downstream code indexes ``node_names[idx]``
+    and does ``.get(i)`` with integer ``i``; without this coercion those lookups
+    raise ``TypeError`` (str index) or silently miss (returning the default for
+    every node). Non-integer keys are preserved as-is.
+    """
+    if not isinstance(d, dict):
+        return d
+    out = {}
+    for k, v in d.items():
+        try:
+            out[int(k)] = v
+        except (ValueError, TypeError):
+            out[k] = v
+    return out
+
+
+def _node_label(node_names, key) -> str:
+    """Resolve a (possibly stringified) node-index key to its display label."""
+    try:
+        return node_names[int(key)]
+    except (ValueError, TypeError, IndexError, KeyError):
+        return str(key)
+
+
+def _format_network_summary(metrics: dict) -> str:
+    """
+    Format the network-science summary text from an already-computed metrics dict.
+
+    Mirrors ``AdvancedNetworkAnalyzer.get_summary_report`` but reads the passed
+    metrics (from the precomputed profile) instead of recomputing.
+    """
+    report = "=" * 60 + "\n"
+    report += "NETWORK ANALYSIS REPORT\n"
+    report += "=" * 60 + "\n\n"
+
+    basic = metrics.get('basic', {})
+    report += f"Network Size: {basic.get('num_nodes', 0)} nodes, {basic.get('num_edges', 0)} edges\n"
+    report += f"Density: {basic.get('density', 0):.3f}\n"
+    report += f"Connected: {basic.get('is_connected', False)}\n\n"
+
+    sw = metrics.get('small_world', {})
+    report += "SMALL WORLD PROPERTIES:\n"
+    report += f"  Clustering: {_safe_fmt(sw.get('clustering_coefficient', 0), '.3f')} (random: {_safe_fmt(sw.get('random_clustering', 0), '.3f')})\n"
+    report += f"  Path Length: {_safe_fmt(sw.get('average_path_length', 0), '.2f')} (random: {_safe_fmt(sw.get('random_path_length', 0), '.2f')})\n"
+    report += f"  Small World σ: {_safe_fmt(sw.get('small_world_sigma', 0), '.2f')} {'✓ Small World' if sw.get('is_small_world') else '✗ Not Small World'}\n\n"
+
+    comm = metrics.get('communities', {})
+    if 'louvain' in comm and comm['louvain'].get('modularity', 0) > 0:
+        report += "COMMUNITY STRUCTURE:\n"
+        report += f"  Number of Communities: {comm['louvain'].get('num_communities', 0)}\n"
+        report += f"  Modularity: {comm['louvain'].get('modularity', 0):.3f}\n\n"
+
+    rob = metrics.get('robustness', {})
+    report += "ROBUSTNESS:\n"
+    report += f"  Random Failure: {_safe_fmt(rob.get('random_failure_robustness', 0), '.3f')}\n"
+    report += f"  Targeted Attack: {_safe_fmt(rob.get('targeted_attack_robustness', 0), '.3f')}\n"
+    report += f"  Path Redundancy: {_safe_fmt(rob.get('path_redundancy', 0), '.2f')}\n\n"
+
+    flow = metrics.get('flow', {})
+    report += "FLOW CHARACTERISTICS:\n"
+    report += f"  Flow Inequality (Gini): {_safe_fmt(flow.get('flow_gini_coefficient', 0), '.3f')}\n"
+    report += f"  Flow Reciprocity: {_safe_fmt(flow.get('flow_reciprocity', 0), '.3f')}\n"
+    report += f"  Throughput Efficiency: {_safe_fmt(flow.get('throughput_efficiency', 0), '.3f')}\n"
+
+    report += "\n" + "=" * 60
+    return report
+
+
 def display_network_analysis(calculator, metrics, flow_matrix, node_names):
     """Display advanced network science analysis - separate from ecosystem metrics."""
     
     st.header("🔄 Network Analysis")
     st.markdown("*Advanced network science metrics independent of ecological theory*")
     
-    # Import the advanced network analyzer
-    from src.network_analyzer import AdvancedNetworkAnalyzer
-    
-    # Initialize analyzer
-    analyzer = AdvancedNetworkAnalyzer(flow_matrix, node_names)
-    
-    # Calculate all network metrics
-    with st.spinner("Calculating network science metrics..."):
-        network_metrics = analyzer.get_all_metrics()
+    # READ the network-analysis family from the precomputed full profile
+    # (computed once at provision). Fall back to a live analyzer only if the
+    # stored profile is missing/unusable, so nothing breaks.
+    network_metrics = None
+    full_profile = get_active_profile(flow_matrix, node_names)
+    if isinstance(full_profile, dict):
+        stored_na = full_profile.get('network_analysis')
+        if isinstance(stored_na, dict) and '_error' not in stored_na and 'basic' in stored_na:
+            network_metrics = stored_na
+
+    if network_metrics is None:
+        # Fallback: compute live (profile absent or degenerate graph).
+        from src.network_analyzer import AdvancedNetworkAnalyzer
+        analyzer = AdvancedNetworkAnalyzer(flow_matrix, node_names)
+        with st.spinner("Calculating network science metrics..."):
+            network_metrics = analyzer.get_all_metrics()
     
     # Network Topology
     st.subheader("📐 Network Topology")
@@ -4008,14 +4405,14 @@ def display_network_analysis(calculator, metrics, flow_matrix, node_names):
         st.metric("Components", network_metrics['basic']['num_components'], help=_tip("communities"))
         st.caption("Weakly connected")
     with col3:
-        st.metric("Clustering", f"{network_metrics['small_world']['clustering_coefficient']:.2f}", help=_tip("clustering_coefficient"))
+        st.metric("Clustering", _safe_fmt(network_metrics['small_world'].get('clustering_coefficient', 0)), help=_tip("clustering_coefficient"))
         st.caption("CC [0-1]")
-        st.metric("Path Length", f"{network_metrics['small_world']['average_path_length']:.2f}", help=_tip("avg_path_length"))
+        st.metric("Path Length", _safe_fmt(network_metrics['small_world'].get('average_path_length', 0)), help=_tip("avg_path_length"))
         st.caption("⟨l⟩ [steps]")
     with col4:
-        st.metric("Small World σ", f"{network_metrics['small_world']['small_world_sigma']:.2f}", help=_tip("small_world_sigma"))
+        st.metric("Small World σ", _safe_fmt(network_metrics['small_world'].get('small_world_sigma', 0)), help=_tip("small_world_sigma"))
         st.caption("σ > 1 = small world")
-        is_sw = "✅ Yes" if network_metrics['small_world']['is_small_world'] else "❌ No"
+        is_sw = "✅ Yes" if network_metrics['small_world'].get('is_small_world') else "❌ No"
         st.metric("Is Small World?", is_sw)
         st.caption("High CC, short paths")
     
@@ -4024,31 +4421,36 @@ def display_network_analysis(calculator, metrics, flow_matrix, node_names):
     st.subheader("⭐ Centrality Analysis")
     st.markdown("*Identifying important nodes through various centrality measures*")
     
-    centralities = network_metrics['centralities']
-    
+    # JSON round-trips integer node-index keys to strings; coerce back so
+    # node_names[idx] lookups and .get(i) reads below work correctly.
+    centralities = {name: _coerce_int_keys(cdict) if isinstance(cdict, dict) else cdict
+                    for name, cdict in network_metrics['centralities'].items()}
+
     # Get top 5 nodes for each centrality
     def get_top_nodes(cent_dict, n=5):
+        if not isinstance(cent_dict, dict):
+            return []
         return sorted(cent_dict.items(), key=lambda x: x[1], reverse=True)[:n]
-    
+
     col1, col2, col3 = st.columns(3)
-    
+
     with col1:
         st.markdown("#### Degree Centrality")
         st.caption("Most connected nodes")
-        for node_id, score in get_top_nodes(centralities['total_degree'], 3):
-            st.write(f"• {node_names[node_id]}: {score:.2f}")
-    
+        for node_id, score in get_top_nodes(centralities.get('total_degree', {}), 3):
+            st.write(f"• {_node_label(node_names, node_id)}: {_safe_fmt(score)}")
+
     with col2:
         st.markdown("#### Betweenness Centrality")
         st.caption("Bridge nodes (bottlenecks)")
-        for node_id, score in get_top_nodes(centralities['betweenness'], 3):
-            st.write(f"• {node_names[node_id]}: {score:.2f}")
-    
+        for node_id, score in get_top_nodes(centralities.get('betweenness', {}), 3):
+            st.write(f"• {_node_label(node_names, node_id)}: {_safe_fmt(score)}")
+
     with col3:
         st.markdown("#### PageRank")
         st.caption("Most influential nodes")
-        for node_id, score in get_top_nodes(centralities['pagerank'], 3):
-            st.write(f"• {node_names[node_id]}: {score:.2f}")
+        for node_id, score in get_top_nodes(centralities.get('pagerank', {}), 3):
+            st.write(f"• {_node_label(node_names, node_id)}: {_safe_fmt(score)}")
     
     # Community Structure
     st.markdown("---")
@@ -4069,23 +4471,23 @@ def display_network_analysis(calculator, metrics, flow_matrix, node_names):
         st.metric("Modularity", f"{louvain.get('modularity', 0):.2f}", help=_tip("modularity"))
         st.caption("Q ∈ [-0.5, 1]")
     with col3:
-        # Assortativity
-        assort = network_metrics['assortativity']
-        st.metric("Degree Assortativity", f"{assort['degree_assortativity']:.2f}", help=_tip("degree_assortativity"))
+        # Assortativity (may be a sentinel / None on degenerate graphs)
+        assort = network_metrics.get('assortativity', {})
+        st.metric("Degree Assortativity", _safe_fmt(assort.get('degree_assortativity', 0)), help=_tip("degree_assortativity"))
         st.caption("r ∈ [-1, 1]")
     with col4:
-        # Rich club
-        rc = network_metrics['rich_club']
-        st.metric("Rich Club", f"{rc['rich_club_coefficient']:.2f}", help=_tip("rich_club"))
-        st.caption(f"k = {rc['threshold_k']}")
-    
+        # Rich club (may be the 'insufficient'/'skipped_large_graph' sentinel)
+        rc = network_metrics.get('rich_club', {})
+        st.metric("Rich Club", _safe_fmt(rc.get('rich_club_coefficient')), help=_tip("rich_club"))
+        st.caption(f"k = {rc.get('threshold_k', 'N/A')}")
+
     # Display community membership if available
     if louvain.get('communities'):
         st.markdown("#### Community Membership")
         community_dict = {}
         for i, comm in enumerate(louvain['communities']):
             for node in comm:
-                community_dict[node_names[node]] = f"Community {i+1}"
+                community_dict[_node_label(node_names, node)] = f"Community {i+1}"
         
         # Create two columns of community assignments
         comm_items = list(community_dict.items())
@@ -4104,28 +4506,30 @@ def display_network_analysis(calculator, metrics, flow_matrix, node_names):
     st.subheader("🛡️ Robustness & Resilience")
     st.markdown("*Network vulnerability and attack tolerance*")
     
-    robustness = network_metrics['robustness']
-    
+    robustness = network_metrics.get('robustness', {})
+
     col1, col2, col3, col4 = st.columns(4)
-    
+
     with col1:
-        st.metric("Random Failure", f"{robustness['random_failure_robustness']:.2f}", help=_tip("random_failure_robustness"))
+        st.metric("Random Failure", _safe_fmt(robustness.get('random_failure_robustness', 0)), help=_tip("random_failure_robustness"))
         st.caption("Robustness [0-1]")
     with col2:
-        st.metric("Targeted Attack", f"{robustness['targeted_attack_robustness']:.2f}", help=_tip("targeted_attack_robustness"))
+        st.metric("Targeted Attack", _safe_fmt(robustness.get('targeted_attack_robustness', 0)), help=_tip("targeted_attack_robustness"))
         st.caption("Hub removal [0-1]")
     with col3:
-        st.metric("Percolation", f"{robustness['percolation_threshold']:.2f}", help=_tip("percolation_threshold"))
+        st.metric("Percolation", _safe_fmt(robustness.get('percolation_threshold', 0)), help=_tip("percolation_threshold"))
         st.caption("Critical threshold")
     with col4:
-        st.metric("Path Redundancy", f"{robustness['path_redundancy']:.2f}", help=_tip("path_redundancy"))
+        st.metric("Path Redundancy", _safe_fmt(robustness.get('path_redundancy', 0)), help=_tip("path_redundancy"))
         st.caption("Alternative paths")
-    
-    # Vulnerability assessment
+
+    # Vulnerability assessment (guard against sentinel/non-numeric values)
+    _tar = robustness.get('targeted_attack_robustness', 0)
+    _tar = _tar if isinstance(_tar, (int, float)) and not isinstance(_tar, bool) else 1.0
     vulnerability = "Low"
-    if robustness['targeted_attack_robustness'] < 0.3:
+    if _tar < 0.3:
         vulnerability = "High"
-    elif robustness['targeted_attack_robustness'] < 0.5:
+    elif _tar < 0.5:
         vulnerability = "Medium"
     
     if vulnerability == "High":
@@ -4140,21 +4544,21 @@ def display_network_analysis(calculator, metrics, flow_matrix, node_names):
     st.subheader("💧 Flow Characteristics")
     st.markdown("*Flow distribution and efficiency patterns*")
     
-    flow_metrics = network_metrics['flow']
-    
+    flow_metrics = network_metrics.get('flow', {})
+
     col1, col2, col3, col4 = st.columns(4)
-    
+
     with col1:
-        st.metric("Flow Gini", f"{flow_metrics['flow_gini_coefficient']:.2f}", help=_tip("flow_gini"))
+        st.metric("Flow Gini", _safe_fmt(flow_metrics.get('flow_gini_coefficient', 0)), help=_tip("flow_gini"))
         st.caption("Inequality [0-1]")
     with col2:
-        st.metric("Flow Heterogeneity", f"{flow_metrics['flow_heterogeneity']:.2f}", help=_tip("flow_heterogeneity"))
+        st.metric("Flow Heterogeneity", _safe_fmt(flow_metrics.get('flow_heterogeneity', 0)), help=_tip("flow_heterogeneity"))
         st.caption("CV of flows")
     with col3:
-        st.metric("Throughput Eff.", f"{flow_metrics['throughput_efficiency']:.2f}", help=_tip("throughput_efficiency"))
+        st.metric("Throughput Eff.", _safe_fmt(flow_metrics.get('throughput_efficiency', 0)), help=_tip("throughput_efficiency"))
         st.caption("Actual/Max [0-1]")
     with col4:
-        st.metric("Reciprocity", f"{flow_metrics['flow_reciprocity']:.2f}", help=_tip("flow_reciprocity"))
+        st.metric("Reciprocity", _safe_fmt(flow_metrics.get('flow_reciprocity', 0)), help=_tip("flow_reciprocity"))
         st.caption("Bidirectional [0-1]")
     
     # Node Rankings
@@ -4163,14 +4567,24 @@ def display_network_analysis(calculator, metrics, flow_matrix, node_names):
     st.markdown("*Comprehensive node importance across multiple metrics*")
     
     # Create node ranking dataframe
+    # centralities was key-coerced to int keys above; guard sentinel scores.
+    _deg = centralities.get('total_degree', {})
+    _btw = centralities.get('betweenness', {})
+    _pr = centralities.get('pagerank', {})
+    _cls = centralities.get('closeness', {})
+
+    def _num(d, i):
+        v = d.get(i, 0) if isinstance(d, dict) else 0
+        return v if isinstance(v, (int, float)) and not isinstance(v, bool) else 0
+
     node_data = []
     for i in range(len(node_names)):
         node_data.append({
             'Node': node_names[i],
-            'Degree': centralities['total_degree'].get(i, 0),
-            'Betweenness': centralities['betweenness'].get(i, 0),
-            'PageRank': centralities['pagerank'].get(i, 0),
-            'Closeness': centralities['closeness'].get(i, 0),
+            'Degree': _num(_deg, i),
+            'Betweenness': _num(_btw, i),
+            'PageRank': _num(_pr, i),
+            'Closeness': _num(_cls, i),
             'In-Flow': np.sum(flow_matrix[:, i]),
             'Out-Flow': np.sum(flow_matrix[i, :])
         })
@@ -4195,12 +4609,15 @@ def display_network_analysis(calculator, metrics, flow_matrix, node_names):
     st.subheader("🏥 Network Health Summary")
     
     # Calculate overall network health metrics
+    def _numv(v, default=0.0):
+        return v if isinstance(v, (int, float)) and not isinstance(v, bool) else default
+
     health_scores = {
-        'Connectivity': min(network_metrics['basic']['density'] * 3, 1.0),  # Scale density
-        'Small World': 1.0 if network_metrics['small_world']['is_small_world'] else 0.3,
-        'Modularity': max(0, louvain.get('modularity', 0)),
-        'Robustness': robustness['random_failure_robustness'],
-        'Efficiency': flow_metrics['throughput_efficiency']
+        'Connectivity': min(_numv(network_metrics.get('basic', {}).get('density', 0)) * 3, 1.0),  # Scale density
+        'Small World': 1.0 if network_metrics.get('small_world', {}).get('is_small_world') else 0.3,
+        'Modularity': max(0, _numv(louvain.get('modularity', 0))),
+        'Robustness': _numv(robustness.get('random_failure_robustness', 0)),
+        'Efficiency': _numv(flow_metrics.get('throughput_efficiency', 0))
     }
     
     col1, col2, col3, col4, col5 = st.columns(5)
@@ -4223,9 +4640,9 @@ def display_network_analysis(calculator, metrics, flow_matrix, node_names):
         st.error(f"**Overall Network Health: POOR ({avg_health:.2f}/1.0)**")
         st.write("The network shows significant structural vulnerabilities requiring attention.")
     
-    # Export network report
+    # Export network report — formatted from the already-read metrics (no recompute).
     with st.expander("📄 Network Science Report"):
-        st.text(analyzer.get_summary_report())
+        st.text(_format_network_summary(network_metrics))
 
 def create_radar_chart(metrics):
     """Create a radar/spider chart for multi-metric comparison."""
@@ -4362,17 +4779,17 @@ def display_visual_summary_cards(metrics, assessments):
         """, unsafe_allow_html=True)
     
     with col3:
-        viable = metrics.get('is_viable', False)
+        _gcard = _alpha_gradient(metrics.get('relative_ascendency', metrics.get('ascendency_ratio', 0)))
         viability_window = metrics.get('viability_window_position', 0)
-        color = "green" if viable else "red"
-        icon = "✅" if viable else "❌"
-        color_hex = {'green': '2ecc71', 'red': 'e74c3c'}[color]
+        _balanced = _gcard['position'] == 'balanced'
+        icon = "🟢" if _balanced else "🧭"
+        color_hex = '2ecc71' if _balanced else '3498db'
         st.markdown(f"""
-        <div style="background: linear-gradient(135deg, #{color_hex}22 0%, transparent 100%); 
+        <div style="background: linear-gradient(135deg, #{color_hex}22 0%, transparent 100%);
                     padding: 20px; border-radius: 10px; border-left: 4px solid #{color_hex};">
-            <h4 style="margin: 0; color: #{color_hex};">{icon} Viability</h4>
-            <h2 style="margin: 10px 0;">{'YES' if viable else 'NO'}</h2>
-            <p style="margin: 0; opacity: 0.8; font-size: 12px;">Window: {viability_window:.1%}</p>
+            <h4 style="margin: 0; color: #{color_hex};">{icon} Gradient Position</h4>
+            <h2 style="margin: 10px 0; text-transform: capitalize;">{_gcard['position']}</h2>
+            <p style="margin: 0; opacity: 0.8; font-size: 12px;">Direction: {_gcard['direction_of_travel']}</p>
         </div>
         """, unsafe_allow_html=True)
     
@@ -4408,8 +4825,10 @@ def display_visual_summary_cards(metrics, assessments):
     with col3:
         st.markdown("**Viability Window**")
         viability_pct = metrics.get('viability_window_position', 0)
+        _alpha = metrics.get('relative_ascendency', metrics.get('ascendency_ratio', 0))
+        in_band = metrics.get('is_viable', 0.2 <= _alpha <= 0.6)
         st.progress(viability_pct)
-        st.caption(f"{viability_pct:.1%} - {'In window' if viable else 'Outside window'}")
+        st.caption(f"{viability_pct:.1%} - {'In indicative band' if in_band else 'Outside indicative band'}")
 
 
 def display_oasis_health(calculator, metrics, flow_matrix, node_names, org_name):
@@ -4429,15 +4848,70 @@ def display_oasis_health(calculator, metrics, flow_matrix, node_names, org_name)
     regenerative economics principles*
     """)
 
-    # Initialize OASIS calculator
-    try:
-        oasis = OASISCalculator(calculator)
-        profile = oasis.get_oasis_profile()
-        interpretations = oasis.get_oasis_interpretation()
-        recommendations = oasis.get_recommendations()
-    except Exception as e:
-        st.error(f"Error computing OASIS metrics: {str(e)}")
-        return
+    # ── Credibility keystone (R9 in-app equivalent) ─────────────────────────
+    # The same 2-4 sentence justification the PDF leads with, so the app is not
+    # silent on WHY ecological/network math applies to an organization. Lead with
+    # the organizational evidence (Fath 2019); keep the indicative-reference caveat.
+    with st.expander("❓ **Why this applies to your organization**", expanded=False):
+        st.markdown(
+            "High-performing organizations analyzed with this same "
+            "efficiency–resilience framework cluster in a characteristic range "
+            "(relative ascendency **α ≈ 0.30–0.45**; "
+            "[Fath et al. 2019](https://doi.org/10.1016/j.glt.2019.06.002), "
+            "regenerative economics). OASIS reads how your organization is "
+            "*structurally wired* — the balance between coordinating efficiency "
+            "and adaptive reserve, computed from real flow data — a **network "
+            "lens that complements, and does not replace, culture and engagement "
+            "measures**. The viability band [0.2, 0.6] is an **indicative, "
+            "directional reference** (calibrated on ecological systems; "
+            "organizational calibration is an open question), so read your "
+            "position as a *direction of travel*, not a compliance grade."
+        )
+
+    # READ the OASIS profile from the precomputed full profile (computed once at
+    # provision). Fall back to a live OASISCalculator only if the stored profile
+    # is missing/unusable, so nothing breaks if a provision path was skipped.
+    oasis = None
+    profile = None
+    full_profile = get_active_profile(flow_matrix, node_names, org_name)
+    if isinstance(full_profile, dict):
+        stored_oasis = full_profile.get('oasis')
+        if isinstance(stored_oasis, dict) and '_error' not in stored_oasis \
+                and 'dimension_scores' in stored_oasis:
+            profile = stored_oasis
+            interpretations = stored_oasis.get('interpretation')
+            recommendations = stored_oasis.get('recommendations')
+            # Interpretation/recommendations are cheap derived views; if the
+            # stored profile lacks them (older build / build error), derive live.
+            if interpretations is None or recommendations is None:
+                try:
+                    _live = OASISCalculator(calculator)
+                    if interpretations is None:
+                        interpretations = _live.get_oasis_interpretation()
+                    if recommendations is None:
+                        recommendations = _live.get_recommendations()
+                except Exception:
+                    interpretations = interpretations or {}
+                    recommendations = recommendations or []
+
+    if profile is None:
+        # Fallback: compute live (profile absent or degenerate graph).
+        try:
+            oasis = OASISCalculator(calculator)
+            profile = oasis.get_oasis_profile()
+            interpretations = oasis.get_oasis_interpretation()
+            recommendations = oasis.get_recommendations()
+        except Exception as e:
+            st.error(f"Error computing OASIS metrics: {str(e)}")
+            return
+
+    # The interactive "custom weights" widget needs a live calculator; build it
+    # lazily only if we read from the store (does not recompute the profile shown).
+    def _get_live_oasis():
+        nonlocal oasis
+        if oasis is None:
+            oasis = OASISCalculator(calculator)
+        return oasis
 
     # Get scores and status
     scores = profile['dimension_scores']
@@ -4502,47 +4976,113 @@ def display_oasis_health(calculator, metrics, flow_matrix, node_names, org_name)
     # ===== WEIGHT CONFIGURATION =====
     st.markdown("---")
     with st.expander("⚙️ **Customize Dimension Weights**", expanded=False):
-        st.markdown("""
-        Adjust weights based on your organization's priorities.
-        All weights must sum to 100%.
-        """)
+        # ── Named context weighting PROFILES (a re-weighting lens) ───────────
+        # Per docs/business-revision/evidence/expert-org-management.md §3: equal
+        # 20% is the honest published DEFAULT; named profiles let a consultant
+        # select a context lens that MODESTLY re-weights the five dimensions.
+        # Selecting a profile is a CHEAP recombination on the already-computed
+        # dimension scores (no metric recompute) via apply_weighting_profile.
+        from src.oasis_calculator import WEIGHTING_PROFILES
 
-        # Initialize session state for weights if not exists
-        if 'oasis_weights' not in st.session_state:
-            st.session_state.oasis_weights = {k: v * 100 for k, v in oasis.DEFAULT_WEIGHTS.items()}
+        st.markdown("#### 🎚️ Weighting Profile (lens)")
+        st.caption(
+            "Equal 20% is the honest default. A profile applies a **modest** "
+            "context tilt to the five dimensions and instantly re-weights the "
+            "overall score — it never changes the dimension scores or metrics."
+        )
+        _profile_names = list(WEIGHTING_PROFILES.keys()) + ['Custom (manual sliders)']
+        selected_profile = st.selectbox(
+            "Select a lens",
+            _profile_names,
+            index=0,  # "Balanced (default)" so nothing changes unless chosen
+            key='oasis_weighting_profile',
+        )
 
-        col1, col2, col3, col4, col5 = st.columns(5)
+        if selected_profile != 'Custom (manual sliders)':
+            st.info(WEIGHTING_PROFILES[selected_profile]['description'])
+            # Cheap recombination on the PRECOMPUTED dimension scores.
+            reweighted = OASISCalculator.apply_weighting_profile(
+                scores, selected_profile)
+            new_overall = reweighted['overall_score']
+            new_status = reweighted['overall_status']
+            new_capped_by = reweighted.get('capped_by', [])
 
-        with col1:
-            new_open = st.slider("🌐 Open", 0, 50, int(st.session_state.oasis_weights['open']), key='w_open')
-        with col2:
-            new_auto = st.slider("🧠 Autonomous", 0, 50, int(st.session_state.oasis_weights['autonomous']), key='w_auto')
-        with col3:
-            new_symb = st.slider("🤝 Symbiotic", 0, 50, int(st.session_state.oasis_weights['symbiotic']), key='w_symb')
-        with col4:
-            new_intel = st.slider("💡 Intelligent", 0, 50, int(st.session_state.oasis_weights['intelligent']), key='w_intel')
-        with col5:
-            new_sust = st.slider("🌱 Sustainable", 0, 50, int(st.session_state.oasis_weights['sustainable']), key='w_sust')
-
-        total = new_open + new_auto + new_symb + new_intel + new_sust
-
-        if total != 100:
-            st.warning(f"⚠️ Weights sum to {total}%. They should sum to 100%.")
+            _status_colors = {'HEALTHY': '#2ecc71', 'WARNING': '#f5b041',
+                              'CRITICAL': '#e74c3c'}
+            _c = _status_colors.get(new_status, '#3498db')
+            _delta = new_overall - overall
+            st.markdown(
+                f"**Active lens:** {selected_profile} &nbsp;→&nbsp; "
+                f"Overall <span style='color:{_c};font-weight:bold'>"
+                f"{new_overall:.0f}/100 ({new_status})</span> "
+                f"<span style='opacity:0.7'>(Δ {_delta:+.1f} vs balanced)</span>",
+                unsafe_allow_html=True,
+            )
+            if new_capped_by:
+                st.caption(
+                    "Status capped by worst dimension(s): "
+                    + ", ".join(d.upper() for d in new_capped_by)
+                )
+            # Show the profile weights being applied.
+            _wcols = st.columns(5)
+            _emoji = {'open': '🌐', 'autonomous': '🧠', 'symbiotic': '🤝',
+                      'intelligent': '💡', 'sustainable': '🌱'}
+            for _col, _dim in zip(_wcols, ['open', 'autonomous', 'symbiotic',
+                                           'intelligent', 'sustainable']):
+                with _col:
+                    st.metric(f"{_emoji[_dim]} {_dim.capitalize()}",
+                              f"{reweighted['weights'][_dim] * 100:.0f}%")
+            st.markdown("---")
+            st.caption(
+                "Switch to **Custom (manual sliders)** to set your own weights."
+            )
         else:
-            st.success("✅ Weights sum to 100%")
+            # ── Manual "Custom" override (existing slider path) ──────────────
+            st.markdown("""
+            Adjust weights based on your organization's priorities.
+            All weights must sum to 100%.
+            """)
 
-            if st.button("Apply Weights"):
-                # Update weights and recalculate
-                new_weights = {
-                    'open': new_open / 100,
-                    'autonomous': new_auto / 100,
-                    'symbiotic': new_symb / 100,
-                    'intelligent': new_intel / 100,
-                    'sustainable': new_sust / 100
+            # Initialize session state for weights if not exists
+            if 'oasis_weights' not in st.session_state:
+                st.session_state.oasis_weights = {k: v * 100 for k, v in OASISCalculator.DEFAULT_WEIGHTS.items()}
+
+            col1, col2, col3, col4, col5 = st.columns(5)
+
+            with col1:
+                new_open = st.slider("🌐 Open", 0, 50, int(st.session_state.oasis_weights['open']), key='w_open')
+            with col2:
+                new_auto = st.slider("🧠 Autonomous", 0, 50, int(st.session_state.oasis_weights['autonomous']), key='w_auto')
+            with col3:
+                new_symb = st.slider("🤝 Symbiotic", 0, 50, int(st.session_state.oasis_weights['symbiotic']), key='w_symb')
+            with col4:
+                new_intel = st.slider("💡 Intelligent", 0, 50, int(st.session_state.oasis_weights['intelligent']), key='w_intel')
+            with col5:
+                new_sust = st.slider("🌱 Sustainable", 0, 50, int(st.session_state.oasis_weights['sustainable']), key='w_sust')
+
+            total = new_open + new_auto + new_symb + new_intel + new_sust
+
+            if total != 100:
+                st.warning(f"⚠️ Weights sum to {total}%. They should sum to 100%.")
+            else:
+                st.success("✅ Weights sum to 100%")
+
+                # Cheap live recombination preview on the precomputed scores.
+                _custom_weights = {
+                    'open': new_open / 100, 'autonomous': new_auto / 100,
+                    'symbiotic': new_symb / 100, 'intelligent': new_intel / 100,
+                    'sustainable': new_sust / 100,
                 }
-                oasis.set_dimension_weights(new_weights)
-                st.session_state.oasis_weights = {k: v * 100 for k, v in new_weights.items()}
-                st.rerun()
+                _custom = OASISCalculator.apply_weighting_profile(scores, _custom_weights)
+                st.caption(
+                    f"Custom overall: {_custom['overall_score']:.0f}/100 "
+                    f"({_custom['overall_status']})"
+                )
+
+                if st.button("Apply Weights"):
+                    _get_live_oasis().set_dimension_weights(_custom_weights)
+                    st.session_state.oasis_weights = {k: v * 100 for k, v in _custom_weights.items()}
+                    st.rerun()
 
     # ===== DIMENSION DETAILS =====
     st.markdown("---")
@@ -4818,6 +5358,14 @@ def display_detailed_report(calculator, metrics, assessments, org_name):
     # Add visual summary cards at the top
     display_visual_summary_cards(metrics, assessments)
 
+    # Read the precomputed OASIS profile so report exports don't recompute it.
+    _full_profile = get_active_profile(calculator.flow_matrix, calculator.node_names, org_name)
+    _oasis_profile = None
+    if isinstance(_full_profile, dict):
+        _stored_oasis = _full_profile.get('oasis')
+        if isinstance(_stored_oasis, dict) and 'dimension_scores' in _stored_oasis:
+            _oasis_profile = _stored_oasis
+
     # Generate publication-quality report
     report_generator = PublicationReportGenerator(
         calculator=calculator,
@@ -4825,7 +5373,8 @@ def display_detailed_report(calculator, metrics, assessments, org_name):
         assessments=assessments,
         org_name=org_name,
         flow_matrix=calculator.flow_matrix,
-        node_names=calculator.node_names
+        node_names=calculator.node_names,
+        oasis_profile=_oasis_profile
     )
 
     # ── Download buttons — prominent at top ────────────────────────────
@@ -4936,11 +5485,12 @@ def display_detailed_report(calculator, metrics, assessments, org_name):
             col1, col2, col3, col4 = st.columns(4)
 
             with col1:
-                status_color = "🟢" if metrics['is_viable'] else "🔴"
+                _gk = _alpha_gradient(metrics['ascendency_ratio'])
+                status_color = "🟢" if _gk['position'] == 'balanced' else "🧭"
                 st.metric(
-                    "Viability Status",
-                    f"{status_color} {'Viable' if metrics['is_viable'] else 'Non-Viable'}",
-                    f"α = {metrics['ascendency_ratio']:.2f}"
+                    "Gradient Position",
+                    f"{status_color} {_gk['position']}",
+                    f"α = {metrics['ascendency_ratio']:.2f} (vs. indicative band)"
                 )
 
             with col2:
@@ -5094,12 +5644,14 @@ Ascendency Ratio (A/C): {metrics['ascendency_ratio']:.2f}
 Overhead Ratio (Φ/C): {metrics['overhead_ratio']:.2f}
 Redundancy: {metrics['redundancy']:.2f}
 
-WINDOW OF VIABILITY
-==================
-Lower Bound: {metrics['viability_lower_bound']:.2f}
-Upper Bound: {metrics['viability_upper_bound']:.2f}
+INDICATIVE REFERENCE BAND (gradient position)
+=============================================
+Reference Lower Edge: {metrics['viability_lower_bound']:.2f}
+Reference Upper Edge: {metrics['viability_upper_bound']:.2f}
 Current Position: {metrics['ascendency']:.2f}
-Is Viable: {'YES' if metrics['is_viable'] else 'NO'}
+Gradient Position: {_alpha_gradient(metrics['ascendency_ratio'])['position']}
+Direction of Travel: {_alpha_gradient(metrics['ascendency_ratio'])['direction_of_travel']}
+Note: {_indicative_caveat()}
 
 HEALTH ASSESSMENT
 ================
@@ -7963,18 +8515,19 @@ def formulas_reference_interface():
         st.markdown("""
         ### **Window of Viability**
         ```
-        Lower Bound = 0.2 * C
-        Upper Bound = 0.6 * C
-        Viable = Lower Bound ≤ A ≤ Upper Bound
+        Reference Lower Edge = 0.2 * C
+        Reference Upper Edge = 0.6 * C
+        Within band = Lower Edge ≤ A ≤ Upper Edge
         ```
-        - **Empirical bounds** from Ulanowicz research
-        - Based on natural ecosystem observations
-        
-        ### **Sustainability Classification**
+        - **Indicative reference band** from Ulanowicz ecological research
+        - Based on natural ecosystem observations — organizational calibration is an
+          active area, so read this as a directional indicator, not a compliance threshold
+
+        ### **Gradient Position (direction of travel)**
         ```
-        if α < 0.2:  "Too chaotic (low organization)"
-        if α > 0.6:  "Too rigid (over-organized)" 
-        if 0.2 ≤ α ≤ 0.6:  "Viable system"
+        if α < 0.2:  "under-organized → increase structure / coordination"
+        if α > 0.6:  "over-organized → increase redundancy / flexibility"
+        if 0.2 ≤ α ≤ 0.6:  "balanced → maintain balance"
         ```
         
         ### **Optimal Robustness Point**

@@ -123,63 +123,18 @@ class GoogleWorkspaceConnector(BaseConnector):
             return {}
     
     def get_flow_data(self, start_date: datetime, end_date: datetime) -> np.ndarray:
-        """Extract communication flows from Google Workspace."""
-        org_data = self.get_organization_structure()
-        nodes = org_data.get('nodes', [])
-        user_mapping = org_data.get('user_mapping', {})
-        
-        if not nodes:
-            return np.array([[]])
-        
-        # Initialize flow matrix
-        n = len(nodes)
-        flow_matrix = np.zeros((n, n))
-        node_index = {node: i for i, node in enumerate(nodes)}
-        
-        try:
-            # Get email activities from Reports API
-            activities = self.reports_service.activities().list(
-                userKey='all',
-                applicationName='gmail',
-                startTime=start_date.isoformat() + 'Z',
-                endTime=end_date.isoformat() + 'Z',
-                maxResults=1000
-            ).execute()
-            
-            # Process email flows
-            for activity in activities.get('items', []):
-                actor = activity['actor']['email']
-                
-                for event in activity.get('events', []):
-                    if event['type'] == 'message_sent':
-                        # Extract recipient from parameters
-                        for param in event.get('parameters', []):
-                            if param['name'] == 'destination':
-                                recipient = param['value']
-                                
-                                # Map to departments
-                                from_dept = user_mapping.get(actor)
-                                to_dept = user_mapping.get(recipient)
-                                
-                                if from_dept and to_dept and from_dept in node_index and to_dept in node_index:
-                                    flow_matrix[node_index[from_dept]][node_index[to_dept]] += 1
-            
-            # Get Drive collaboration data
-            drive_activities = self.drive_service.activities().query(
-                body={
-                    'startTime': start_date.isoformat() + 'Z',
-                    'endTime': end_date.isoformat() + 'Z'
-                }
-            ).execute()
-            
-            # Process collaboration flows
-            # (simplified - would need more sophisticated processing)
-            
-            return flow_matrix
-            
-        except Exception as e:
-            print(f"Error extracting flows: {e}")
-            return flow_matrix
+        """Superseded by the two-stage GmailConnector — do not fabricate data.
+
+        The old inline Reports-API extraction returned a zero matrix, which reads
+        as real (empty) data downstream. Metadata-only Gmail ingestion now lives in
+        src.connectors.GmailConnector (sync -> store -> build_flow_matrix), driven
+        by the 'Connect Gmail' UI. Refuse rather than mislead.
+        """
+        raise NotImplementedError(
+            "GoogleWorkspaceConnector.get_flow_data is retired. Use "
+            "src.connectors.GmailConnector (Connect Gmail in the app), which pulls "
+            "metadata-only and builds a weighted flow matrix."
+        )
     
     def get_metadata(self) -> Dict[str, Any]:
         """Get Google Workspace metadata."""
@@ -273,19 +228,37 @@ class MicrosoftGraphConnector(BaseConnector):
         return {}
     
     def get_flow_data(self, start_date: datetime, end_date: datetime) -> np.ndarray:
-        """Extract flows from Microsoft Graph."""
-        # Implementation would query:
-        # - Email flows from Exchange
-        # - Teams channel messages
-        # - SharePoint collaboration
-        # - Meeting patterns from Calendar
-        
-        # Simplified POC
+        """
+        Extract directed flows from Microsoft Graph.
+
+        Production implementation queries Exchange (email), Teams (channel messages),
+        SharePoint (collaboration), and Calendar (meetings), maps each actor/recipient
+        to its department, and accumulates directed interactions. Those interactions
+        are normalized with `flows_from_interactions` (the shared connector primitive),
+        NOT fabricated. Until live extraction is wired, this returns a zero matrix so
+        downstream analysis never operates on synthetic data.
+        """
         org_data = self.get_organization_structure()
         n = len(org_data.get('nodes', []))
-        
-        # Would process actual data here
-        return np.random.rand(n, n) * 100  # Placeholder
+        # No real interaction extraction yet — return zeros, never random/fake flows.
+        return np.zeros((n, n), dtype=float)
+
+    @staticmethod
+    def flows_from_interactions(interactions) -> np.ndarray:
+        """
+        Normalize directed interactions into a flow matrix via the shared primitive.
+
+        Args:
+            interactions: iterable of (source_dept, target_dept, weight) tuples.
+
+        Returns:
+            Square numpy flow matrix.
+        """
+        try:
+            from network_ingestion import build_flow_matrix_from_edges
+        except Exception:
+            from src.network_ingestion import build_flow_matrix_from_edges
+        return build_flow_matrix_from_edges(interactions).flow_matrix
     
     def get_metadata(self) -> Dict[str, Any]:
         """Get Microsoft Graph metadata."""

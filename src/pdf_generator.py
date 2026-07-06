@@ -12,6 +12,17 @@ import numpy as np
 import plotly.graph_objects as go
 import plotly.io as pio
 
+
+def _pdf_gradient(alpha):
+    """Gradient classifier (position + direction-of-travel) — single source of
+    truth from report_intelligence. Reframes the old binary viability verdict."""
+    try:
+        import report_intelligence as _ri
+    except ImportError:  # pragma: no cover
+        from src import report_intelligence as _ri
+    return _ri.assess_alpha_position(alpha)
+
+
 # ── Color palette ──────────────────────────────────────────────────────────
 FOREST_GREEN = '#1a5f35'
 MEDIUM_GREEN = '#2d8a4e'
@@ -36,6 +47,75 @@ OASIS_COLORS = {
     'intelligent': '#e67e22',
     'sustainable': '#1abc9c',
 }
+
+
+# ── Human-readable metric labels ───────────────────────────────────────────
+# Maps raw code identifiers (dict keys) to reader-facing labels. Used ONLY for
+# display text; dict keys/access are never changed.
+_METRIC_LABELS = {
+    'relative_ascendency': 'relative ascendency (α)',
+    'ascendency_ratio': 'relative ascendency (α)',
+    'number_of_roles': 'number of functional roles',
+    'functional_diversity': 'functional diversity',
+    'finn_cycling_index': 'resource cycling (Finn cycling index)',
+    'flow_reciprocity': 'flow reciprocity',
+    'regenerative_capacity': 'regenerative capacity',
+    'flow_diversity': 'flow diversity',
+    'connectance': 'network connectance',
+    'clustering_coefficient': 'clustering coefficient',
+    'gini_coefficient': 'resource distribution (Gini coefficient)',
+    'mutualism_ratio': 'mutualism ratio',
+    'robustness': 'robustness',
+    'redundancy': 'pathway redundancy',
+    'overhead_ratio': 'reserve overhead',
+}
+
+
+def humanize_metric_name(name):
+    """Convert a raw metric identifier into a reader-facing label.
+
+    Falls back to a title-cased, underscore-stripped version for any key not in
+    the explicit map, guaranteeing no raw ``snake_case`` identifier reaches the
+    reader.
+    """
+    if not isinstance(name, str):
+        return str(name)
+    key = name.strip()
+    if key in _METRIC_LABELS:
+        return _METRIC_LABELS[key]
+    return key.replace('_', ' ').strip()
+
+
+def build_toc_items():
+    """Table-of-Contents entries mirroring the ACTUAL body headings, in order.
+
+    Kept in sync with :data:`BODY_HEADINGS`; every entry here must correspond to
+    a heading rendered in the report body.
+    """
+    return [
+        ("Executive Summary", ""),
+        ("1. Introduction", ""),
+        ("2. Methodology", ""),
+        ("3. Results", ""),
+        ("   3.1 Core Network Metrics", ""),
+        ("   3.2 Sustainability Assessment", ""),
+        ("   3.3 Visualizations", ""),
+        ("   3.4 Flow Distribution Analysis", ""),
+        ("4. OASIS Organizational Health Assessment", ""),
+        ("5. Benchmarking & Position", ""),
+        ("6. Risk & Resilience Analysis", ""),
+        ("7. Prioritized Action Roadmap", ""),
+        ("8. ESG Framework Mapping", ""),
+        ("9. Discussion", ""),
+        ("10. Conclusions & Recommendations", ""),
+        ("References", ""),
+        ("Appendix: Detailed Data", ""),
+    ]
+
+
+# Canonical list of body headings actually rendered (top-level + subsections),
+# used by the TOC and by proofing tests to guarantee TOC↔body consistency.
+BODY_HEADINGS = [t.strip() for t, _ in build_toc_items()]
 
 
 def _hex_to_rgb(hex_color):
@@ -316,8 +396,60 @@ def _build_reportlab_pdf(report_generator, calculator, metrics, charts=None):
                                      width=render_w, height=render_h, scale=2)
             img_buf = BytesIO(img_bytes)
             return Image(img_buf, width=width, height=height)
-        except Exception:
+        except Exception as _e:
+            import logging
+            logging.getLogger(__name__).warning(
+                "PDF chart (plotly/kaleido) export failed, skipping: %s", _e)
             return None
+
+    def _mpl_image(fig, width=CONTENT_W, height=280, dpi=150):
+        """Convert a matplotlib Figure to a reportlab Image flowable.
+
+        Used for charts that already have a native matplotlib builder (e.g. the
+        Window-of-Viability curve) and as a kaleido-free fallback path.
+        """
+        try:
+            img_buf = BytesIO()
+            fig.savefig(img_buf, format='png', dpi=dpi,
+                        bbox_inches='tight', facecolor='white')
+            img_buf.seek(0)
+            try:
+                import matplotlib.pyplot as _plt
+                _plt.close(fig)
+            except Exception:
+                pass
+            return Image(img_buf, width=width, height=height)
+        except Exception as _e:
+            import logging
+            logging.getLogger(__name__).warning(
+                "PDF chart (matplotlib) export failed, skipping: %s", _e)
+            return None
+
+    def _guarded_chart_block(builder, caption, story_list,
+                             heading=None, heading_style=None):
+        """Build one chart via *builder* (returns a reportlab Image or None),
+        wrap it with a caption, and append as a KeepTogether block.
+
+        Each chart is individually guarded so one failure logs a warning and is
+        skipped rather than aborting the whole PDF. Returns True if embedded.
+        """
+        img = None
+        try:
+            img = builder()
+        except Exception as _e:
+            import logging
+            logging.getLogger(__name__).warning(
+                "PDF chart builder raised, skipping: %s", _e)
+            img = None
+        if img is None:
+            return False
+        block = []
+        if heading is not None:
+            block.append(Paragraph(heading, heading_style or s_h2))
+        block.append(img)
+        block.append(Paragraph(caption, s_caption))
+        story_list.append(KeepTogether(block))
+        return True
 
     # ── Build story ──────────────────────────────────────────────────────
     story = []
@@ -350,9 +482,10 @@ def _build_reportlab_pdf(report_generator, calculator, metrics, charts=None):
     story.append(Spacer(1, 2 * cm))
     n_nodes = len(calculator.node_names)
     n_edges = int(np.count_nonzero(calculator.flow_matrix))
-    viability = 'Viable' if metrics['is_viable'] else 'Non-Viable'
+    viability = _pdf_gradient(metrics.get('relative_ascendency',
+                              metrics.get('ascendency_ratio', 0)))['position']
     cover_data = [
-        ['Network Nodes', 'Active Connections', 'Viability Status', 'Robustness'],
+        ['Network Nodes', 'Active Connections', 'Gradient Position', 'Robustness'],
         [str(n_nodes), str(n_edges), viability, f"{metrics.get('robustness', 0):.3f}"],
     ]
     cover_table = Table(cover_data, colWidths=[CONTENT_W / 4] * 4)
@@ -375,16 +508,122 @@ def _build_reportlab_pdf(report_generator, calculator, metrics, charts=None):
     story.append(PageBreak())
 
     # ════════════════════════════════════════════════════════════════════
-    # EXECUTIVE SUMMARY (KPI Cards)
+    # EXECUTIVE ONE-PAGER  (R8 + R9)
+    # A self-contained, demo-ready first content page composed of five
+    # elements, in order:
+    #   0. The credibility keystone (R9) — "Why this applies to your org".
+    #   1. Reconciled headline verdict — the CAPPED OASIS status + capped_by.
+    #   2. KPI cards with reference anchors (gradient framing, never bare fail).
+    #   3. The marquee "you are here" Window-of-Viability curve.
+    #   4. Top-3 risks in Evidence -> Implication form.
+    #   5. Prioritized next steps (roadmap, time-horizoned).
+    # Then a clear "Detailed analysis follows" divider; the existing detailed
+    # sections continue after it.
+    # All inputs are the precomputed oasis_profile + report_intelligence views;
+    # nothing here recomputes a metric.
     # ════════════════════════════════════════════════════════════════════
+
+    # Shared intelligence module + the precomputed profile (read, do not recompute).
+    try:
+        import report_intelligence as _ri_exec
+    except ImportError:  # pragma: no cover
+        from src import report_intelligence as _ri_exec
+
+    _exec_profile = getattr(report_generator, 'oasis_profile', None)
+    if not (isinstance(_exec_profile, dict) and 'dimension_scores' in _exec_profile):
+        _exec_profile = None
+    if _exec_profile is None:
+        try:
+            from oasis_calculator import OASISCalculator as _OC_exec
+        except Exception:
+            try:
+                from src.oasis_calculator import OASISCalculator as _OC_exec
+            except Exception:
+                _OC_exec = None
+        if _OC_exec is not None:
+            try:
+                _exec_profile = _OC_exec(calculator).get_oasis_profile()
+            except Exception:
+                _exec_profile = None
+
+    rob = metrics.get('robustness', 0)
+    rob_status = _ri_exec.categorize_robustness_label(rob)
+    eff = metrics.get('network_efficiency', 0)
+    eff_status = _ri_exec.categorize_efficiency_label(eff)
+    alpha = metrics.get('ascendency_ratio', 0)
+    _grad_exec = _ri_exec.assess_alpha_position(alpha)
+
     story.append(Paragraph("Executive Summary", s_h1))
     story.append(HRFlowable(
         width='100%', thickness=1, color=_hex_to_rgb(FOREST_GREEN),
-        spaceBefore=0, spaceAfter=12,
+        spaceBefore=0, spaceAfter=10,
     ))
 
-    # Build KPI cards as a table
-    def _kpi_cell(label, value, status, color=None):
+    # ── 0. Credibility keystone (R9): "Why this applies to your organization" ──
+    #    Lead with the ORGANIZATIONAL evidence (Fath 2019), not wetlands; frame
+    #    the window as an indicative directional reference (honesty guardrail).
+    s_keystone = ParagraphStyle(
+        'Keystone', parent=s_body, fontSize=9.5, leading=13,
+        textColor=_hex_to_rgb(DARK_TEXT),
+        leftIndent=6, rightIndent=6, spaceBefore=2, spaceAfter=8,
+        borderColor=_hex_to_rgb(TEAL), borderWidth=0.5, borderPadding=5,
+        backColor=_hex_to_rgb('#f4fbf9'),
+    )
+    story.append(Paragraph(
+        "<b>Why this applies to your organization.</b> High-performing "
+        "organizations analyzed with this same efficiency&ndash;resilience "
+        "framework cluster in a characteristic range (relative ascendency "
+        "&alpha; &asymp; 0.30&ndash;0.45; Fath et al., 2019, regenerative "
+        "economics). OASIS reads how your organization is <i>structurally "
+        "wired</i> &mdash; the balance between coordinating efficiency and "
+        "adaptive reserve computed from real flow data &mdash; a network lens "
+        "that <i>complements</i>, and does not replace, culture and engagement "
+        "measures. The viability band is an <b>indicative, directional</b> "
+        "reference (calibrated on ecological systems; organizational "
+        "calibration is an open question), so read your position as a "
+        "direction of travel, not a compliance grade.",
+        s_keystone))
+
+    # ── 1. Reconciled headline verdict — capped status + business meaning ──
+    if _exec_profile is not None:
+        _overall = float(_exec_profile.get('overall_score', 0.0))
+        _capped_status = str(_exec_profile.get('overall_status', 'UNKNOWN'))
+        _capped = bool(_exec_profile.get('overall_status_capped', False))
+        _capped_by = _exec_profile.get('capped_by', []) or []
+        _verdict_color = _get_status_color(_capped_status)
+        if _capped and _capped_by:
+            _cap_names = ', '.join(d.capitalize() for d in _capped_by)
+            _headline = (
+                f"<font color=\"{_verdict_color}\"><b>{_capped_status} "
+                f"&mdash; {_overall:.0f}/100</b></font>, capped by a critical "
+                f"<b>{_cap_names}</b> dimension."
+            )
+            _sowhat = (
+                "So what: the overall label is held below its raw average "
+                "because a core pillar is critical &mdash; a weak pillar cannot "
+                "be averaged away, and it sets the near-term priority."
+            )
+        else:
+            _headline = (
+                f"<font color=\"{_verdict_color}\"><b>{_capped_status} "
+                f"&mdash; {_overall:.0f}/100</b></font>."
+            )
+            _sowhat = (
+                "So what: no single dimension is critical; the priority is to "
+                "hold the balance and address the weakest pillar before it "
+                "drifts."
+            )
+        _s_verdict = ParagraphStyle(
+            'Verdict', parent=s_body, fontSize=13, leading=17,
+            spaceBefore=2, spaceAfter=2, alignment=TA_LEFT)
+        story.append(Paragraph("Headline Verdict", ParagraphStyle(
+            'vh', parent=s_h3, spaceBefore=2, spaceAfter=2)))
+        story.append(Paragraph(_headline, _s_verdict))
+        story.append(Paragraph(_sowhat, ParagraphStyle(
+            's', parent=s_body_italic, fontSize=9.5, leading=12, spaceAfter=8)))
+
+    # ── 2. KPI cards with reference anchors (gradient framing) ──
+    def _kpi_cell(label, value, status, anchor, color=None):
         c = color or _get_status_color(status)
         return [
             Paragraph(str(value), ParagraphStyle(
@@ -392,30 +631,43 @@ def _build_reportlab_pdf(report_generator, calculator, metrics, charts=None):
             Paragraph(label, s_kpi_label),
             Paragraph(status, ParagraphStyle(
                 'ks', parent=s_kpi_status, textColor=_hex_to_rgb(c))),
+            Paragraph(anchor, ParagraphStyle(
+                'ka', parent=s_kpi_label, fontSize=7.2, leading=8.5,
+                textColor=_hex_to_rgb(MUTED))),
         ]
 
-    rob = metrics.get('robustness', 0)
-    rob_status = 'High' if rob > 0.2 else 'Moderate' if rob > 0.15 else 'Low'
-    eff = metrics.get('network_efficiency', 0)
-    eff_status = 'Optimal' if 0.2 <= eff <= 0.6 else 'Sub-optimal'
-    alpha = metrics.get('ascendency_ratio', 0)
+    # α gradient position drives the alpha card's status word (never "Non-Viable").
+    _alpha_pos = {
+        'under-organized': 'Under-organized',
+        'over-organized': 'Over-organized',
+        'balanced': 'Balanced',
+    }[_grad_exec['position']]
+    _overall_kpi = (f"{_exec_profile.get('overall_score', 0):.0f}"
+                    if _exec_profile is not None else '—')
+    _overall_status_kpi = (str(_exec_profile.get('overall_status', ''))
+                           if _exec_profile is not None else '')
 
     kpi_cells = [
-        _kpi_cell('Viability Status', viability, viability),
-        _kpi_cell('Robustness (R)', f"{rob:.3f}", rob_status),
-        _kpi_cell('Network Efficiency', f"{eff:.3f}", eff_status),
-        _kpi_cell('Rel. Ascendency (α)', f"{alpha:.3f}",
-                   'Optimal' if 0.30 <= alpha <= 0.45 else 'Warning'),
+        _kpi_cell('OASIS Overall', _overall_kpi, _overall_status_kpi,
+                  'HEALTHY ≥ 60 / WARNING ≥ 40 / else CRITICAL'),
+        _kpi_cell('Rel. Ascendency (α)', f"{alpha:.3f}", _alpha_pos,
+                  'indicative band 0.2–0.6; high-perf. orgs 0.30–0.45'),
+        _kpi_cell('Robustness (R)', f"{rob:.3f}", rob_status,
+                  'peaks ≈0.37 (=1/e); High ≥ 0.25'),
+        _kpi_cell('Efficiency', f"{eff:.3f}", eff_status,
+                  'balanced 0.2–0.6; high = brittle'),
     ]
 
-    # Flatten into table rows (3 rows per card, 4 columns)
-    kpi_data = [[cell[i] for cell in kpi_cells] for i in range(3)]
+    # Flatten into table rows (4 rows per card: value/label/status/anchor).
+    kpi_data = [[cell[i] for cell in kpi_cells] for i in range(4)]
     kpi_table = Table(kpi_data, colWidths=[CONTENT_W / 4] * 4)
     kpi_table.setStyle(TableStyle([
         ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('TOPPADDING', (0, 0), (-1, -1), 6),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ('LEFTPADDING', (0, 0), (-1, -1), 4),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 4),
         ('BOX', (0, 0), (0, -1), 0.5, _hex_to_rgb('#e0e0e0')),
         ('BOX', (1, 0), (1, -1), 0.5, _hex_to_rgb('#e0e0e0')),
         ('BOX', (2, 0), (2, -1), 0.5, _hex_to_rgb('#e0e0e0')),
@@ -423,25 +675,108 @@ def _build_reportlab_pdf(report_generator, calculator, metrics, charts=None):
         ('BACKGROUND', (0, 0), (-1, -1), _hex_to_rgb('#fafcfb')),
     ]))
     story.append(kpi_table)
-    story.append(Spacer(1, 0.5 * cm))
+    story.append(Spacer(1, 0.35 * cm))
 
-    # Executive summary text
-    exec_text = (
-        f"This report presents a comprehensive network analysis of <b>{org_name}</b> "
-        f"using the Ulanowicz-Fath regenerative economics framework. The organization's "
-        f"network comprises <b>{n_nodes} nodes</b> and <b>{n_edges} directed connections</b>, "
-        f"with a total system throughput of <b>{metrics['total_system_throughput']:.1f} units</b>."
-    )
-    story.append(Paragraph(exec_text, s_body))
+    # ── 3. The marquee "you are here" Window-of-Viability curve ──
+    def _build_exec_wov_image():
+        try:
+            png = _ri_exec.render_window_of_viability_png(alpha, rob)
+        except Exception:
+            return None
+        if not png:
+            return None
+        try:
+            _w = CONTENT_W * 0.72
+            return Image(BytesIO(png), width=_w, height=_w * 4.0 / 7.2)
+        except Exception:
+            return None
 
-    viab_text = (
-        f"The system {'operates within' if metrics['is_viable'] else 'falls outside'} the "
-        f"window of viability (α = {alpha:.3f}, bounds: {metrics['viability_lower_bound']:.2f}–"
-        f"{metrics['viability_upper_bound']:.2f}), indicating "
-        f"{'sustainable operational characteristics' if metrics['is_viable'] else 'need for structural adaptation'}. "
-        f"Robustness of R = {rob:.3f} suggests {rob_status.lower()} resilience to perturbations."
-    )
-    story.append(Paragraph(viab_text, s_body))
+    _guarded_chart_block(
+        _build_exec_wov_image,
+        "<i>You are here.</i> The organization's position (red marker) on the "
+        "robustness curve R(&alpha;) = &minus;&alpha;&middot;ln(&alpha;), with "
+        "the indicative reference band shaded. " + _grad_exec['caveat'],
+        story)
+
+    # ── 4. Top-3 risks (Evidence -> Implication) ──
+    story.append(Paragraph("Top Risks", ParagraphStyle(
+        'trh', parent=s_h3, spaceBefore=4, spaceAfter=3)))
+    _exec_risks_rendered = False
+    if _exec_profile is not None:
+        try:
+            _risk_view = _ri_exec.build_risk_view(metrics, _exec_profile)
+            for _it in _risk_view['items'][:3]:
+                _sc = _get_status_color(_it['severity'])
+                story.append(Paragraph(
+                    f"<font color=\"{_sc}\"><b>{_it['severity']}</b></font> "
+                    f"&mdash; {_it['title']}. "
+                    f"<b>Evidence:</b> {_it['evidence']} "
+                    f"<b>Implication:</b> {_it['implication']}",
+                    ParagraphStyle('rk', parent=s_body, fontSize=9, leading=11.5,
+                                   spaceBefore=1, spaceAfter=3,
+                                   leftIndent=10, firstLineIndent=-10)))
+                _exec_risks_rendered = True
+        except Exception:
+            _exec_risks_rendered = False
+    if not _exec_risks_rendered:
+        story.append(Paragraph(
+            "<b>Evidence:</b> risk view unavailable for this network. "
+            "<b>Implication:</b> see the detailed Risk &amp; Resilience section.",
+            ParagraphStyle('rk0', parent=s_body, fontSize=9, leading=11.5,
+                           spaceAfter=3)))
+
+    # ── 5. Prioritized next steps (roadmap, time-horizoned) ──
+    story.append(Paragraph("Prioritized Next Steps", ParagraphStyle(
+        'nsh', parent=s_h3, spaceBefore=4, spaceAfter=3)))
+    _exec_steps_rendered = False
+    if _exec_profile is not None:
+        try:
+            try:
+                from oasis_calculator import OASISCalculator as _OC_rec
+            except Exception:
+                from src.oasis_calculator import OASISCalculator as _OC_rec
+            _exec_recs = _exec_profile.get('recommendations')
+            if _exec_recs is None:
+                _exec_recs = _OC_rec(calculator).get_recommendations()
+            _exec_roadmap = _ri_exec.build_action_roadmap(_exec_recs, _exec_profile)
+            _horizon_labels = [
+                ('immediate', 'Immediate (0–3 mo)'),
+                ('short_term', 'Short-Term (3–9 mo)'),
+                ('medium_term', 'Medium-Term (9–18 mo)'),
+            ]
+            _flat_steps = []
+            for _hkey, _hlabel in _horizon_labels:
+                for _st in _exec_roadmap.get(_hkey, []):
+                    _flat_steps.append((_hlabel, _st))
+            for _hlabel, _st in _flat_steps[:3]:
+                _pc = _get_status_color(_st.get('priority', ''))
+                story.append(Paragraph(
+                    f"<font color=\"{_pc}\"><b>{_hlabel}</b></font> &middot; "
+                    f"<b>{_st.get('dimension', '')}</b> &mdash; "
+                    f"{_st.get('action', '')}",
+                    ParagraphStyle('ns', parent=s_body, fontSize=9, leading=11.5,
+                                   spaceBefore=1, spaceAfter=3,
+                                   leftIndent=10, firstLineIndent=-10)))
+                _exec_steps_rendered = True
+        except Exception:
+            _exec_steps_rendered = False
+    if not _exec_steps_rendered:
+        story.append(Paragraph(
+            "<b>Immediate (0–3 mo)</b> &middot; Establish a recurring "
+            "assessment cadence and confirm the reconciled verdict with "
+            "leadership before acting.",
+            ParagraphStyle('ns0', parent=s_body, fontSize=9, leading=11.5,
+                           spaceAfter=3)))
+
+    # ── Divider: analyst depth gated behind this line ──
+    story.append(Spacer(1, 0.2 * cm))
+    story.append(HRFlowable(
+        width='100%', thickness=1.2, color=_hex_to_rgb(GOLD),
+        dash=(3, 2), spaceBefore=1, spaceAfter=3))
+    story.append(Paragraph(
+        "— Detailed analysis follows —",
+        ParagraphStyle('divider', parent=s_caption, fontSize=10,
+                       textColor=_hex_to_rgb(MEDIUM_GREEN), spaceAfter=2)))
 
     story.append(PageBreak())
 
@@ -453,23 +788,7 @@ def _build_reportlab_pdf(report_generator, calculator, metrics, charts=None):
         width='100%', thickness=1, color=_hex_to_rgb(FOREST_GREEN),
         spaceBefore=0, spaceAfter=16,
     ))
-    toc_items = [
-        ("Executive Summary", ""),
-        ("1. Introduction", ""),
-        ("2. Methodology", ""),
-        ("3. Results", ""),
-        ("   3.1 Network Structure", ""),
-        ("   3.2 Information-Theoretic Analysis", ""),
-        ("   3.3 System Organization", ""),
-        ("   3.4 Sustainability Assessment", ""),
-        ("   3.5 Resilience Metrics", ""),
-        ("   3.6 Flow Distribution", ""),
-        ("4. OASIS Health Assessment", ""),
-        ("5. Discussion", ""),
-        ("6. Conclusions & Recommendations", ""),
-        ("References", ""),
-        ("Appendix", ""),
-    ]
+    toc_items = build_toc_items()
     for item, _ in toc_items:
         indent = 24 if item.startswith('   ') else 0
         toc_style = ParagraphStyle(
@@ -744,12 +1063,12 @@ def _build_reportlab_pdf(report_generator, calculator, metrics, charts=None):
         ['Parameter', 'Value', 'Status'],
         ['Current Position (α)', f"{alpha:.3f}",
          'Optimal' if 0.30 <= alpha <= 0.45 else 'Developing' if alpha < 0.35 else 'Efficient'],
-        ['Lower Bound', f"{metrics['viability_lower_bound']:.3f}",
-         'PASS' if alpha > metrics['viability_lower_bound'] else 'FAIL'],
-        ['Upper Bound', f"{metrics['viability_upper_bound']:.3f}",
-         'PASS' if alpha < metrics['viability_upper_bound'] else 'FAIL'],
-        ['Within Window of Viability', 'Yes' if metrics['is_viable'] else 'No',
-         'Sustainable' if metrics['is_viable'] else 'Needs attention'],
+        ['Reference Lower Edge', f"{metrics['viability_lower_bound']:.3f}",
+         'above' if alpha > metrics['viability_lower_bound'] else 'below'],
+        ['Reference Upper Edge', f"{metrics['viability_upper_bound']:.3f}",
+         'below' if alpha < metrics['viability_upper_bound'] else 'above'],
+        ['Gradient Position', _pdf_gradient(alpha)['position'],
+         'Direction of travel: ' + _pdf_gradient(alpha)['direction_of_travel']],
     ]
     viab_table_data = []
     for ri, row in enumerate(viab_data):
@@ -770,42 +1089,103 @@ def _build_reportlab_pdf(report_generator, calculator, metrics, charts=None):
     viab_t.setStyle(TableStyle(viab_style))
     story.append(viab_t)
     story.append(Paragraph(
-        "<i>Table 2. Viability Assessment</i> — Position of the organization relative to the empirically derived window of viability, indicating whether current efficiency-resilience dynamics are sustainable.", s_caption))
+        "<i>Table 2. Gradient Position</i> — Position of the organization on the "
+        "efficiency-resilience gradient relative to the indicative reference band, "
+        "with direction of travel. " + _pdf_gradient(alpha)['caveat'], s_caption))
 
-    # ── Charts ──
-    # Professional figure caption mapping: chart_name -> interpretive note
+    # ── Window-of-Viability / robustness curve (most important credibility
+    #    visual). Prefer the native matplotlib builder; fall back to the
+    #    Plotly robustness curve via kaleido if matplotlib is unavailable.
+    _wov_num = [0]  # figure counter carried into 3.3
+
+    def _build_wov_image():
+        try:
+            from visualizer import SustainabilityVisualizer as _SV
+        except Exception:
+            from src.visualizer import SustainabilityVisualizer as _SV
+        try:
+            viz = _SV(calculator)
+            mpl_fig = viz.plot_sustainability_curve_matplotlib(figsize=(11, 4.5))
+            img = _mpl_image(mpl_fig, width=CONTENT_W * 0.95, height=CONTENT_W * 0.95 * 4.5 / 11)
+            if img is not None:
+                return img
+            # Fallback: plotly robustness curve through kaleido
+            return _chart_image(viz.create_robustness_curve(),
+                                width=CONTENT_W * 0.9, height=250)
+        except Exception:
+            return None
+
+    if _guarded_chart_block(
+            _build_wov_image,
+            "<i>Figure 1. Window of Viability &amp; Robustness Curve</i> — Left: the "
+            "organization's ascendency (A) versus development capacity (C) with the "
+            "green band marking the empirical window of viability. Right: key "
+            "sustainability metrics. This visual anchors the efficiency&ndash;resilience "
+            "trade-off central to the Ulanowicz-Fath framework.",
+            story):
+        _wov_num[0] = 1
+
+    # ── 3.3 Visualizations ──
+    # Self-sufficient: charts are built internally from the calculator so the
+    # report embeds real images even when the caller passes charts=None
+    # (previously this whole block was skipped -> zero images in the PDF).
+    # Any caller-supplied plotly figures are embedded in addition.
     _figure_notes = {
         "System Robustness Curve": "The organization's position (red marker) relative to the theoretical robustness function R = -α·log(α), with the empirical optimum at α ≈ 0.37.",
         "Core Metrics Analysis": "Comparative bar chart of key information-theoretic indicators, enabling rapid identification of metrics that deviate from healthy-system benchmarks.",
         "Flow Distribution": "Distribution of resource flows across the top network nodes, illustrating concentration patterns and potential structural dependencies.",
     }
+
+    story.append(Paragraph("3.3 Visualizations", s_h2))
+    fig_num = [_wov_num[0]]  # continue numbering after the WoV figure
+
+    # (a) Internal flow / Sankey diagram built from the calculator.
+    def _build_flow_image():
+        try:
+            from visualizer import SustainabilityVisualizer as _SV
+        except Exception:
+            from src.visualizer import SustainabilityVisualizer as _SV
+        viz = _SV(calculator)
+        return _chart_image(viz.create_sankey_diagram(),
+                            width=CONTENT_W * 0.95, height=300)
+
+    fig_num[0] += 1
+    _flow_ok = _guarded_chart_block(
+        _build_flow_image,
+        f"<i>Figure {fig_num[0]}. Network Flow Diagram (Sankey)</i> — Directed "
+        "resource flows between nodes, revealing structural pathways, hubs and "
+        "dependencies across the organizational network.",
+        story)
+    if not _flow_ok:
+        fig_num[0] -= 1  # don't burn a figure number on a skipped chart
+
+    # (b) Any caller-supplied plotly figures (app path).
+    embedded_any = _flow_ok or _wov_num[0] > 0
     if charts:
-        fig_num = 1
-        first_chart = True
         for chart_name, fig in charts.items():
             if fig is None:
                 continue
-            img = _chart_image(fig, width=CONTENT_W * 0.92, height=250)
-            if img:
-                note = _figure_notes.get(chart_name, f"Visualization of {chart_name.lower()} for the analyzed network.")
-                chart_block = [
-                    img,
-                    Paragraph(
-                        f"<i>Figure {fig_num}. {chart_name}</i> — {note}", s_caption),
-                ]
-                if first_chart:
-                    # Keep section heading with the first chart
-                    chart_block.insert(
-                        0, Paragraph("3.3 Visualizations", s_h2))
-                    first_chart = False
-                story.append(KeepTogether(chart_block))
-                fig_num += 1
-        if first_chart:
-            # No valid charts — still emit the heading
-            story.append(Paragraph("3.3 Visualizations", s_h2))
-            story.append(Paragraph(
-                "Chart images could not be generated for this report.",
-                s_body_italic))
+
+            def _build(_f=fig):
+                return _chart_image(_f, width=CONTENT_W * 0.92, height=250)
+
+            fig_num[0] += 1
+            note = _figure_notes.get(
+                chart_name,
+                f"Visualization of {chart_name.lower()} for the analyzed network.")
+            ok = _guarded_chart_block(
+                _build,
+                f"<i>Figure {fig_num[0]}. {chart_name}</i> — {note}",
+                story)
+            if ok:
+                embedded_any = True
+            else:
+                fig_num[0] -= 1
+
+    if not embedded_any:
+        story.append(Paragraph(
+            "Chart images could not be generated for this report.",
+            s_body_italic))
 
     # ── Remaining results text ──
     story.append(Paragraph("3.4 Flow Distribution Analysis", s_h2))
@@ -863,13 +1243,23 @@ def _build_reportlab_pdf(report_generator, calculator, metrics, charts=None):
         spaceBefore=0, spaceAfter=8,
     ))
 
-    # Try to get OASIS data
+    # Try to get OASIS data — prefer the precomputed profile (computed once at
+    # provision) carried on the report_generator; recompute only on a miss.
     try:
-        from oasis_calculator import OASISCalculator
-        oasis = OASISCalculator(calculator)
-        profile = oasis.get_oasis_profile()
-        interpretations = oasis.get_oasis_interpretation()
-        recommendations = oasis.get_recommendations()
+        profile = getattr(report_generator, 'oasis_profile', None)
+        if not (isinstance(profile, dict) and 'dimension_scores' in profile):
+            profile = None
+        interpretations = profile.get('interpretation') if profile else None
+        recommendations = profile.get('recommendations') if profile else None
+        if profile is None or interpretations is None or recommendations is None:
+            from oasis_calculator import OASISCalculator
+            oasis = OASISCalculator(calculator)
+            if profile is None:
+                profile = oasis.get_oasis_profile()
+            if interpretations is None:
+                interpretations = oasis.get_oasis_interpretation()
+            if recommendations is None:
+                recommendations = oasis.get_recommendations()
 
         scores = profile['dimension_scores']
         overall = profile['overall_score']
@@ -880,6 +1270,19 @@ def _build_reportlab_pdf(report_generator, calculator, metrics, charts=None):
             f"The OASIS framework assesses organizational health across five dimensions "
             f"derived from Fath et al.'s (2019) 10 Principles of Regenerative Economics. "
             f"The overall health score is <b>{overall:.0f}/100</b> ({overall_status}).",
+            s_body))
+
+        # Transparency note: which weighting lens produced the overall. Equal
+        # weights are the honest default; a named profile is a modest context
+        # tilt (see docs/business-revision/evidence/expert-org-management.md §3).
+        _prof_weights = profile.get('weights') or {}
+        _is_equal = all(abs(w - 0.20) < 1e-6 for w in _prof_weights.values()) \
+            if _prof_weights else True
+        _lens = (profile.get('profile_name')
+                 or ('Balanced (equal weights)' if _is_equal else 'Custom weights'))
+        story.append(Paragraph(
+            f"<i>Weighting profile: {_lens}. The overall is a weighted mean of the "
+            f"five dimension scores; equal weights (20% each) are the default lens.</i>",
             s_body))
 
         # OASIS scores table
@@ -925,6 +1328,39 @@ def _build_reportlab_pdf(report_generator, calculator, metrics, charts=None):
         story.append(Paragraph(
             "<i>Table 4. OASIS Organizational Health Profile</i> — Composite scores across the five OASIS dimensions (Open, Autonomous, Symbiotic, Intelligent, Sustainable), with status indicators benchmarked against healthy-system thresholds.", s_caption))
 
+        # ── OASIS radar + dimension gauges (embedded images) ──
+        try:
+            from oasis_visualizer import (
+                create_oasis_radar_chart as _radar,
+                create_all_dimension_gauges as _gauges)
+        except Exception:
+            try:
+                from src.oasis_visualizer import (
+                    create_oasis_radar_chart as _radar,
+                    create_all_dimension_gauges as _gauges)
+            except Exception:
+                _radar = _gauges = None
+
+        if _radar is not None:
+            _guarded_chart_block(
+                lambda: _chart_image(
+                    _radar(scores, title="OASIS Health Profile"),
+                    width=CONTENT_W * 0.7, height=CONTENT_W * 0.7),
+                "<i>Figure O1. OASIS Radar</i> — Five-dimension health profile "
+                "(Open, Autonomous, Symbiotic, Intelligent, Sustainable) plotted "
+                "against healthy-system thresholds. A balanced pentagon indicates "
+                "well-rounded organizational health.",
+                story)
+        if _gauges is not None:
+            _guarded_chart_block(
+                lambda: _chart_image(
+                    _gauges(profile),
+                    width=CONTENT_W * 0.98, height=200),
+                "<i>Figure O2. OASIS Dimension Gauges</i> — Per-dimension scores "
+                "(0&ndash;100) with color-coded status bands for at-a-glance "
+                "identification of strengths and weaknesses.",
+                story)
+
         # Dimension interpretations
         story.append(Paragraph("4.1 Dimension Interpretations", s_h2))
         for dim in ['open', 'autonomous', 'symbiotic', 'intelligent', 'sustainable']:
@@ -951,8 +1387,10 @@ def _build_reportlab_pdf(report_generator, calculator, metrics, charts=None):
                 ]
                 metrics_to_improve = rec.get('metrics_to_improve', [])
                 if metrics_to_improve:
+                    _mnames = ', '.join(
+                        humanize_metric_name(_m) for _m in metrics_to_improve)
                     rec_items.append(
-                        f"<b>Metrics to improve:</b> {', '.join(metrics_to_improve)}")
+                        f"<b>Metrics to improve:</b> {_mnames}")
                 for item in rec_items:
                     story.append(Paragraph(f"•  {item}", ParagraphStyle(
                         'ri', parent=s_body, leftIndent=18, firstLineIndent=-12,
@@ -967,9 +1405,282 @@ def _build_reportlab_pdf(report_generator, calculator, metrics, charts=None):
     story.append(PageBreak())
 
     # ════════════════════════════════════════════════════════════════════
-    # 5. DISCUSSION
+    # 5-8. DETAILED ECOSYSTEMIC ANALYSIS
+    # (benchmarking, risk & resilience, action roadmap, ESG mapping)
+    # Built from src/report_intelligence.py on metrics already computed.
     # ════════════════════════════════════════════════════════════════════
-    story.append(Paragraph("5. Discussion", s_h1))
+    _ri = None
+    try:
+        import report_intelligence as _ri
+        from oasis_calculator import OASISCalculator as _OC
+    except Exception:
+        try:
+            from src import report_intelligence as _ri
+            from src.oasis_calculator import OASISCalculator as _OC
+        except Exception:
+            _ri = None
+
+    if _ri is not None:
+        try:
+            # Prefer the precomputed OASIS profile carried on report_generator.
+            _profile = getattr(report_generator, 'oasis_profile', None)
+            if not (isinstance(_profile, dict) and 'dimension_scores' in _profile):
+                _profile = None
+            _recs = _profile.get('recommendations') if _profile else None
+            if _profile is None or _recs is None:
+                _oasis = _OC(calculator)
+                if _profile is None:
+                    _profile = _oasis.get_oasis_profile()
+                if _recs is None:
+                    _recs = _oasis.get_recommendations()
+            _bench = _ri.build_benchmark_view(metrics, _profile)
+            _risk = _ri.build_risk_view(metrics, _profile)
+            _roadmap = _ri.build_action_roadmap(_recs, _profile)
+            _esg = _ri.build_esg_crosswalk(_profile, metrics)
+
+            def _sec_rule():
+                story.append(HRFlowable(
+                    width='100%', thickness=1, color=_hex_to_rgb(FOREST_GREEN),
+                    spaceBefore=0, spaceAfter=8))
+
+            # ---- 5. Benchmarking & Position ----
+            story.append(Paragraph("5. Benchmarking &amp; Position", s_h1))
+            _sec_rule()
+            _pos = {
+                'within': 'within the Window of Viability',
+                'above': 'above the viability band (tending rigid / over-organized)',
+                'below': 'below the viability band (tending chaotic / under-organized)',
+            }.get(_bench['position'], 'undetermined')
+            story.append(Paragraph(
+                f"The organization's relative ascendency is "
+                f"<b>&alpha; = {_bench['alpha']:.3f}</b>, placing it {_pos} "
+                f"(viable band {_bench['lower']}&ndash;{_bench['upper']}; robustness "
+                f"optimum &alpha; &asymp; {_bench['optimum']:.2f}). Distance to the "
+                f"robustness optimum is <b>{_bench['distance_to_optimum']:.3f}</b>.",
+                s_body))
+            # PEER-COHORT benchmark (percentile-vs-peers).
+            # HONEST: only reports a percentile when a size/sector-matched cohort
+            # of >= MIN_COHORT_SIZE peers exists in the store; otherwise renders
+            # an explicit insufficient-cohort note and falls back to the
+            # indicative reference below. Never fabricates peer numbers.
+            try:
+                try:
+                    from database.peer_cohort import (
+                        peer_alpha_benchmark as _pab,
+                        format_peer_benchmark_note as _pbn,
+                    )
+                    from database.db_manager import get_database_manager as _gdb
+                except Exception:
+                    from src.database.peer_cohort import (
+                        peer_alpha_benchmark as _pab,
+                        format_peer_benchmark_note as _pbn,
+                    )
+                    from src.database.db_manager import get_database_manager as _gdb
+                _peer_db = _gdb()
+                _org_nodes = len(calculator.node_names)
+                _org_sector = getattr(report_generator, 'sector', None)
+                _peer = _pab(_peer_db, alpha=_bench['alpha'],
+                             node_count=_org_nodes, sector=_org_sector)
+                _peer_note = _pbn(_peer, _bench['alpha'])
+                _peer_style = s_body if _peer.get('status') == 'ok' else s_body_italic
+                story.append(Paragraph(
+                    f"<b>Peer-cohort benchmark.</b> {_peer_note}", _peer_style))
+            except Exception:
+                # Best-effort; on any failure fall through to the indicative
+                # reference without fabricating anything.
+                pass
+            # PRIMARY comparator: organizational anchor (Fath et al. 2019).
+            _org_lo, _org_hi = 0.30, 0.45
+            _org_in = _org_lo <= _bench['alpha'] <= _org_hi
+            story.append(Paragraph(
+                "<b>Primary benchmark &mdash; organizational reference.</b> "
+                "High-performing organizations analyzed with this framework exhibit "
+                "relative ascendency &alpha; in the range "
+                f"<b>0.30&ndash;0.45</b> (Fath et al., 2019). At &alpha; = "
+                f"{_bench['alpha']:.3f}, {org_name} "
+                f"{'sits within' if _org_in else 'sits outside'} this "
+                "organizational band, which is the appropriate headline comparator "
+                "for interpreting these results.", s_body))
+            _org_data = [
+                ['Reference', 'Relative Ascendency (α)', 'Source'],
+                [Paragraph('High-performing organizations', cell_b),
+                 Paragraph('0.30–0.45', cell_s),
+                 Paragraph('Fath et al., 2019', cell_s)],
+                [Paragraph(f'<b>{org_name} (this assessment)</b>', cell_b),
+                 Paragraph(f"<b>{_bench['alpha']:.3f}</b>", cell_s),
+                 Paragraph('—', cell_s)],
+            ]
+            _ot = Table(_org_data, colWidths=[
+                CONTENT_W * 0.40, CONTENT_W * 0.30, CONTENT_W * 0.30])
+            _ot.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), _hex_to_rgb(TABLE_HEADER_BG)),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('TOPPADDING', (0, 0), (-1, -1), 5),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                ('LEFTPADDING', (0, 0), (-1, -1), 6),
+                ('GRID', (0, 0), (-1, -1), 0.3, _hex_to_rgb('#cccccc')),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1),
+                 [colors.white, _hex_to_rgb(TABLE_ALT_ROW)]),
+            ]))
+            story.append(_ot)
+            story.append(Paragraph(
+                "<i>Table 5. Primary benchmark &mdash; organizational reference "
+                "band (Fath et al., 2019).</i>", s_caption))
+            # ── Secondary: ecological anchors, clearly demoted to illustrative ──
+            story.append(Spacer(1, 0.3 * cm))
+            story.append(Paragraph(
+                "The ecological values below are provided only as <b>illustrative "
+                "methodology reference points</b> that calibrate the viability "
+                "scale. They are <b>not</b> the benchmark for this organization and "
+                "should not be read as targets.", s_body_italic))
+            _anchor_data = [['Ecological Reference Point (illustrative)',
+                             'Relative Ascendency (α)', 'Source']]
+            for _a in _bench['reference_anchors']:
+                _anchor_data.append([
+                    Paragraph(_a['label'], cell_b),
+                    Paragraph(f"{_a['relative_ascendency']:.3f}", cell_s),
+                    Paragraph(_a.get('source', ''), cell_s)])
+            if len(_anchor_data) > 1:
+                _at = Table(_anchor_data, colWidths=[
+                    CONTENT_W * 0.40, CONTENT_W * 0.30, CONTENT_W * 0.30])
+                _at.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), _hex_to_rgb(MUTED)),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('TOPPADDING', (0, 0), (-1, -1), 5),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 6),
+                    ('GRID', (0, 0), (-1, -1), 0.3, _hex_to_rgb('#cccccc')),
+                    ('ROWBACKGROUNDS', (0, 1), (-1, -1),
+                     [colors.white, _hex_to_rgb(TABLE_ALT_ROW)]),
+                ]))
+                story.append(_at)
+                story.append(Paragraph(
+                    "<i>Table 5b. Ecological reference points (illustrative). "
+                    "Scientific calibration values for the viability scale, "
+                    "not organizational targets.</i>", s_caption))
+            story.append(PageBreak())
+
+            # ---- 6. Risk & Resilience Analysis ----
+            story.append(Paragraph("6. Risk &amp; Resilience Analysis", s_h1))
+            _sec_rule()
+            story.append(Paragraph(
+                f"Overall fragility classification: <b>{_risk['fragility']}</b>. "
+                f"Adaptive reserve indicators &mdash; overhead ratio "
+                f"{_risk['overhead_ratio'] * 100:.1f}%, redundancy "
+                f"{_risk['redundancy']:.3f}.", s_body))
+            for _it in _risk['items']:
+                _sc = _get_status_color(_it['severity'])
+                story.append(Paragraph(
+                    f"<font color=\"{_sc}\"><b>{_it['severity']}</b></font> "
+                    f"&mdash; {_it['title']}", s_h3))
+                story.append(Paragraph(f"<b>Evidence:</b> {_it['evidence']}", s_body))
+                story.append(Paragraph(
+                    f"<b>Implication:</b> {_it['implication']}", s_body))
+            story.append(PageBreak())
+
+            # ---- 7. Prioritized Action Roadmap ----
+            story.append(Paragraph("7. Prioritized Action Roadmap", s_h1))
+            _sec_rule()
+            for _htitle, _hkey in [
+                ('7.1 Immediate (0–3 months)', 'immediate'),
+                ('7.2 Short-Term (3–9 months)', 'short_term'),
+                ('7.3 Medium-Term (9–18 months)', 'medium_term'),
+            ]:
+                story.append(Paragraph(_htitle, s_h2))
+                _items = _roadmap[_hkey]
+                if not _items:
+                    story.append(Paragraph(
+                        "No actions in this horizon.", s_body_italic))
+                    continue
+                for _it in _items:
+                    _pc = _get_status_color(_it['priority'])
+                    story.append(Paragraph(
+                        f"<font color=\"{_pc}\"><b>{_it['priority']}</b></font> "
+                        f"&middot; {_it['dimension']}", s_h3))
+                    story.append(Paragraph(f"<b>Issue:</b> {_it['issue']}", s_body))
+                    story.append(Paragraph(f"<b>Action:</b> {_it['action']}", s_body))
+                    story.append(Paragraph(
+                        f"<b>Expected impact:</b> {_it['expected_impact']}", s_body))
+                    _m = ', '.join(
+                        humanize_metric_name(_x)
+                        for _x in _it['metrics_to_improve']) or 'N/A'
+                    story.append(Paragraph(
+                        f"<b>Metrics to improve:</b> {_m}", s_body))
+            story.append(PageBreak())
+
+            # ---- 8. ESG Framework Mapping ----
+            story.append(Paragraph("8. ESG Framework Mapping", s_h1))
+            _sec_rule()
+            # Single source of truth for the caveat (report_intelligence).
+            _esg_caveat = getattr(
+                _ri, 'INDICATIVE_ESG_CAVEAT',
+                "Indicative structural-lens crosswalk — not a compliance attestation.")
+            story.append(Paragraph(f"<i>{_esg_caveat}</i>", s_body_italic))
+            story.append(Paragraph(
+                "The mapping is <b>finding-specific</b>: framework codes are shown at the "
+                "granularity we can defend (series/pillar), the relevance note states what "
+                "the structural finding <i>informs</i>, and the materiality flag reflects "
+                "this organization's actual dimension status. Analogue mappings (e.g. the "
+                "climate-scoped TCFD pillars against non-climate structural findings) are "
+                "explicitly marked <b>contextual</b>, never as direct disclosures.", s_body))
+            story.append(Spacer(1, 0.2 * cm))
+
+            _materiality_color = {
+                'attention': '#c0392b', 'watch': '#d4a843',
+                'supporting': '#1a5f35', 'not_assessed': MUTED,
+            }
+            for _row in _esg:
+                _mat = _row['materiality']
+                _mc = _materiality_color.get(_mat['flag'], MUTED)
+                story.append(Paragraph(
+                    f"<b>{_row['oasis_dimension']}</b> &mdash; {_row['construct']}", s_h3))
+                story.append(Paragraph(
+                    f"<b>Finding:</b> {_row['finding_summary']}", s_body))
+                # Framework codes (with contextual caveats) as a compact table.
+                _fw_data = [['Standard', 'Reference', 'Disclosure area / caveat']]
+                for _fw in _row['frameworks']:
+                    _lbl = _fw.get('label', '')
+                    if _fw.get('contextual') and _fw.get('caveat'):
+                        _lbl = (f"{_lbl} <font color=\"{MUTED}\"><i>[contextual: "
+                                f"{_fw['caveat']}]</i></font>")
+                    _fw_data.append([
+                        Paragraph(f"<b>{_fw['standard']}</b>", cell_s),
+                        Paragraph(_fw['code'], cell_s),
+                        Paragraph(_lbl, cell_s)])
+                _ft = Table(_fw_data, colWidths=[
+                    CONTENT_W * 0.12, CONTENT_W * 0.22, CONTENT_W * 0.66])
+                _ft.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), _hex_to_rgb(TABLE_HEADER_BG)),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                    ('TOPPADDING', (0, 0), (-1, -1), 4),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 6),
+                    ('GRID', (0, 0), (-1, -1), 0.3, _hex_to_rgb('#cccccc')),
+                    ('ROWBACKGROUNDS', (0, 1), (-1, -1),
+                     [colors.white, _hex_to_rgb(TABLE_ALT_ROW)]),
+                ]))
+                story.append(_ft)
+                story.append(Paragraph(
+                    f"<b>Disclosure relevance:</b> {_row['disclosure_relevance']}", s_body))
+                story.append(Paragraph(
+                    f"<b>Materiality (this organization):</b> "
+                    f"<font color=\"{_mc}\"><b>{_mat['label']}</b></font>", s_body))
+                story.append(Spacer(1, 0.25 * cm))
+            story.append(Paragraph(
+                "<i>Table 6. Finding-specific, status-driven OASIS-to-ESG structural-lens "
+                "crosswalk (indicative; not a compliance attestation).</i>", s_caption))
+            story.append(PageBreak())
+        except Exception:
+            # Detailed analysis is additive; never break the base report.
+            pass
+
+    # ════════════════════════════════════════════════════════════════════
+    # 9. DISCUSSION
+    # ════════════════════════════════════════════════════════════════════
+    story.append(Paragraph("9. Discussion", s_h1))
     story.append(HRFlowable(
         width='100%', thickness=1, color=_hex_to_rgb(FOREST_GREEN),
         spaceBefore=0, spaceAfter=8,
@@ -980,7 +1691,7 @@ def _build_reportlab_pdf(report_generator, calculator, metrics, charts=None):
     # ════════════════════════════════════════════════════════════════════
     # 6. CONCLUSIONS & RECOMMENDATIONS
     # ════════════════════════════════════════════════════════════════════
-    story.append(Paragraph("6. Conclusions &amp; Recommendations", s_h1))
+    story.append(Paragraph("10. Conclusions &amp; Recommendations", s_h1))
     story.append(HRFlowable(
         width='100%', thickness=1, color=_hex_to_rgb(FOREST_GREEN),
         spaceBefore=0, spaceAfter=8,

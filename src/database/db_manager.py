@@ -92,6 +92,17 @@ class DatabaseManager:
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_network_hash ON networks(network_hash)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_metrics_network ON precomputed_metrics(network_id)')
 
+        # Lightweight migration: add formula_version column if absent.
+        # (SQLite has no "ADD COLUMN IF NOT EXISTS"; guard via PRAGMA/try-except.)
+        self._ensure_column(
+            cursor, 'precomputed_metrics', 'formula_version', 'TEXT'
+        )
+
+        # Peer-cohort benchmarking: optional nullable sector tag on the network.
+        # Used to build size/sector-matched peer cohorts. Untagged (NULL) rows are
+        # simply skipped by the sector filter — never fabricated. Idempotent.
+        self._ensure_column(cursor, 'networks', 'sector', 'TEXT')
+
         # HuggingFace Discovery tables
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS discovered_datasets (
@@ -161,6 +172,25 @@ class DatabaseManager:
 
         conn.commit()
         logger.debug("Database schema initialized")
+
+    def _ensure_column(self, cursor, table: str, column: str, coltype: str) -> None:
+        """Add `column` to `table` if it does not already exist (idempotent).
+
+        Implements the ADD COLUMN IF NOT EXISTS pattern for SQLite, which lacks
+        native support. Safe on both fresh databases and pre-existing ones.
+        """
+        try:
+            cursor.execute(f"PRAGMA table_info({table})")
+            existing = {row[1] for row in cursor.fetchall()}  # row[1] == column name
+            if column not in existing:
+                cursor.execute(
+                    f"ALTER TABLE {table} ADD COLUMN {column} {coltype}"
+                )
+                logger.info(f"Migrated {table}: added column {column} {coltype}")
+        except sqlite3.OperationalError as e:
+            # Column already added by a concurrent init, or duplicate-column race.
+            if 'duplicate column' not in str(e).lower():
+                logger.warning(f"Could not ensure column {table}.{column}: {e}")
 
     @staticmethod
     def compute_network_hash(flow_matrix: np.ndarray, node_names: Optional[List[str]] = None) -> str:
@@ -237,7 +267,8 @@ class DatabaseManager:
                      source_file: str,
                      node_count: int,
                      edge_count: int,
-                     network_hash: str) -> int:
+                     network_hash: str,
+                     sector: str = None) -> int:
         """
         Save or update a network record.
 
@@ -247,6 +278,9 @@ class DatabaseManager:
             node_count: Number of nodes
             edge_count: Number of edges
             network_hash: Unique network hash
+            sector: Optional sector tag (for peer-cohort benchmarking). When None,
+                any existing sector on the row is PRESERVED (never overwritten to
+                NULL) so a later re-save without a tag does not wipe the tag.
 
         Returns:
             Network ID
@@ -256,15 +290,16 @@ class DatabaseManager:
 
         try:
             cursor.execute('''
-                INSERT INTO networks (name, source_file, node_count, edge_count, network_hash)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO networks (name, source_file, node_count, edge_count, network_hash, sector)
+                VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(network_hash) DO UPDATE SET
                     name = excluded.name,
                     source_file = excluded.source_file,
                     node_count = excluded.node_count,
                     edge_count = excluded.edge_count,
+                    sector = COALESCE(excluded.sector, networks.sector),
                     updated_at = CURRENT_TIMESTAMP
-            ''', (name, source_file, node_count, edge_count, network_hash))
+            ''', (name, source_file, node_count, edge_count, network_hash, sector))
 
             conn.commit()
 
@@ -284,9 +319,11 @@ class DatabaseManager:
             cursor.execute('''
                 UPDATE networks
                 SET source_file = ?, node_count = ?, edge_count = ?,
-                    network_hash = ?, updated_at = CURRENT_TIMESTAMP
+                    network_hash = ?,
+                    sector = COALESCE(?, sector),
+                    updated_at = CURRENT_TIMESTAMP
                 WHERE name = ?
-            ''', (source_file, node_count, edge_count, network_hash, name))
+            ''', (source_file, node_count, edge_count, network_hash, sector, name))
             conn.commit()
 
             cursor.execute('SELECT id FROM networks WHERE name = ?', (name,))
@@ -295,32 +332,45 @@ class DatabaseManager:
 
     def get_precomputed_metrics(self,
                                  network_id: int,
-                                 tier: int = None) -> Optional[Dict[str, Any]]:
+                                 tier: int = None,
+                                 required_version: str = None) -> Optional[Dict[str, Any]]:
         """
         Get precomputed metrics for a network.
 
         Args:
             network_id: Network ID
             tier: Optional tier filter (1, 2, or 3). If None, returns all tiers merged.
+            required_version: Optional formula_version guard (tier-specific reads only).
+                If provided and the stored row's formula_version differs, this is
+                treated as a MISS (returns None) so the caller recomputes.
 
         Returns:
-            Dictionary of metrics or None if not found
+            Dictionary of metrics or None if not found (or version mismatch).
+            When a specific tier is requested, the returned dict carries
+            '_formula_version' and 'formula_version' with the stored version.
         """
         conn = self._get_connection()
         cursor = conn.cursor()
 
         if tier is not None:
             cursor.execute('''
-                SELECT metrics_json, computation_time_ms, computed_at
+                SELECT metrics_json, computation_time_ms, computed_at, formula_version
                 FROM precomputed_metrics
                 WHERE network_id = ? AND metric_tier = ?
             ''', (network_id, tier))
             row = cursor.fetchone()
 
             if row:
+                stored_version = row['formula_version']
+                if required_version is not None and stored_version != required_version:
+                    # Version mismatch -> stale -> treat as a miss.
+                    return None
                 metrics = json.loads(row['metrics_json'])
                 metrics['_computation_time_ms'] = row['computation_time_ms']
                 metrics['_computed_at'] = row['computed_at']
+                # Surface the stored version (fall back to any in-blob stamp).
+                metrics['formula_version'] = stored_version or metrics.get('formula_version')
+                metrics['_formula_version'] = metrics['formula_version']
                 return metrics
             return None
         else:
@@ -366,7 +416,8 @@ class DatabaseManager:
                                   network_id: int,
                                   tier: int,
                                   metrics: Dict[str, Any],
-                                  computation_time_ms: int = 0) -> None:
+                                  computation_time_ms: int = 0,
+                                  formula_version: str = None) -> None:
         """
         Save precomputed metrics for a network.
 
@@ -375,6 +426,9 @@ class DatabaseManager:
             tier: Metric tier (1, 2, or 3)
             metrics: Dictionary of metric values
             computation_time_ms: Time taken to compute in milliseconds
+            formula_version: Optional formula version stamp. If omitted, falls back
+                to metrics['formula_version'] when present. Enables stale-profile
+                detection on read (see get_precomputed_metrics required_version).
         """
         conn = self._get_connection()
         cursor = conn.cursor()
@@ -383,23 +437,34 @@ class DatabaseManager:
         metrics_serializable = self._make_serializable(metrics)
         metrics_json = json.dumps(metrics_serializable)
 
+        if formula_version is None:
+            formula_version = metrics.get('formula_version') if isinstance(metrics, dict) else None
+
         cursor.execute('''
-            INSERT INTO precomputed_metrics (network_id, metric_tier, metrics_json, computation_time_ms)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO precomputed_metrics
+                (network_id, metric_tier, metrics_json, computation_time_ms, formula_version)
+            VALUES (?, ?, ?, ?, ?)
             ON CONFLICT(network_id, metric_tier) DO UPDATE SET
                 metrics_json = excluded.metrics_json,
                 computation_time_ms = excluded.computation_time_ms,
+                formula_version = excluded.formula_version,
                 computed_at = CURRENT_TIMESTAMP
-        ''', (network_id, tier, metrics_json, computation_time_ms))
+        ''', (network_id, tier, metrics_json, computation_time_ms, formula_version))
 
         conn.commit()
-        logger.debug(f"Saved tier {tier} metrics for network {network_id}")
+        logger.debug(f"Saved tier {tier} metrics for network {network_id} "
+                     f"(formula_version={formula_version})")
 
     def _make_serializable(self, obj: Any) -> Any:
         """Convert numpy types to JSON-serializable Python types."""
         if isinstance(obj, dict):
-            return {k: self._make_serializable(v) for k, v in obj.items()}
-        elif isinstance(obj, (list, tuple)):
+            # JSON object keys must be strings; coerce non-str keys (e.g. tuple
+            # or numpy keys that some networkx metrics emit) to str.
+            return {
+                (k if isinstance(k, str) else str(k)): self._make_serializable(v)
+                for k, v in obj.items()
+            }
+        elif isinstance(obj, (list, tuple, set, frozenset)):
             return [self._make_serializable(v) for v in obj]
         elif isinstance(obj, np.ndarray):
             return obj.tolist()
