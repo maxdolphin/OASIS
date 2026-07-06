@@ -1762,7 +1762,12 @@ def connect_gmail_interface():
         return
 
     # 1) Credentials come from Streamlit secrets (never hard-coded / committed).
-    creds = dict(st.secrets.get("gmail", {})) if hasattr(st, "secrets") else {}
+    # st.secrets raises StreamlitSecretNotFoundError when no secrets.toml exists,
+    # so guard the access rather than the attribute.
+    try:
+        creds = dict(st.secrets.get("gmail", {}))
+    except Exception:
+        creds = {}
     if not creds.get("service_account_file"):
         st.warning(
             "No Gmail credentials configured. Add a `[gmail]` block to "
