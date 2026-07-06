@@ -1,7 +1,7 @@
 # Gmail Connector — Self-Provisioning Network Source (Design Spec)
 
 **Date:** 2026-07-06
-**Status:** Approved design (approach B — two-stage with persisted raw-interaction store)
+**Status:** Implemented (Tasks 1–7) — see `docs/superpowers/plans/2026-07-06-gmail-connector.md`. Approach B (two-stage with persisted raw-interaction store).
 **Branch:** `feat/detailed-ecosystemic-report`
 
 ## 1. Goal
