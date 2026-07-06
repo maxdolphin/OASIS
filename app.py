@@ -986,7 +986,8 @@ def show_main_page():
     mode_list = [
         "📊 Upload Data",
         "🧪 Use Sample Data",
-        "⚡ Generate Synthetic Data"
+        "⚡ Generate Synthetic Data",
+        "🔌 Connect Gmail"
     ]
     if DISCOVERY_AVAILABLE:
         mode_list.append("🔍 Discover Datasets")
@@ -1009,6 +1010,8 @@ def show_main_page():
         sample_data_interface()
     elif analysis_mode == "⚡ Generate Synthetic Data":
         synthetic_data_interface()
+    elif analysis_mode == "🔌 Connect Gmail":
+        connect_gmail_interface()
     elif analysis_mode == "🔍 Discover Datasets":
         discovery_interface()
     elif analysis_mode == "📖 Documentation":
@@ -1741,6 +1744,103 @@ def sample_data_interface():
 
         except Exception as e:
             st.error(f"Error loading sample data: {str(e)}")
+
+def connect_gmail_interface():
+    """Self-provisioning Gmail connector: admin OAuth -> sync -> build -> analyze."""
+    from datetime import datetime, timedelta
+    st.header("🔌 Connect Gmail")
+    st.info(
+        "OASIS reads only **who-emailed-whom and when** — never subjects or "
+        "message contents. Requires a Google Workspace **admin** to authorize the "
+        "app (domain-wide delegation)."
+    )
+
+    try:
+        from src.connectors import GmailConnector, GmailInteractionStore, build_flow_matrix
+    except Exception as exc:
+        st.error(f"Connector unavailable: {exc}")
+        return
+
+    # 1) Credentials come from Streamlit secrets (never hard-coded / committed).
+    creds = dict(st.secrets.get("gmail", {})) if hasattr(st, "secrets") else {}
+    if not creds.get("service_account_file"):
+        st.warning(
+            "No Gmail credentials configured. Add a `[gmail]` block to "
+            "`.streamlit/secrets.toml` with `service_account_file`, `subject` "
+            "(admin email), and `domain`."
+        )
+        return
+
+    if st.button("🔗 Connect", type="primary"):
+        conn = GmailConnector()
+        if conn.authenticate(creds):
+            st.session_state["gmail_domain"] = creds["domain"]
+            org = conn.get_organization_structure()
+            st.success(
+                f"Connected to **{creds['domain']}** — "
+                f"{org['total_users']} users."
+            )
+        else:
+            st.error("Authentication failed. Check the service account, admin "
+                     "subject, and that domain-wide delegation is granted.")
+
+    if not st.session_state.get("gmail_domain"):
+        return
+
+    domain = st.session_state["gmail_domain"]
+
+    # 2) Sync controls
+    st.subheader("1 · Sync mailbox metadata")
+    win_days = st.selectbox("Pull window (days)", [30, 90, 180, 365], index=1)
+    if st.button("⬇️ Sync now"):
+        conn = GmailConnector()
+        if not conn.authenticate(creds):
+            st.error("Re-authentication failed.")
+            return
+        now = int(datetime.utcnow().timestamp())
+        start = now - win_days * 86400
+        run_id = f"sync-{now}"
+        with st.spinner(f"Syncing last {win_days} days…"):
+            n = conn.sync(start, now, sync_run_id=run_id)
+        st.session_state["gmail_last_sync"] = now
+        st.success(f"Synced {n} directed interactions.")
+
+    if not st.session_state.get("gmail_last_sync"):
+        return
+
+    # 3) Build controls
+    st.subheader("2 · Build the network")
+    granularity = st.radio("Granularity", ["individual", "department"], index=1)
+    half_life_days = st.slider("Recency half-life (days)", 7, 180, 30)
+    beta = st.slider("Sustained-engagement weight (β)", 0.0, 2.0, 0.5, 0.1,
+                     help="Calibration parameter — boosts relationships active "
+                          "across many weeks. Not a scientific metric formula.")
+    build_win_days = st.selectbox("Analysis window (days)", [30, 90, 180, 365],
+                                  index=1, key="build_win")
+    if st.button("🧮 Build & Analyze", type="primary"):
+        store = GmailInteractionStore()
+        conn = GmailConnector()
+        conn.authenticate(creds)
+        org = conn.get_organization_structure()
+        now = int(datetime.utcnow().timestamp())
+        rows = store.query_window(domain, now - build_win_days * 86400, now)
+        parsed, dropped = build_flow_matrix(
+            rows, org_users=org["org_users"], now_utc=now,
+            window_seconds=build_win_days * 86400,
+            half_life_seconds=half_life_days * 86400,
+            beta=beta, granularity=granularity)
+        if dropped:
+            st.caption(f"Dropped {dropped} external-address interactions.")
+        st.session_state.analysis_data = {
+            "flow_matrix": parsed.flow_matrix,
+            "node_names": parsed.node_names,
+            "org_name": f"{domain} (Gmail · {granularity})",
+            "source": "gmail_connector",
+        }
+        provision_network(st.session_state.analysis_data)
+        st.session_state.current_page = "analysis"
+        st.rerun()
+
 
 def synthetic_data_interface():
     """Visual Network Generator Interface."""
