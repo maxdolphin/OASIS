@@ -104,7 +104,13 @@ class GmailConnector(BaseConnector):
         user_orgunit = org["user_orgunit"]
         rows = []
         for sender in user_orgunit:
-            for msg in self.gmail_client.list_sent_messages(sender, start_ts, end_ts):
+            try:
+                messages = self.gmail_client.list_sent_messages(
+                    sender, start_ts, end_ts)
+            except Exception as exc:  # pragma: no cover - per-user resilience
+                print(f"Gmail sync skipped {sender}: {exc}")
+                continue
+            for msg in messages:
                 src = str(msg["from"]).lower()
                 for kind in ("to", "cc"):
                     for rcpt in msg.get(kind, []) or []:
@@ -158,18 +164,27 @@ class _GmailApiClient:  # pragma: no cover - real-API adapter, exercised via fak
         return build("gmail", "v1", credentials=creds)
 
     def list_sent_messages(self, user_email, start_ts, end_ts):
+        # NOTE: the gmail.metadata scope does NOT permit the `q` search param
+        # (Gmail 403s). We list the SENT label and filter by internalDate client
+        # side. SENT is newest-first, so we stop once we pass the window's start.
         service = self._service_for(user_email)
-        query = f"in:sent after:{start_ts} before:{end_ts}"
         results = []
         page = None
-        while True:
+        done = False
+        while not done:
             resp = service.users().messages().list(
-                userId="me", q=query, pageToken=page).execute()
+                userId="me", labelIds=["SENT"], pageToken=page).execute()
             for ref in resp.get("messages", []):
                 msg = service.users().messages().get(
                     userId="me", id=ref["id"], format="metadata",
                     metadataHeaders=["From", "To", "Cc", "Date"]).execute()
-                results.append(_parse_metadata(msg))
+                parsed = _parse_metadata(msg)
+                ts = parsed["ts_utc"]
+                if ts < start_ts:
+                    done = True  # older than the window; nothing newer remains
+                    break
+                if ts <= end_ts:
+                    results.append(parsed)
             page = resp.get("nextPageToken")
             if not page:
                 break

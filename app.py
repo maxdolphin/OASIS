@@ -1747,7 +1747,8 @@ def sample_data_interface():
 
 def connect_gmail_interface():
     """Self-provisioning Gmail connector: admin OAuth -> sync -> build -> analyze."""
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
+    from src.network_ingestion import NetworkIngestionError
     st.header("🔌 Connect Gmail")
     st.info(
         "OASIS reads only **who-emailed-whom and when** — never subjects or "
@@ -1802,7 +1803,7 @@ def connect_gmail_interface():
         if not conn.authenticate(creds):
             st.error("Re-authentication failed.")
             return
-        now = int(datetime.utcnow().timestamp())
+        now = int(datetime.now(timezone.utc).timestamp())
         start = now - win_days * 86400
         run_id = f"sync-{now}"
         with st.spinner(f"Syncing last {win_days} days…"):
@@ -1827,13 +1828,20 @@ def connect_gmail_interface():
         conn = GmailConnector()
         conn.authenticate(creds)
         org = conn.get_organization_structure()
-        now = int(datetime.utcnow().timestamp())
+        now = int(datetime.now(timezone.utc).timestamp())
         rows = store.query_window(domain, now - build_win_days * 86400, now)
-        parsed, dropped = build_flow_matrix(
-            rows, org_users=org["org_users"], now_utc=now,
-            window_seconds=build_win_days * 86400,
-            half_life_seconds=half_life_days * 86400,
-            beta=beta, granularity=granularity)
+        try:
+            parsed, dropped = build_flow_matrix(
+                rows, org_users=org["org_users"], now_utc=now,
+                window_seconds=build_win_days * 86400,
+                half_life_seconds=half_life_days * 86400,
+                beta=beta, granularity=granularity)
+        except NetworkIngestionError as exc:
+            st.warning(
+                f"No internal network could be built for this window: {exc} "
+                "Try a longer window or a different granularity."
+            )
+            return
         if dropped:
             st.caption(f"Dropped {dropped} external-address interactions.")
         st.session_state.analysis_data = {
