@@ -6,14 +6,10 @@ subject/body/snippet columns exist — metadata-only is enforced by schema.
 from __future__ import annotations
 
 import sqlite3
-from typing import Dict, Iterable, List, Set
+from contextlib import closing
+from typing import Any, Dict, Iterable, List, Set
 
 DEFAULT_DB_PATH = "data/database/networks.db"
-
-_COLUMNS = [
-    "src_email", "dst_email", "recipient_kind", "ts_utc",
-    "thread_id", "size_bytes", "src_orgunit", "dst_orgunit",
-]
 
 
 class GmailInteractionStore:
@@ -29,7 +25,7 @@ class GmailInteractionStore:
         return conn
 
     def _ensure_schema(self) -> None:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS gmail_interactions (
@@ -53,7 +49,7 @@ class GmailInteractionStore:
             )
 
     def insert_rows(self, org_domain: str, sync_run_id: str,
-                    rows: Iterable[Dict]) -> int:
+                    rows: Iterable[Dict[str, Any]]) -> int:
         payload = [
             (org_domain, sync_run_id,
              r["src_email"], r["dst_email"], r["recipient_kind"], int(r["ts_utc"]),
@@ -61,7 +57,7 @@ class GmailInteractionStore:
              r.get("src_orgunit"), r.get("dst_orgunit"))
             for r in rows
         ]
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             conn.executemany(
                 "INSERT INTO gmail_interactions "
                 "(org_domain, sync_run_id, src_email, dst_email, recipient_kind, "
@@ -73,7 +69,7 @@ class GmailInteractionStore:
 
     def query_window(self, org_domain: str, start_ts: int,
                      end_ts: int) -> List[Dict]:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn:
             cur = conn.execute(
                 "SELECT * FROM gmail_interactions "
                 "WHERE org_domain = ? AND ts_utc >= ? AND ts_utc <= ? "
@@ -83,6 +79,6 @@ class GmailInteractionStore:
             return [dict(row) for row in cur.fetchall()]
 
     def column_names(self) -> Set[str]:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn:
             cur = conn.execute("PRAGMA table_info(gmail_interactions)")
             return {row["name"] for row in cur.fetchall()}
