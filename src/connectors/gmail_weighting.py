@@ -2,7 +2,7 @@
 
 Hybrid weighting per directed node pair (a -> b):
     volume(a,b)  = sum_i exp(-ln2/half_life * (now - t_i))   # recency decay
-    sustain(a,b) = 1 + beta * ln(1 + A)                      # A = # distinct active ISO weeks
+    sustain(a,b) = 1 + beta * ln(1 + A)                      # A = # distinct active 7-day epoch-aligned windows
     weight(a,b)  = volume(a,b) * sustain(a,b)
 
 No wall clock is read here: `now_utc` is an explicit argument.
@@ -15,7 +15,7 @@ from typing import Dict, List, Set, Tuple
 
 try:
     from network_ingestion import build_flow_matrix_from_edges, ParseResult
-except Exception:  # pragma: no cover - import path when run as a package
+except ImportError:  # pragma: no cover - import path when run as a package
     from src.network_ingestion import build_flow_matrix_from_edges, ParseResult
 
 _WEEK = 7 * 86400
@@ -49,9 +49,19 @@ def build_flow_matrix(
         beta: sustained-engagement coefficient (>= 0).
         granularity: 'individual' (node=email) or 'department' (node=orgUnit leaf).
 
+    Messages with ``ts_utc > now_utc`` (future timestamps / clock skew) are
+    excluded, as are rows older than ``now_utc - window_seconds``.
+
     Returns:
         (ParseResult, dropped_external_count).
     """
+    if half_life_seconds <= 0:
+        raise ValueError(f"half_life_seconds must be > 0, got {half_life_seconds!r}")
+    if beta < 0:
+        raise ValueError(f"beta must be >= 0, got {beta!r}")
+    if window_seconds < 0:
+        raise ValueError(f"window_seconds must be >= 0, got {window_seconds!r}")
+
     lam = math.log(2) / float(half_life_seconds)
     cutoff = now_utc - window_seconds
 

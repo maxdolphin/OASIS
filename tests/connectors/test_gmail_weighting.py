@@ -1,6 +1,9 @@
 import math
 
+import pytest
+
 from src.connectors.gmail_weighting import build_flow_matrix
+from src.network_ingestion import NetworkIngestionError
 
 DAY = 86400
 WEEK = 7 * DAY
@@ -88,3 +91,24 @@ def test_window_excludes_old_messages():
         rows, org_users=ORG, now_utc=NOW, window_seconds=30 * DAY,
         half_life_seconds=10 ** 9, beta=0.0, granularity="individual")
     assert "c@x.com" not in parsed.node_names
+
+
+def test_zero_half_life_raises():
+    with pytest.raises(ValueError):
+        build_flow_matrix([_row("a@x.com", "b@x.com", NOW)], org_users=ORG,
+                          now_utc=NOW, window_seconds=DAY, half_life_seconds=0,
+                          beta=0.0, granularity="individual")
+
+
+def test_negative_beta_raises():
+    with pytest.raises(ValueError):
+        build_flow_matrix([_row("a@x.com", "b@x.com", NOW)], org_users=ORG,
+                          now_utc=NOW, window_seconds=DAY, half_life_seconds=DAY,
+                          beta=-1.0, granularity="individual")
+
+
+def test_empty_rows_raise_ingestion_error():
+    # No edges -> build_flow_matrix_from_edges rejects <2 nodes. Documents the contract.
+    with pytest.raises(NetworkIngestionError):
+        build_flow_matrix([], org_users=ORG, now_utc=NOW, window_seconds=DAY,
+                          half_life_seconds=DAY, beta=0.0, granularity="individual")
