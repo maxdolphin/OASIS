@@ -75,3 +75,20 @@ def test_parse_metadata_extracts_display_name_addresses():
     assert out["to"] == ["j@x.com", "alice@x.com"]
     assert out["cc"] == []
     assert out["ts_utc"] == 2000  # internalDate ms -> s
+
+
+def test_legacy_google_stub_points_to_new_connector():
+    # The legacy GoogleWorkspaceConnector must no longer fabricate a matrix; it
+    # should refuse and direct callers to src.connectors.GmailConnector.
+    import inspect
+    import pytest
+    from datetime import datetime
+    from src.cloud_connectors import GoogleWorkspaceConnector
+
+    src = inspect.getsource(GoogleWorkspaceConnector.get_flow_data)
+    assert "GmailConnector" in src, "legacy stub must reference the new connector"
+    assert "np.zeros" not in src, "legacy stub must not fabricate a matrix"
+
+    with pytest.raises(NotImplementedError):
+        GoogleWorkspaceConnector().get_flow_data(datetime(2026, 1, 1),
+                                                 datetime(2026, 2, 1))
