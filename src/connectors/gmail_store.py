@@ -47,9 +47,22 @@ class GmailInteractionStore:
                 "CREATE INDEX IF NOT EXISTS ix_gmail_org_ts "
                 "ON gmail_interactions(org_domain, ts_utc)"
             )
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ux_gmail_edge "
+                "ON gmail_interactions(org_domain, src_email, dst_email, "
+                "recipient_kind, ts_utc, thread_id)"
+            )
 
     def insert_rows(self, org_domain: str, sync_run_id: str,
                     rows: Iterable[Dict[str, Any]]) -> int:
+        """Insert directed message-edge rows; returns the count actually written.
+
+        Duplicate message-edges (same org/src/dst/kind/ts/thread) are ignored via
+        INSERT OR IGNORE, so re-syncing overlapping windows is idempotent and does
+        not double-count flows. Note: SQLite treats NULL thread_id as distinct, so
+        rows with a NULL thread_id are not deduped — acceptable because Gmail always
+        supplies threadId.
+        """
         payload = [
             (org_domain, sync_run_id,
              r["src_email"], r["dst_email"], r["recipient_kind"], int(r["ts_utc"]),
@@ -58,14 +71,14 @@ class GmailInteractionStore:
             for r in rows
         ]
         with closing(self._connect()) as conn, conn:
-            conn.executemany(
-                "INSERT INTO gmail_interactions "
+            cur = conn.executemany(
+                "INSERT OR IGNORE INTO gmail_interactions "
                 "(org_domain, sync_run_id, src_email, dst_email, recipient_kind, "
                 " ts_utc, thread_id, size_bytes, src_orgunit, dst_orgunit) "
                 "VALUES (?,?,?,?,?,?,?,?,?,?)",
                 payload,
             )
-        return len(payload)
+            return cur.rowcount if cur.rowcount is not None and cur.rowcount >= 0 else len(payload)
 
     def query_window(self, org_domain: str, start_ts: int,
                      end_ts: int) -> List[Dict]:

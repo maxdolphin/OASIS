@@ -7,6 +7,7 @@ Only metadata headers are read (From/To/Cc/timestamp/thread/size) — never body
 from __future__ import annotations
 
 from datetime import datetime
+from email.utils import getaddresses
 from typing import Any, Dict, Optional
 
 import numpy as np
@@ -53,9 +54,9 @@ class GmailConnector(BaseConnector):
             creds = service_account.Credentials.from_service_account_file(
                 credentials["service_account_file"], scopes=GMAIL_SCOPES,
             ).with_subject(credentials["subject"])
-            self.admin_client = _AdminSdkClient(
-                build("admin", "directory_v1", credentials=creds))
-            self.gmail_client = _GmailApiClient(credentials, GMAIL_SCOPES)
+            admin = _AdminSdkClient(build("admin", "directory_v1", credentials=creds))
+            gmail = _GmailApiClient(credentials, GMAIL_SCOPES)
+            self.admin_client, self.gmail_client = admin, gmail
             self.domain = credentials["domain"]
             return True
         except Exception as exc:  # pragma: no cover - real-API path
@@ -175,12 +176,12 @@ class _GmailApiClient:  # pragma: no cover - real-API adapter, exercised via fak
         return results
 
 
-def _parse_metadata(msg) -> Dict[str, Any]:  # pragma: no cover - real-API shape
+def _parse_metadata(msg) -> Dict[str, Any]:
     headers = {h["name"].lower(): h["value"]
                for h in msg.get("payload", {}).get("headers", [])}
 
     def addrs(v):
-        return [a.strip() for a in v.split(",")] if v else []
+        return [addr for _, addr in getaddresses([v]) if addr] if v else []
 
     return {
         "ts_utc": int(msg.get("internalDate", "0")) // 1000,

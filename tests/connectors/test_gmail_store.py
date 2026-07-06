@@ -52,6 +52,13 @@ def test_insert_empty_returns_zero(store):
     assert store.insert_rows("x.com", "run1", []) == 0
 
 
+def test_insert_is_idempotent(store):
+    rows = [_row("a@x.com", "b@x.com", 1000)]
+    assert store.insert_rows("x.com", "run1", rows) == 1
+    assert store.insert_rows("x.com", "run2", rows) == 0  # same edge, ignored
+    assert len(store.query_window("x.com", 0, 9999)) == 1
+
+
 def test_schema_has_no_content_columns(store):
     cols = store.column_names()
     forbidden = {"subject", "body", "snippet", "content", "text"}

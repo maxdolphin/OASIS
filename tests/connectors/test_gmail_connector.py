@@ -52,3 +52,26 @@ def test_sync_emits_per_recipient_rows(tmp_path):
 def test_authenticate_returns_false_on_missing_credentials():
     c = GmailConnector()
     assert c.authenticate({}) is False
+
+
+def test_sync_is_idempotent(tmp_path):
+    from src.connectors.gmail_store import GmailInteractionStore
+    store = GmailInteractionStore(db_path=str(tmp_path / "t.db"))
+    c = GmailConnector(admin_client=FakeAdmin(), gmail_client=FakeGmail(),
+                       domain="x.com", store=store)
+    assert c.sync(1000, 3000, "run1") == 2
+    assert c.sync(1000, 3000, "run2") == 0  # same messages, no new rows
+    assert len(store.query_window("x.com", 0, 10 ** 12)) == 2
+
+
+def test_parse_metadata_extracts_display_name_addresses():
+    from src.connectors.gmail_connector import _parse_metadata
+    msg = {"internalDate": "2000000", "threadId": "t", "sizeEstimate": 10,
+           "payload": {"headers": [
+               {"name": "From", "value": "a@x.com"},
+               {"name": "To", "value": '"Doe, John" <j@x.com>, alice@x.com'},
+               {"name": "Cc", "value": ""}]}}
+    out = _parse_metadata(msg)
+    assert out["to"] == ["j@x.com", "alice@x.com"]
+    assert out["cc"] == []
+    assert out["ts_utc"] == 2000  # internalDate ms -> s
